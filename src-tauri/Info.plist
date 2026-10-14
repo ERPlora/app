@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Claves de Info.plist que Tauri v2 FUSIONA en el bundle de macOS (basta con que este fichero esté
+  junto a `tauri.conf.json`; `tauri-build` lo vigila).
+
+  Aquí solo va lo que macOS exige para el hardware POS. Todo lo demás (nombre, versión, iconos,
+  LSMinimumSystemVersion) lo genera Tauri desde `tauri.conf.json`: NO duplicarlo aquí.
+
+  Por qué existe este fichero: desde macOS 15 (Sequoia) el acceso a la red local requiere
+  consentimiento del usuario, y la restricción se aplica por debajo de la API — alcanza a los BSD
+  sockets, así que también al `TcpStream::connect` de Rust contra el puerto 9100 de una impresora
+  ESC/POS, no solo a Bonjour. Sin estas claves el sistema NO muestra el diálogo y las conexiones
+  fallan en SILENCIO (timeout), con lo que el descubrimiento devuelve cero impresoras y parece que
+  el local no tiene ninguna. Cubierto por `tests/macos_local_network.rs`.
+-->
+<plist version="1.0">
+<dict>
+	<!-- Motivo que macOS muestra en el diálogo de permiso. Debe explicar el beneficio al usuario,
+	     no el mecanismo. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>ERPlora needs access to your local network to find and print to the receipt and kitchen printers in your business.</string>
+
+	<!-- Servicios Bonjour que la app navega. macOS solo permite resolver los declarados aquí, y
+	     estos son exactamente los que sondea `discovery::discover_mdns`: si falta uno, esas
+	     impresoras no aparecen y no hay ningún error que lo delate. -->
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_pdl-datastream._tcp</string>
+		<string>_ipp._tcp</string>
+	</array>
+</dict>
+</plist>

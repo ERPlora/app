@@ -1,0 +1,28 @@
+# Configuración de compilación del shell. Vive aquí (y NO en `gen/android/`) porque `gen/` es
+# generado: `cargo tauri android init` lo reescribe y el troubleshooting oficial de Tauri te dice
+# que lo borres cuando algo se rompe. Esto tiene que sobrevivir a eso.
+
+# ── Android: alineación de páginas de 16 KB ──────────────────────────────────────────────────────
+#
+# Los dispositivos Android modernos usan páginas de memoria de 16 KB, y **Google Play lo exige**
+# para las apps que apuntan a Android 15+. Un `.so` alineado a 4 KB (0x1000) arranca igualmente,
+# pero en "page size compatible mode" y con este diálogo delante del usuario:
+#
+#   «This app isn't 16 KB compatible. ELF alignment check failed.
+#    lib/arm64-v8a/liberplora_tauri_lib.so : LOAD segment not aligned»
+#
+# Verificado en el emulador `google_apis_playstore_ps16k` (API 37): sin esta bandera los segmentos
+# LOAD salen con `align 0x1000`; con ella, `0x4000`.
+#
+# Se aplica a las cuatro ABIs de Android y no al resto de targets: en escritorio no aplica.
+[target.aarch64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.armv7-linux-androideabi]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.i686-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.x86_64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]

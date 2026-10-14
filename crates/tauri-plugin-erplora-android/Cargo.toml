@@ -1,0 +1,30 @@
+# Plugin Android del shell: el vehículo por el que el shell Tauri puede llevar código Kotlin al
+# dispositivo. Hoy resuelve una sola cosa —los permisos de RUNTIME— porque sin ellos el hardware
+# está muerto en Android y falla en silencio. Mañana albergará lo que Rust no alcanza
+# (`NsdManager`, quiosco, autoarranque).
+[package]
+name = "tauri-plugin-erplora-android"
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+description = "Permisos de runtime de Android para el shell de ERPlora"
+# `tauri-plugin` lo exige igual al nombre del paquete: es la clave con la que Tauri asocia el
+# módulo Android compilado con este crate.
+links = "tauri-plugin-erplora-android"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+# The bluetooth print payload crosses the JNI boundary as base64 (ADR-0204, hub#388), same
+# reasoning as the shell's `save_download`: ~1.3x the bytes instead of ~4x as a JSON number array.
+base64 = "0.22"
+
+# Inherits `[workspace.lints]` from the root manifest (hub#1242). Without these two lines the
+# crate is silently EXEMPT from the lint gate.
+[lints]
+workspace = true

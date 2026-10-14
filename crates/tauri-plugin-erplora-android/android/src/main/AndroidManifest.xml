@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android permissions of the till, declared where a GENERATOR CANNOT REACH THEM (hub#337).
+
+  The app manifest lives in `apps/tauri/src-tauri/gen/android`, and that project is generated.
+  Measured with tauri-cli 2.11.2: `cargo tauri android init` leaves the manifest alone if it is
+  there, but writes Tauri's template back if it is MISSING — INTERNET and nothing else, without
+  the four hardware permissions and without the `erplora://` intent filter. So a permission typed
+  into that file by hand is one lost file away from gone: a `rm -rf gen/android` to unstick
+  Gradle, a merge that drops it. And nothing complains: the APK builds, installs and runs; only
+  the printers stop existing, because Android blocks the LAN below the API level and a blocked
+  socket is a timeout, not an error.
+
+  This file is the durable half. The Android manifest merger folds a library module's
+  `<uses-permission>` tags into the app at build time, and this module is a hand-written crate, so
+  regenerating the Android project cannot take the declaration with it. The app manifest keeps its
+  own copy on purpose (the lesson of hub#345, where Android alone needed the deep-link scheme
+  declared twice); guards in `crates/tauri-plugin-erplora-android/src/lib.rs` and
+  `apps/tauri/src-tauri/tests/android_local_network.rs` fail loudly if either copy loses one, and
+  the release job reads the list back off the built APK, which is the only place the MERGED
+  manifest exists at all.
+
+  No `package` attribute on purpose: the namespace comes from `android.namespace` in
+  `build.gradle.kts`, and AGP 8 fails the build if a manifest declares it as well.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Reaching a printer at all. Also what implicitly allowed the LAN on Android 16 and below,
+         which is exactly why losing the rest of this list stays invisible on an older device. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Which network the till is on, so the sweep knows the subnet to walk. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- mDNS. Android drops multicast packets unless a multicast lock is held, and taking that
+         lock needs this permission: without it the Bonjour half of discovery finds nothing and
+         only the port-9100 sweep is left. -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+
+    <!-- Local Network Protection (Android 17 / API 37). A RUNTIME permission: declaring it is
+         only what makes it possible to ask for it — `ErploraAndroidPlugin.requestPermissions`
+         does the asking. Without the declaration the request is answered DENIED with no dialog,
+         forever, and the user is told to grant something the settings screen never offers. -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+
+    <!-- Telling the kitchen an order came in when nobody is looking at the screen. Runtime
+         permission since Android 13 (API 33). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Bluetooth Classic SPP printing (ADR-0204, hub#388): listing the BONDED printers and
+         opening the RFCOMM socket. A RUNTIME permission since Android 12 (API 31); without the
+         declaration the request is answered DENIED with no dialog, forever — same trap as
+         ACCESS_LOCAL_NETWORK above. No BLUETOOTH_SCAN on purpose: pairing happens in Android's
+         own settings, the till only reads the bonded list. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!-- The pre-12 spelling, install-time. `maxSdkVersion` keeps it out of the merged manifest
+         where BLUETOOTH_CONNECT took over. -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+
+    <!-- Reading the staff badge off the device's OWN reader (hub#988). Unlike the three above this
+         is a `normal`, install-time permission: there is no dialog and no way to deny it, so it
+         deliberately stays OUT of `PermissionPolicy` — a runtime request for it would show nothing
+         and add an entry to the status map that can never change. Missing it does not fail
+         silently the way the LAN one does; `enableReaderMode` throws a SecurityException. -->
+    <uses-permission android:name="android.permission.NFC" />
+
+    <!-- 🔴 Load-bearing, and the reason the permission alone is not enough. Declaring
+         `android.permission.NFC` makes Google Play add an IMPLICIT `android.hardware.nfc`
+         requirement, and Play then hides the app from every device without an NFC chip — most
+         cheap counter tablets, and every desktop-class Chromebook. The till would vanish from the
+         store for the customers least likely to have a reader, over a convenience feature. Saying
+         `required="false"` out loud is what keeps the listing open to them; the code already
+         degrades cleanly (`nfc_unavailable`). -->
+    <uses-feature
+        android:name="android.hardware.nfc"
+        android:required="false" />
+
+    <!-- Hearing the next notice with the screen off (hub#2307). Android freezes a backgrounded
+         app within minutes (cached-app freezer, Doze), and the page that listens for new orders
+         and appointments freezes with it: the notice arrives when somebody wakes the tablet.
+         A foreground service is what keeps the process out of that state, the same way the
+         restaurant apps of the delivery platforms stay «online». Both permissions are install-time
+         `normal`: no dialog, so they stay OUT of `PermissionPolicy`; missing either one,
+         `startForeground` throws a SecurityException on Android 14+ (API 34). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <!-- Where the device is, for a module that calls `navigator.geolocation` (hub#2552). The
+         first consumer is the `attendance` module, which can require an employee clocking in from
+         a personal phone to be near the venue. RUNTIME permissions: wry's
+         `RustWebChromeClient.onGeolocationPermissionsShowPrompt` asks for both when the page
+         asks for a position. Without the declaration that request is answered DENIED with no
+         dialog, forever, the page gets PERMISSION_DENIED and the clock-in is rejected. FINE for a
+         GPS fix, COARSE because Android 12+ lets the user grant only an approximate one. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- 🔴 Load-bearing, same trap as the NFC feature above. Either location permission makes
+         Google Play add an IMPLICIT `android.hardware.location` requirement, and unlike the
+         `.gps` / `.network` sub-features this parent one is implied whatever the target SDK
+         (read back with aapt2 at targetSdk 36). The till itself never needs a position: only a
+         module like `attendance` asks for one, and it already handles a device without it.
+         Saying `required="false"` keeps the listing open to tablets without location hardware. -->
+    <uses-feature
+        android:name="android.hardware.location"
+        android:required="false" />
+
+    <application>
+        <!-- `specialUse` because none of the typed foreground services (dataSync, mediaPlayback,
+             …) describes «stay reachable for incoming orders»; Google Play asks for the subtype
+             below in the store declaration, and reviews it against what the notification says.
+             Not exported: no other app may start or stop it. -->
+        <service
+            android:name="com.erplora.android.NoticeListeningService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Point of sale that must hear new orders, bookings and messages while the screen is off; stops when the user signs out or closes the app." />
+        </service>
+    </application>
+
+</manifest>

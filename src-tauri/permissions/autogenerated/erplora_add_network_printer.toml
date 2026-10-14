@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-erplora-add-network-printer"
+description = "Enables the erplora_add_network_printer command without any pre-configured scope."
+commands.allow = ["erplora_add_network_printer"]
+
+[[permission]]
+identifier = "deny-erplora-add-network-printer"
+description = "Denies the erplora_add_network_printer command without any pre-configured scope."
+commands.deny = ["erplora_add_network_printer"]

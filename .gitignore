@@ -1,0 +1,24 @@
+# JS (only the Tauri CLI lives here)
+node_modules/
+package-lock.json
+
+# Rust
+target/
+
+# OS
+.DS_Store
+
+# Secrets: never versioned. The release workflow writes the keystore from CI secrets.
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.p12
+keystore.properties
+key.properties
+google-services.json
+
+# Python bytecode (scripts/ci/*.py): produced by py_compile in tests, never source.
+__pycache__/
+*.pyc

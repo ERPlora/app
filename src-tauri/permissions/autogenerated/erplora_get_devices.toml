@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-erplora-get-devices"
+description = "Enables the erplora_get_devices command without any pre-configured scope."
+commands.allow = ["erplora_get_devices"]
+
+[[permission]]
+identifier = "deny-erplora-get-devices"
+description = "Denies the erplora_get_devices command without any pre-configured scope."
+commands.deny = ["erplora_get_devices"]

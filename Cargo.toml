@@ -1,0 +1,38 @@
+# Cargo workspace of the ERPlora native app (Tauri 2). Moved out of the ERPlora/hub monorepo
+# (origin/develop 9dd38215), where these three crates were members of the hub's root workspace.
+# `[workspace.lints]` and `[workspace.package]` are lifted unchanged from that root manifest.
+[workspace]
+resolver = "2"
+members = [
+    "src-tauri",
+    "crates/peripherals",
+    "crates/tauri-plugin-erplora-android",
+]
+
+# ── Rust lints of the workspace (hub#1242) ─────────────────────────────────────────────────────
+# Each member inherits these tables with
+#   [lints]
+#   workspace = true
+# A crate that forgets those two lines is silently exempt.
+#
+# Ratchet: `correctness` is at deny because it was clean when the gate was born; the next group is
+# promoted by bringing it to zero first and then changing its `level` here. No `-D warnings` flag
+# in CI: the level is operated from this table.
+[workspace.lints.clippy]
+# Real bugs: `&mut` to a temporary, always-false comparisons, broken `Ord`, misplaced overflow.
+correctness = { level = "deny", priority = -1 }
+# Explicit although it matches clippy's default: it is the next notch of the ratchet.
+suspicious = { level = "warn", priority = -1 }
+
+[workspace.lints.rust]
+# Code the compiler already knows it will REJECT in a future version.
+future_incompatible = { level = "deny", priority = -1 }
+# An unused import is an ERROR, not a warning (hub#1501 → hub#1504).
+unused_imports = { level = "deny", priority = -1 }
+
+[workspace.package]
+edition = "2021"
+# Inherited by `erplora-peripherals` (`version.workspace = true`). The app's own version lives in
+# `src-tauri/tauri.conf.json`, which the release workflow rewrites from the `v*` tag.
+version = "1.0.0"
+license = "MIT"

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-erplora-remove-device"
+description = "Enables the erplora_remove_device command without any pre-configured scope."
+commands.allow = ["erplora_remove_device"]
+
+[[permission]]
+identifier = "deny-erplora-remove-device"
+description = "Denies the erplora_remove_device command without any pre-configured scope."
+commands.deny = ["erplora_remove_device"]

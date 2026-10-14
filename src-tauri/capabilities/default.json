@@ -1,0 +1,49 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The HUB origins of the 'main' window (ADR-0159, thin client) — the only capability that hands out the hardware. The webview loads REMOTE origins: the cloud hub PWA (https://*.erplora.com) and, in dev, the local PWA (Vite :5173 or the runtime :8787). Without these remote.urls Tauri's ACL refuses every invoke from the PWA and the till cannot print. The wildcard crosses labels on purpose: hubs live at {slug}.{aura}.erplora.com, with lettered auras on Hetzner and numbered ones on the AWS fallback, so enumerating auras would mean shipping a new app to every till the day a new aura opens. The SaaS apex is NOT covered by this pattern and lives in `onboarding.json` with no hardware. CUSTOM hub domains get no hardware in v1 (they cannot be enumerated here — see ADR-0159). local:true keeps tauri:// authorized (transient boots / degraded page). Besides the hardware it grants `allow-open-external-url`, the way OUT to the user's own browser (hub#475): the till PWA is where the buttons that CHARGE live, and `window.open` opens nothing in a webview. And `allow-print-document`, the system print dialog for an A4 document (hub#2006): the document is shown in a `print-<n>` window that no capability names, so it has no IPC. And `notification:allow-register-listener`, so the PWA hears a tap on a system notice and opens the screen it is about (hub#2305) — only the listener: the notices themselves go out through `erplora_notify`. And `allow-erplora-take-notice-tap`, so the PWA claims the tap it was not there to hear — a click on the computer, where the plugin reports none, or the tap that started the app on Android (hub#2360). The raw `opener:*` permissions are NEVER granted — they take any address and two of them open files. This pattern is only the FIRST gate: it cannot name the one business this till belongs to, so `src/hub_link.rs` (hub#2504) refuses every command but `device_context`, `forget_hub` and `shell_retry` to any page whose origin is not the LINKED hub (`not_the_linked_hub`) — another business, `www`, `pre` and the loopback ports get nothing unless they are the linked hub. The same gate stands in front of every `erplora-android` command (hub#2642): Android's permission dialogs, the listening service and the way out of the app are the linked hub's too. And in front of every `notification` command (hub#2658): hearing the taps on the notices is the linked hub's too, which is why `run` registers the plugin wrapped (`hub_link::notification_plugin`). Tauri's own sets are granted one by one, `core:default` minus `core:app` (hub#2658): the core `app` plugin cannot be wrapped, and it would hand the build the till runs to any page of the pattern. The linked hub reads the version through `erplora_bridge_status`. Of `core:app` only its listener stays: the Android Back button reaches the page as that plugin's `back-button` event (hub#1906), which says nothing about the build and is heard by the page on screen.",
+  "local": true,
+  "remote": {
+    "urls": [
+      "https://*.erplora.com/*",
+      "http://127.0.0.1:8787/*",
+      "http://127.0.0.1:5173/*"
+    ]
+  },
+  "windows": ["main"],
+  "permissions": [
+    "core:path:default",
+    "core:event:default",
+    "core:window:default",
+    "core:webview:default",
+    "core:image:default",
+    "core:resources:default",
+    "core:menu:default",
+    "core:tray:default",
+    "core:app:allow-register-listener",
+    "core:app:allow-remove-listener",
+    "allow-device-context",
+    "allow-forget-hub",
+    "allow-open-external-url",
+    "allow-save-download",
+    "allow-print-document",
+    "allow-erplora-bridge-status",
+    "allow-erplora-discover-printers",
+    "allow-erplora-get-devices",
+    "allow-erplora-print",
+    "allow-erplora-test-print",
+    "allow-erplora-open-drawer",
+    "allow-erplora-set-device-role",
+    "allow-erplora-add-network-printer",
+    "allow-erplora-set-device-name",
+    "allow-erplora-remove-device",
+    "allow-erplora-notify",
+    "allow-erplora-take-notice-tap",
+    "notification:allow-register-listener",
+    "allow-erplora-nfc-read",
+    "allow-autostart-is-enabled",
+    "allow-autostart-enable",
+    "allow-autostart-disable",
+    "erplora-android:default"
+  ]
+}

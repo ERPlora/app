@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-erplora-test-print"
+description = "Enables the erplora_test_print command without any pre-configured scope."
+commands.allow = ["erplora_test_print"]
+
+[[permission]]
+identifier = "deny-erplora-test-print"
+description = "Denies the erplora_test_print command without any pre-configured scope."
+commands.deny = ["erplora_test_print"]

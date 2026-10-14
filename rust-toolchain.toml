@@ -1,0 +1,5 @@
+# Toolchain pin of the app (Rust stable). The Android targets are added by the release workflow
+# (`dtolnay/rust-toolchain` with `targets:`); the hub's `wasm32-unknown-unknown` target was for its
+# WASM guests and is not needed here.
+[toolchain]
+channel = "stable"

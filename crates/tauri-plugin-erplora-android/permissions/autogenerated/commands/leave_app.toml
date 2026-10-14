@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-leave-app"
+description = "Enables the leave_app command without any pre-configured scope."
+commands.allow = ["leave_app"]
+
+[[permission]]
+identifier = "deny-leave-app"
+description = "Denies the leave_app command without any pre-configured scope."
+commands.deny = ["leave_app"]

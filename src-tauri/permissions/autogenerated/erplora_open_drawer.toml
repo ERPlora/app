@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-erplora-open-drawer"
+description = "Enables the erplora_open_drawer command without any pre-configured scope."
+commands.allow = ["erplora_open_drawer"]
+
+[[permission]]
+identifier = "deny-erplora-open-drawer"
+description = "Denies the erplora_open_drawer command without any pre-configured scope."
+commands.deny = ["erplora_open_drawer"]

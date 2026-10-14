@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Manifest MSIX para el canal Microsoft Store (ADR-0136).
+
+  Los tokens __MSIX_*__ los sustituye scripts/pack-msix.ps1 en build-time con los valores
+  REALES de Partner Center (Product identity de la ficha reservada «ERPlora»):
+    __MSIX_IDENTITY_NAME__       → Package/Identity/Name        (p.ej. "12345Erplora.ERPlora")
+    __MSIX_PUBLISHER__           → Package/Identity/Publisher   (p.ej. "CN=xxxxxxxx-...-...")
+    __MSIX_PUBLISHER_DISPLAY__   → PublisherDisplayName
+    __MSIX_VERSION__             → versión 4 partes (Store exige revisión .0)
+
+  El MSIX se sube SIN FIRMAR: la Store lo re-firma con su certificado tras la certificación.
+  El exe se empaqueta tal cual sale de `tauri build` (post-build puro; no cambia Tauri).
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap rescap">
+
+  <Identity
+    Name="__MSIX_IDENTITY_NAME__"
+    Publisher="__MSIX_PUBLISHER__"
+    Version="__MSIX_VERSION__"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>ERPlora</DisplayName>
+    <PublisherDisplayName>__MSIX_PUBLISHER_DISPLAY__</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <!-- 10.0.17763 = Windows 10 1809, mínimo de MSIX moderno + WebView2 Evergreen. -->
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+    <Resource Language="es-es" />
+  </Resources>
+
+  <Applications>
+    <Application Id="ERPlora" Executable="ERPlora.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="ERPlora"
+        Description="ERPlora Hub — modular POS/ERP for restaurants and salons"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png"
+        BackgroundColor="transparent" />
+      <Extensions>
+        <!-- erplora:// (ADR-0196 §7): los enlaces a un hub y el clic en un aviso desde el Centro de
+             actividades (hub#2409). El .exe/.msi lo registran al instalar; la copia de la Store
+             solo tiene lo que declara aquí. Windows lanza ERPlora.exe con el enlace como argumento. -->
+        <uap:Extension Category="windows.protocol">
+          <uap:Protocol Name="erplora">
+            <uap:DisplayName>ERPlora</uap:DisplayName>
+          </uap:Protocol>
+        </uap:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <!-- App Win32 empaquetada (Tauri): full trust; el modelo de permisos real es el del runtime. -->
+    <rescap:Capability Name="runFullTrust" />
+    <!-- SaaS (marketplace/AI/entitlement) + hardware POS en LAN (ESC/POS TCP:9100, §2.7). -->
+    <Capability Name="internetClient" />
+    <Capability Name="privateNetworkClientServer" />
+  </Capabilities>
+</Package>

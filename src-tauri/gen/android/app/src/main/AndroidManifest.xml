@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- POS hardware: reaching the LAN printers (ESC/POS over TCP:9100 + mDNS).
+         Verified on the API 37 emulator: with INTERNET alone, `erplora_discover_printers` returns
+         [] with NO error — Android's local network block is SILENT (timeouts, not exceptions), so
+         it is indistinguishable from "this venue has no printers".
+
+         ACCESS_LOCAL_NETWORK is a RUNTIME permission from Android 17 (API 37) and mandatory once
+         targetSdk reaches 37: declaring it is not enough, it has to be ASKED for — and asking
+         needs Kotlin, because the callback lands on the Activity. That is
+         `ErploraAndroidPlugin.requestPermissions`, and the shell asks before every scan and every
+         print (hub#337).
+
+         ⚠️ THIS FILE IS GENERATED. Measured with tauri-cli 2.11.2: `cargo tauri android init`
+         leaves it alone while it exists, but if it is MISSING it writes Tauri's template back —
+         INTERNET only, no hardware permissions and no erplora:// intent filter. The durable copy
+         of this list therefore lives outside the generated project, in
+         `crates/tauri-plugin-erplora-android/android/src/main/AndroidManifest.xml`; the manifest
+         merger folds it back in, verified by stripping this file down to INTERNET and rebuilding.
+         Both copies are guarded by `apps/tauri/src-tauri/tests/android_local_network.rs`. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+
+    <!-- Telling the kitchen an order came in when NOBODY is looking at the screen.
+         Runtime permission since Android 13. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Bluetooth Classic SPP printing (ADR-0204, hub#388): bonded list + RFCOMM socket.
+         Runtime permission since Android 12; the pre-12 spelling is install-time and capped
+         with maxSdkVersion. No BLUETOOTH_SCAN on purpose: pairing happens in Android's own
+         settings, the till only reads the bonded list. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+
+    <!-- Reading the staff badge off the device's own reader (hub#988). An install-time `normal`
+         permission: no dialog, so it is NOT in PermissionPolicy. -->
+    <uses-permission android:name="android.permission.NFC" />
+
+    <!-- 🔴 The line above narrows the store listing unless this one is here. Google Play adds an
+         IMPLICIT android.hardware.nfc requirement to any app declaring the NFC permission, and
+         hides it from every device without a chip — most cheap counter tablets. Saying the chip is
+         optional keeps the app installable there; the code already degrades to `nfc_unavailable`
+         and the badge keeps arriving through the USB reader. -->
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
+
+    <!-- Hearing the next notice with the screen off (hub#2307): the foreground service
+         `NoticeListeningService`, declared (with its `specialUse` type) in the plugin manifest,
+         which the merger folds in. Install-time permissions; without them `startForeground`
+         throws on Android 14+. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <!-- Where the device is, for a module that calls `navigator.geolocation` (hub#2552); first
+         consumer: the `attendance` module (clock-in near the venue). Runtime permissions, asked
+         by wry's `RustWebChromeClient.onGeolocationPermissionsShowPrompt`; undeclared, the
+         request is DENIED with no dialog. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- 🔴 Same trap as the NFC feature: the location permissions make Google Play add an
+         IMPLICIT android.hardware.location requirement (whatever the target SDK) and hide the app
+         from every device without it. The till does not need a position; only a module asks. -->
+    <uses-feature android:name="android.hardware.location" android:required="false" />
+
+    <!-- AndroidTV support -->
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+
+    <application
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.erplora_tauri"
+        android:usesCleartextTraffic="${usesCleartextTraffic}">
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+            android:launchMode="singleTask"
+            android:label="@string/main_activity_title"
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <!-- AndroidTV support -->
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+
+            <!-- Deep link `erplora://hub/<host>` (ADR-0196 §7). Es lo que hace que un enlace del
+                 SaaS —«Open Terminal», el correo de invitación— abra la APP en vez del navegador.
+
+                 Android solo entrega un enlace a una activity con las tres piezas juntas: acción
+                 VIEW, categoría BROWSABLE (sin ella el sistema NO se lo da a un enlace venido de
+                 un navegador o de un cliente de correo) y el `data` con el esquema. Si falta
+                 cualquiera, el intent no se entrega nunca y NADIE lo reporta: el usuario toca el
+                 enlace y no pasa nada.
+
+                 SIN `android:autoVerify`: eso es para App Links `https`, que exigen publicar un
+                 assetlinks.json; este es un esquema propio y no se verifica contra ningún dominio.
+                 El `launchMode="singleTask"` de arriba es lo que hace que un segundo enlace
+                 reutilice la app abierta en vez de apilar otra instancia encima del TPV. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="erplora" />
+            </intent-filter>
+            <!-- DEEP LINK PLUGIN. AUTO-GENERATED. DO NOT REMOVE. -->
+            <intent-filter >
+                <action android:name="android.intent.action.VIEW" />
+                <!-- ChromeOS ARC++ uses a different action for deep links -->
+                <action android:name="org.chromium.arc.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="erplora" />
+                <data android:host="hub" />
+                
+                
+                
+                
+            </intent-filter>
+            <!-- DEEP LINK PLUGIN. AUTO-GENERATED. DO NOT REMOVE. -->
+        </activity>
+
+        <provider
+          android:name="androidx.core.content.FileProvider"
+          android:authorities="${applicationId}.fileprovider"
+          android:exported="false"
+          android:grantUriPermissions="true">
+          <meta-data
+            android:name="android.support.FILE_PROVIDER_PATHS"
+            android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+</manifest>

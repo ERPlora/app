@@ -1,0 +1,15 @@
+# Granted by default: asking about and requesting permissions is NEVER the danger — the danger is
+# not being able to ask, and the hardware going dead with nobody knowing why. `allow-leave-app`
+# (hub#1906) sends the app to the background, the same as the system Back on the root screen: there
+# is nothing to protect behind it. `allow-open-app-settings` (hub#1886) only opens the app's page in
+# the system settings: the person still decides.
+# `allow-keep-listening` (hub#2307) keeps the app running with the screen off, with Android's ongoing
+# notification saying so; the page only asks for it while somebody is signed in with notices on.
+# The app grants this set to every page under erplora.com, but registers the plugin with its
+# linked-hub gate in front (`init(gate)`, hub#2642): any other page gets `not_the_linked_hub` and no
+# command runs.
+"$schema" = "schemas/schema.json"
+
+[default]
+description = "Consultar y solicitar los permisos de runtime que el TPV necesita en Android, salir de la app con el botón Atrás, abrir la ficha de la app en los ajustes del sistema y seguir a la escucha de avisos con la pantalla apagada."
+permissions = ["allow-check-permissions", "allow-request-permissions", "allow-leave-app", "allow-open-app-settings", "allow-keep-listening"]

@@ -1,0 +1,124 @@
+<!doctype html>
+<!-- Página DEGRADADA del shell (ADR-0159): la que ve el usuario cuando la ventana no puede cargar
+     el hub o el SaaS. Desde hub#1716 NO es solo la del primer arranque: el guardia de conectividad
+     (`src/connectivity.rs`) trae aquí la ventana ante cualquier carga que no aterrice, y se la
+     lleva de vuelta sola en cuanto la red contesta. Antes de eso el usuario se quedaba en la
+     pantalla de error de la webview —blanca en macOS, gris en Android— sin barra de direcciones ni
+     botón de recarga: la caja muerta hasta matar la app desde el sistema.
+
+     El shell es un cliente fino: el contenido real vive en https://erplora.com (onboarding) y en
+     la PWA del hub. Esta página se empaqueta ENTERA dentro de la app —marca incluida— porque es
+     justo la que se pinta cuando no hay red para pedir nada. -->
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ERPlora</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: light-dark(#f6f8fa, #111418); color: light-dark(#1f2937, #e5e7eb);
+      }
+      main { text-align: center; padding: 2rem; max-width: 26rem; }
+      .mark { width: 72px; height: 72px; border-radius: 1rem; }
+      .brand {
+        margin: .75rem 0 1.5rem; font-size: .8rem; font-weight: 700; letter-spacing: .14em;
+        text-transform: uppercase; color: light-dark(#6b7280, #9ca3af);
+      }
+      h1 { font-size: 1.25rem; margin: 0 0 .5rem; }
+      p { margin: .25rem 0; color: light-dark(#6b7280, #9ca3af); font-size: .95rem; }
+      button {
+        margin-top: 1.25rem; padding: .6rem 1.4rem; border: 0; border-radius: .5rem;
+        background: #2563eb; color: #fff; font-size: .95rem; cursor: pointer;
+      }
+      button[disabled] { opacity: .6; cursor: default; }
+      .status { margin-top: .9rem; min-height: 1.2rem; font-size: .9rem; color: light-dark(#b45309, #fbbf24); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <!-- La MARCA va empaquetada (no es un asset remoto): es la única forma de que la pantalla
+           siga siendo reconociblemente ERPlora justo cuando no hay red. -->
+      <img class="mark" src="erplora-mark.png" alt="ERPlora" />
+      <p class="brand">ERPlora</p>
+      <h1 id="title">Sin conexión a internet</h1>
+      <p id="body"></p>
+      <p id="hint"></p>
+      <button id="retry" type="button">Reintentar</button>
+      <p class="status" id="status" aria-live="polite"></p>
+    </main>
+    <!-- Wired from a script, not from an `onclick=`: this page is served under the app's CSP
+         (`script-src 'self'`), and CSP has neither a hash nor a nonce for an inline event handler,
+         so the button used to be pure decoration — the browser dropped the handler without a word.
+         `__TAURI_SCRIPT_NONCE__` is the token Tauri swaps for a fresh nonce when it serves the
+         asset, adding `'nonce-…'` to script-src (`tauri_utils::assets::SCRIPT_NONCE_TOKEN`).
+         Remove the attribute and the script is blocked, just as silently. Pinned by
+         `src-tauri/tests/shell_csp.rs`. -->
+    <script nonce="__TAURI_SCRIPT_NONCE__">
+      // ADR-0055/0199: visible text ships as an English SOURCE chain plus its `es` translation.
+      // This page has no i18n runtime to lean on — it is what you get when there is no network at
+      // all — so it carries both catalogues itself. `es` is the default, like the hub's own shell
+      // (`apps/web/src/i18n/index.ts`); English is served only when the device is explicitly not
+      // Spanish, because here there is no hub setting to reconcile with later.
+      var COPY = {
+        en: {
+          title: "No internet connection",
+          body: "ERPlora cannot reach your business right now. This is a connection problem, not a fault in the app — nothing you saved has been lost.",
+          hint: "Check the Wi-Fi or the mobile data. ERPlora reconnects on its own as soon as the network is back.",
+          retry: "Try again",
+          checking: "Checking the connection…",
+          still_offline: "Still no connection. Check the Wi-Fi or the mobile data."
+        },
+        es: {
+          title: "Sin conexión a internet",
+          body: "ERPlora no puede conectar con tu negocio ahora mismo. Es un problema de conexión, no es un fallo de la aplicación: no se ha perdido nada de lo que guardaste.",
+          hint: "Comprueba el wifi o los datos móviles. ERPlora vuelve a conectarse solo en cuanto haya red.",
+          retry: "Reintentar",
+          checking: "Comprobando la conexión…",
+          still_offline: "Sigue sin conexión. Comprueba el wifi o los datos móviles."
+        }
+      };
+
+      var language = String(navigator.language || "es").toLowerCase().indexOf("es") === 0 ? "es" : "en";
+      var text = COPY[language];
+      document.documentElement.lang = language;
+      document.getElementById("title").textContent = text.title;
+      document.getElementById("body").textContent = text.body;
+      document.getElementById("hint").textContent = text.hint;
+
+      var retry = document.getElementById("retry");
+      var status = document.getElementById("status");
+      retry.textContent = text.retry;
+
+      // The button asks the SHELL, which is the only side that can probe the network and move the
+      // window (hub#1716). It used to be `location.reload()` — on this page that reloads THIS page,
+      // so the one control on the only screen the user could reach led straight back to itself.
+      // The shell keeps retrying on its own too; this is the way to say "now".
+      retry.addEventListener("click", function () {
+        var bridge = window.__TAURI__ && window.__TAURI__.core;
+        if (!bridge) {
+          // Outside the installed app there is no shell to ask. Say so instead of looking broken.
+          status.textContent = text.still_offline;
+          return;
+        }
+        retry.disabled = true;
+        status.textContent = text.checking;
+        bridge
+          .invoke("shell_retry")
+          .then(function (online) {
+            // When it IS online the shell has already navigated away and this page is gone; the
+            // branch that matters is the other one.
+            if (!online) status.textContent = text.still_offline;
+          })
+          .catch(function () {
+            status.textContent = text.still_offline;
+          })
+          .then(function () {
+            retry.disabled = false;
+          });
+      });
+    </script>
+  </body>
+</html>

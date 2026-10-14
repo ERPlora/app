@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "degraded",
+  "description": "The BUNDLED page and nothing else (hub#1716). `shell_retry` probes the network and NAVIGATES the main window, so it is the one command a remote origin must never reach: a page on a hub — or anything injected into one — could otherwise send the till wherever it liked. Declaring no `remote` block is how Tauri says local-only, and `local: true` says it out loud rather than by omission. The bundled offline page already inherits Tauri's core sets (`core:default` minus `core:app`, hub#2658) from `default.json` (which is `local: true` too), so this capability adds exactly one grant and no IPC surface of its own. Pinned by `tests/shell_offline.rs`.",
+  "local": true,
+  "windows": ["main"],
+  "permissions": ["allow-shell-retry"]
+}

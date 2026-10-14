@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-erplora-take-notice-tap"
+description = "Enables the erplora_take_notice_tap command without any pre-configured scope."
+commands.allow = ["erplora_take_notice_tap"]
+
+[[permission]]
+identifier = "deny-erplora-take-notice-tap"
+description = "Denies the erplora_take_notice_tap command without any pre-configured scope."
+commands.deny = ["erplora_take_notice_tap"]

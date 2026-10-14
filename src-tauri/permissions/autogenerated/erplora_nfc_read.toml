@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-erplora-nfc-read"
+description = "Enables the erplora_nfc_read command without any pre-configured scope."
+commands.allow = ["erplora_nfc_read"]
+
+[[permission]]
+identifier = "deny-erplora-nfc-read"
+description = "Denies the erplora_nfc_read command without any pre-configured scope."
+commands.deny = ["erplora_nfc_read"]

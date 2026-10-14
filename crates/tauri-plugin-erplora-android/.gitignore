@@ -1,0 +1,10 @@
+# Salida de Gradle del módulo Android: se regenera con `cargo tauri android build`.
+android/build
+android/.gradle
+# Copia que Tauri deja del SDK `tauri-android` al construir; viene del crate `tauri`, no es fuente.
+android/.tauri
+# Salida de la raíz Gradle que corre los tests Kotlin en los PR (hub#933). La config SÍ es fuente.
+android-tests/build
+android-tests/.gradle
+# Build de Cargo.
+/target

@@ -1,0 +1,14 @@
+{
+  "name": "@erplora/app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "erplora-app (Tauri v2 thin shell). This package.json exists for ONE reason: it makes the Tauri CLI a dependency of the workspace, so the release builds it with `pnpm exec tauri` instead of `npm install -g` — which needs a writable /usr/lib/node_modules and therefore only ever worked on GitHub-hosted runners (hub#878). There is no frontend to build here: `frontendDist` is the committed `shell-dist/` (ADR-0154).",
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4"
+  }
+}

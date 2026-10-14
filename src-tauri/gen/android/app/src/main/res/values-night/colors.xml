@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark twin of values/colors.xml: the ion-toolbar-background custom property under
+         .ion-palette-dark in apps/web/src/theme/variables.css (hub#1903). -->
+    <color name="status_bar_strip">#FF0B0C0E</color>
+</resources>

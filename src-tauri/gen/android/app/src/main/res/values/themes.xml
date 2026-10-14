@@ -1,0 +1,9 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Theme.erplora_tauri" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <!-- The strip reserved under the status bar is transparent all the way down to the window,
+             so this is the colour the clock rests on: the header's, not MaterialComponents' white
+             (hub#1903). -->
+        <item name="android:windowBackground">@color/status_bar_strip</item>
+    </style>
+</resources>

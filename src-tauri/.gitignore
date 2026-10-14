@@ -1,0 +1,4 @@
+# Build de Tauri / Cargo
+/target
+# Schemas autogenerados por tauri-build (autocompletado de capabilities)
+/gen/schemas

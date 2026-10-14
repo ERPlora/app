@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-erplora-discover-printers"
+description = "Enables the erplora_discover_printers command without any pre-configured scope."
+commands.allow = ["erplora_discover_printers"]
+
+[[permission]]
+identifier = "deny-erplora-discover-printers"
+description = "Denies the erplora_discover_printers command without any pre-configured scope."
+commands.deny = ["erplora_discover_printers"]

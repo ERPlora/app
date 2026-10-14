@@ -1,0 +1,120 @@
+# apps/tauri — shell CLIENTE FINO de escritorio (Tauri v2), ADR-0159.
+#
+# La webview carga el onboarding del SaaS y después la PWA del hub cloud (`hub_url`); el hardware
+# local va por handlers `invoke` sobre `erplora-peripherals` (el shell ES el bridge, ADR-0050).
+# SIN runtime embebido, SIN SQLite, SIN entitlement gate (ADR-0154 los retiró; este crate ya no
+# depende de `erplora-server` ni de `erplora-cloud-client`).
+
+[package]
+name = "erplora-tauri"
+edition = "2021"
+version = "0.0.0"
+license = "MIT"
+description = "ERPlora Shell — thin desktop client (Tauri v2): SaaS onboarding + cloud hub PWA in a webview, local hardware via invoke"
+
+[lib]
+name = "erplora_tauri_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+# Hardware POS (impresoras de red ESC/POS + cajón) — el shell ES el bridge (§2.7): los handlers
+# `invoke` de hardware delegan en este crate, in-process. Contrato JSON
+# (`protocol::{PrinterInfo,Device}`) heredado del bridge standalone, retirado en hub#340.
+erplora-peripherals = { path = "../crates/peripherals" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+# Canales del worker de la PrintQueue + watchdog (tareas de fondo del shell). `time` es del
+# guardia de conectividad (hub#1716): espera con backoff sobre un `Notify` mientras la red está
+# caída, y sin timer alguno mientras todo va bien.
+tokio = { version = "1", features = ["sync", "time"] }
+# `device.id` estable por instalación (X-Device-Id del login, §2.9b / sesión única ADR-0154).
+uuid = { version = "1", features = ["v4"] }
+# Notificaciones del SISTEMA: el aviso cuando NADIE mira la pantalla (comanda → cocina). Plugin
+# oficial; cubre Windows/macOS/Linux y Android/iOS con la misma API, así que el shell expone un
+# solo comando `erplora_notify` para las cuatro plataformas.
+tauri-plugin-notification = "2"
+# Permisos de RUNTIME de Android. Sin ellos el hardware está muerto y falla EN SILENCIO: el
+# descubrimiento devuelve [] y las notificaciones no salen, sin un solo error.
+tauri-plugin-erplora-android = { path = "../crates/tauri-plugin-erplora-android" }
+# Solo para preguntarle al hub recordado si sigue existiendo al arrancar (`should_forget_hub`).
+# Sin esto, un hub borrado deja la app tapiada en un 404 permanente y sin salida por la UI.
+# Mismo spec que el resto del workspace, así que no añade compilación nueva.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+# El `eprintln!` de Rust NO llega a logcat en Android: sin esto, un fallo del chequeo del
+# hub recordado es invisible, que es justo como se coló que no corría.
+log = "0.4"
+# Deep link `erplora://` (ADR-0196 §7). Registration is what makes a link from the SaaS open the
+# APP, and each platform learns about the scheme somewhere else: Windows from a registry key and
+# Linux from a `.desktop` handler, both written by the BUNDLER at install time from
+# `plugins.deep-link.desktop.schemes`; macOS/iOS from `CFBundleURLTypes` in the bundle; Android
+# from the intent filter in `AndroidManifest.xml`. Doing that by hand is where the plugin earns its
+# place — and it is also the only portable way to receive the URL once the app is running.
+tauri-plugin-deep-link = "2"
+# The user's own browser (hub#475). The webview opens NO window of its own, so `window.open` from
+# the page is a silent no-op — and behind it are the buttons that charge: the module checkout that
+# ADR-0114 §4 moved OUT of the app for Google Play, the plans page, the billing portal. Official
+# plugin: `ACTION_VIEW` on Android, the desktop opener elsewhere. Only its Rust api is used; no
+# `opener:*` permission reaches a page (`tests/remote_acl.rs`).
+tauri-plugin-opener = "2"
+# `save_download` (hub#480): the page holds the bytes (it fetched them with the hub session) and the
+# shell holds the disk, so they cross the `invoke` boundary. base64 and not a JSON array of numbers:
+# a 5 MB export is ~6.7 MB of text this way and ~20 MB the other, on a tablet.
+base64 = "0.22"
+
+[dev-dependencies]
+# `tests/remote_acl.rs` valida los patrones de `capabilities/default.json` con el MISMO motor que
+# Tauri usa en runtime (`RemoteUrlPattern`), en vez de reimplementar el matching en el test.
+tauri-utils = "2"
+# `test` gives us `tauri::test::mock_builder` + `MockRuntime`, whose `navigate()` records the URL
+# and whose `url()` answers with it. That is what lets `connectivity`'s regression test assert the
+# window MOVED to our offline page and back (hub#1716) instead of asserting on a bool. Dev-only:
+# with resolver 2 this feature never reaches the shipped binary.
+tauri = { version = "2", features = ["test"] }
+
+# Desktop only. On Windows and Linux the OS answers a link by LAUNCHING the executable again with
+# the URL appended, so without this a click would start a SECOND till on top of the first one
+# instead of steering the one already open. Mobile has no such thing (`singleTask` + the intent
+# does it), hence the target gate.
+#
+# The cfg is spelled out per-OS and not as `cfg(desktop)`: that alias is a rustc cfg emitted by
+# `tauri-build`, and Cargo does not know it when resolving dependencies — it would silently drop
+# the crate and the `#[cfg(desktop)]` code would stop compiling.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+# «Start on login» (ADR-0204 §7, hub#389): opt-in autostart for the dedicated desktop till, so
+# there is always a print host draining the hub's queue. The OS keeps the state (LaunchAgent /
+# registry / autostart dir); the shell only exposes enable/disable/is_enabled over `invoke`.
+tauri-plugin-autostart = "2"
+# The question before a link links another hub (hub#2644), in the system's own dialog: the page is
+# exactly who must not be able to answer it. `rfd` and not `tauri-plugin-dialog`: that plugin's
+# `init` replaces `window.alert`/`window.confirm` on EVERY page with its own commands, which the hub's
+# pages are not granted — their `confirm()` would come back as a (truthy) promise. GTK on Linux, like
+# the webview; `common-controls-v6` gives the Windows dialog its «Open»/«Cancel» buttons.
+rfd = { version = "0.16", default-features = false, features = ["gtk3", "common-controls-v6"] }
+# The system's language for that question: Spanish unless it says otherwise.
+sys-locale = "0.3"
+
+# A click on a notice on the computer (hub#2360). The notification plugin shows a desktop notice and
+# drops its handle, so no click ever comes back; the shell shows it itself and waits for the click.
+# macOS talks to `mac-notification-sys` directly: `notify-rust` only waits there when the notice has
+# buttons. Windows shows the notice through WinRT itself, so the notice can carry the link a click
+# in the Action Center launches the app with (hub#2409); `notify-rust` cannot set it. All three are
+# already in the tree through the plugin, at these versions.
+[target.'cfg(target_os = "macos")'.dependencies]
+mac-notification-sys = "0.6"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Data_Xml_Dom", "UI_Notifications"] }
+
+[target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd"))'.dependencies]
+notify-rust = "4.18"
+
+# Inherits `[workspace.lints]` from the root manifest (hub#1242). Without these two lines the
+# crate is silently EXEMPT from the lint gate.
+[lints]
+workspace = true

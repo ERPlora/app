@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "onboarding",
+  "description": "The BOOT origin of the app: the SaaS apex (ADR-0196 — the app opens at erplora.com and reaches a hub from there). Separate from `default` on purpose: the apex is not covered by `https://*.erplora.com` (that pattern needs a label before the dot), so declaring it is a deliberate act, and keeping it in its own capability is what stops the boot page from inheriting the hardware. erplora.com also serves marketing, billing and a third-party checkout — it is the widest attack surface the window loads, and whatever gets injected there must not be able to open the cash drawer. So it gets the device identity the hub login carries (X-Device-Id, single session ADR-0154) plus the escape hatch that drops a captured hub, and NOTHING else. Widening this list means widening what a page on erplora.com can do to the till: see `tests/remote_acl.rs`.",
+  "remote": {
+    "urls": [
+      "https://erplora.com/*",
+      "http://127.0.0.1:8001/*"
+    ]
+  },
+  "windows": ["main"],
+  "permissions": ["allow-device-context", "allow-forget-hub"]
+}

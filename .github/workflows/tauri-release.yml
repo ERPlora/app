@@ -1,0 +1,802 @@
+# ==============================================================================
+# ERPlora Hub App (Tauri) — Build & Upload to S3
+# ==============================================================================
+#
+# La app de escritorio/móvil del Hub (este repo, cliente fino Tauri v2). El bundle NO lleva la
+# PWA: `frontendDist` empaqueta `shell-dist/` (página de respaldo commiteada) y la UI real la sirve
+# el hub cloud (ADR-0154/0159). Build por plataforma → S3. (Nació como espejo de
+# `bridge-release.yml`, retirado con el propio bridge en hub#340.)
+#
+# Pipeline (build pesado: Windows ×2 de facturación → NO en cada push a main, ADR-CI 2026-07-10):
+#   push tag v*        ─► build + build-android ─► S3 app/v{version}/ + latest/
+#   workflow_dispatch  ─► build + build-android ─► S3 app/latest/   (refresco manual de `latest/`)
+# Los jobs vigentes son la lista de `jobs:` de este mismo fichero — no la reproduzcas aquí.
+#
+# S3 layout (mismo bucket que el bridge; lo consume el Cloud para la descarga):
+#   s3://erplora-saas/downloads/app/
+#   ├── latest/
+#   │   ├── erplora-app-setup.exe   (Windows x64, instalador NSIS — SIN FIRMAR de momento)
+#   │   ├── erplora-app.msi         (Windows x64, MSI — SIN FIRMAR)
+#   │   ├── erplora-app.AppImage    (Linux x86_64, portable)
+#   │   ├── erplora-app.deb         (Linux x86_64, Debian/Ubuntu)
+#   │   └── latest.json             {"version","published_at"} — LO ÚNICO que dice qué hay aquí
+#   └── v{version}/...
+#
+# `latest.json` es la fuente de verdad de «la última versión publicada» (hub#400): el Cloud la lee
+# (`GET /api/v1/app/release/`) y la app instalada la compara con la suya. Sin él no hay canal de
+# actualización y la flota se queda huérfana — que es la razón por la que esto va ANTES de publicar
+# en Play (hub#308) y en Microsoft Store (hub#392).
+#
+# NO se construye aquí:
+#   - macOS  → build local (`cargo tauri build`); no hay cert Apple Developer ID (decisión 2026-06-22).
+#
+# Android SÍ se construye aquí (job `build-android`): ADR-0180 revierte el §3 de ADR-0160 y
+# devuelve el Tauri-Android a este workflow — Android es la MISMA app Tauri, bajo la identidad
+# única `com.erplora.app` (ADR-0160). ADR-0196 remata la dirección: muere la app Kotlin de
+# `ERPlora-Bridge-android`. Este workflow produce el AAB, lo sube a Object Storage y lo **publica
+# en Play** (job `publish-play`, hub#308) — gateado por `vars.PLAY_PACKAGE_NAME`, con la PRIMERA
+# subida manual como requisito de Google. Runbook: GOOGLE-PLAY.md.
+#
+# Firma Windows (ADR-0136, 2026-07-16): el canal PRINCIPAL de Windows es Microsoft Store —
+# MSIX sin firmar que la Store re-firma con su cert tras certificación (0€, sin SmartScreen,
+# updates gestionadas por la Store). Ver job `publish-store` + MICROSOFT-STORE.md.
+# El NSIS/MSI de S3 queda como canal secundario SIN FIRMAR (aviso SmartScreen); si algún día
+# hace falta firmarlo → Azure Artifact Signing (~10€/mes), decisión aplazada (lean).
+#
+# Almacenamiento: Hetzner Object Storage (S3-compatible, `fsn1.your-objectstorage.com`),
+# bucket `erplora-saas` (prefijo `downloads/`), prefijo `app/`. Sustituye a AWS S3/OIDC (AWS apagado).
+# Credenciales estáticas en secrets del repo:
+#   HETZNER_S3_ACCESS_KEY · HETZNER_S3_SECRET_KEY · HETZNER_S3_ENDPOINT
+# ==============================================================================
+
+name: Build Hub App (Tauri)
+
+on:
+  # Compilar la app es caro (Windows factura ×2). Antes corría en cada push a `main` que tocara
+  # apps/tauri, apps/web o crates → ~123 min/run, 13 runs/10d ≈ 1.595 min. Pre-lanzamiento nadie
+  # descarga `latest/` a diario, así que solo se construye al etiquetar una release o a mano.
+  push:
+    # SOLO la release final `vX.Y.Z`. Un tag `vX.Y.Z-rc.N` es el canal `canary` de la IMAGEN
+    # (build-hub.yml, hub#1170) y NO debe llegar a Microsoft Store / Google Play: ahí las versiones
+    # son monótonas e irreversibles, y una candidata puede no salir nunca.
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+    inputs:
+      # Un dispatch servía para DOS cosas incompatibles: refrescar `latest/` a mano y probar que el
+      # empaquetado sigue en pie. Lo segundo no debería publicar nada — `latest/latest.json` es la
+      # fuente de verdad de «la última versión publicada» que lee el Cloud (hub#400), y un run de
+      # prueba dejaba ahí los binarios de la rama que fuera. El default mantiene el comportamiento
+      # documentado; para probar, desmárcalo (`-f publish=false`).
+      publish:
+        description: "Subir los bundles a Object Storage (refresca `latest/`)"
+        type: boolean
+        default: true
+
+# Un push/tag nuevo cancela el build en curso del mismo ref: no apilar builds completos.
+concurrency:
+  group: tauri-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# 🔴 `dl.google.com` responde **404 a `ci-runner-1` por IPv6** — a TODA ruta de ese host, no solo
+# a un fichero (comprobado en la máquina: `curl -6` → 404, `curl -4` → 206, para el mismo URL).
+# Node resuelve AAAA primero (`verbatim` desde v17), así que toda acción JS que descargue de
+# Google coge la carretera rota: `Setup Android SDK` murió con `HTTPError: Unexpected HTTP
+# response: 404` bajando unas command line tools QUE EXISTEN (hub#878). Los runners de GitHub no
+# tienen IPv6, por eso allí nunca pudo pasar — el clásico «el runner propio no trae lo mismo»,
+# solo que esta vez traía de MÁS.
+#
+# Esto le da la vuelta al orden de resolución para los procesos Node que NO lanzamos nosotros (las
+# propias acciones). En Windows y macOS es un no-op: sin IPv6 no hay nada que reordenar.
+env:
+  NODE_OPTIONS: --dns-result-order=ipv4first
+
+jobs:
+
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux es el ÚNICO de los tres que puede salir del presupuesto de Actions:
+          # `ci-runner-1` es una máquina Linux. Windows y macOS se quedan donde están porque no
+          # hay dónde llevarlos — Hetzner no ofrece imágenes Windows y macOS exige hardware
+          # Apple. No es una decisión de coste: es que no existe la alternativa.
+          - os: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
+            label: linux
+          - os: windows-latest
+            label: windows
+          # macOS faltaba en la matriz: la app de Mac no se construía en CI en absoluto, solo a
+          # mano. `macos-latest` es Apple Silicon; el .dmg sale SIN NOTARIZAR mientras no haya
+          # certificado de Apple, así que Gatekeeper pedirá botón derecho → Abrir la primera vez.
+          - os: macos-latest
+            label: macos
+    steps:
+      - uses: actions/checkout@v4
+
+      # Dependencias de sistema de Tauri en Linux (webkit2gtk, appindicator, rsvg, patchelf…).
+      #
+      # ⚠️ La condición mira la ETIQUETA, no `matrix.os`. Desde que Linux sale al runner propio
+      # (#848) `matrix.os` vale `self-hosted`, así que `== 'ubuntu-latest'` era falso y este paso
+      # se saltaba entero: el bundle de Linux se quedaba sin `librsvg2-dev`, `libappindicator3-dev`
+      # ni `patchelf`, y fallaba al empaquetar. `matrix.label` no depende de dónde corra.
+      #
+      # Las dos últimas NO son para compilar: son para EMPAQUETAR el AppImage, y son cosas que el
+      # bundler coge DE LA MÁQUINA (por eso no hay dependencia de proyecto que las sustituya):
+      #   · `xdg-utils` → `/usr/bin/xdg-mime` y `/usr/bin/xdg-open`, que tauri-bundler COPIA dentro
+      #     del AppDir (xdg-mime porque la app declara el esquema `erplora://`; xdg-open porque
+      #     `bundleXdgOpen` va por defecto). Sin ellos: «xdg-mime binary not found» — después de
+      #     compilar la release entera.
+      #   · `libgtk-3-bin` → `gtk-query-immodules-3.0`, con el que el plugin GTK de linuxdeploy
+      #     escribe `immodules.cache`… y justo después hace `sed -i` sobre ese fichero. El plugin
+      #     corre con `set -e`, así que si la herramienta falta, el `sed` se encuentra un fichero
+      #     que nadie escribió y se lleva por delante el paso entero.
+      # La imagen de GitHub trae las dos; un Ubuntu de Hetzner no. Guardado por
+      # `release_runner_assumptions.rs`, que además explica cuál rompe qué (hub#878).
+      # Through the apt-lock wrapper: on the shared runner another job may hold apt's lock, and on
+      # a tag that red lands in the middle of a release (infra#313).
+      - name: Install Linux build deps
+        if: matrix.label == 'linux'
+        run: |
+          bash scripts/ci/apt-lock-retry.sh sudo apt-get update
+          bash scripts/ci/apt-lock-retry.sh sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            build-essential \
+            file \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            xdg-utils \
+            libgtk-3-bin
+
+      # Aquí NO se construye ningún frontend, y eso no ha cambiado (hub#465): `tauri.conf.json`
+      # no tiene `beforeBuildCommand` —lo único que haría a tauri-action construir uno— porque
+      # `frontendDist` apunta al `shell-dist/` estático y commiteado (ADR-0154). Lo que sí hay
+      # ahora es el CLI de Tauri como dependencia del workspace; el porqué, en `Tauri CLI`.
+      # Guardado por scripts/pack-msix.test.sh: el día que vuelva un `beforeBuildCommand`, ese
+      # test exige que vuelva con él lo que haga falta para construir el front.
+      # `dtolnay/rust-toolchain` NO instala rustup: lo USA. En los runners de GitHub siempre está;
+      # en `ci-runner-1` es un fichero que el `Post` de `rust-cache` llegó a borrar (ver abajo).
+      - name: Bootstrap rustup (runner propio)
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v rustup >/dev/null 2>&1; then
+            echo "rustup ausente en este runner — instalándolo"
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --no-modify-path --default-toolchain none
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # 🔴 `cache-bin: false`: el paso `Post` de esta acción limpia `$CARGO_HOME/bin` y borra el
+      # `rustup` del runner propio, rompiendo el job SIGUIENTE. Explicación en `test-shell.yml`.
+      #
+      # 🔴 `save-if` apagado en el runner propio, y NO es una optimización tampoco. El mismo `Post`
+      # llama a `cleanRegistry`, que hace `rmRF` de TODO directorio de `~/.cargo/registry/src` que
+      # no sea del workspace. Este job y `build-android` corren A LA VEZ en `ci-runner-1` —dos
+      # ranuras, dos `_work`, UN `$HOME`— y el build de Android incluye como proyectos Gradle
+      # `:tauri-android`, `:tauri-plugin-deep-link`, `:tauri-plugin-notification` y
+      # `:tauri-plugin-opener`, que viven EXACTAMENTE ahí. Medido: este `Post` escribió
+      # «... Cleaning cargo registry ...» a las 13:29:24 y 41 s después Android moría en la fase de
+      # configuración con «No variants exist» para esos cuatro (hub#878) — un rojo que habla de
+      # variantes de Gradle y no menciona ni la caché ni el otro job.
+      # `save-if: false` corta ANTES de limpiar (`save.ts`), así que el restore sigue y en Windows
+      # y macOS —máquinas que mueren con el job— la caché se guarda igual que siempre.
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          cache-bin: false
+          save-if: ${{ runner.environment != 'self-hosted' }}
+
+      # En tag push, fija la versión del bundle a partir del tag (`v1.2.3` → `1.2.3`) para que la
+      # app reporte su versión. En main se queda con la de `tauri.conf.json` (build "latest").
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          node -e "const f='src-tauri/tauri.conf.json';const c=require('./'+f);c.version='${V}';require('fs').writeFileSync(f, JSON.stringify(c,null,2)+'\n');console.log('version →','${V}')"
+
+      # 🔴 El CLI de Tauri sale del WORKSPACE, no de un `npm install -g` (hub#878).
+      #
+      # `tauri-action` solo usa un gestor de paquetes si el proyecto DEPENDE del CLI
+      # (`getRunner()` → `hasDependency('@tauri-apps/cli', projectPath)`); si no, cae en
+      # `npm install -g @tauri-apps/cli@v2`. Eso escribe en `/usr/lib/node_modules`, que en un
+      # runner de GitHub es del usuario y en `ci-runner-1` es de root: el job de Linux de `v1.1.0`
+      # murió con `EACCES` antes de compilar una sola línea. El build dependía de un permiso de la
+      # máquina sin que nada lo dijera.
+      #
+      # `package.json` existe SOLO para esto: fija el CLI en el lockfile (versión
+      # exacta, misma en las tres plataformas — `npm i -g …@v2` compilaba cada release con lo que
+      # hubiera ese día) y lo instala dentro del workspace, donde siempre se puede escribir.
+      # `--filter @erplora/app` deja fuera las deps del web app: aquí no se construye front.
+      - name: Node 22 + pnpm (pinned by package.json `packageManager`)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Tauri CLI (dependencia del workspace, NO global)
+        run: pnpm install --frozen-lockfile --filter @erplora/app
+
+      # `tauriScript` es lo que le dice a la acción que el CLI ya está: sin él vuelve al
+      # `npm install -g` de arriba. Sin `tagName` solo compila (no crea release de GitHub);
+      # subimos a S3.
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: .
+          tauriScript: pnpm exec tauri
+
+      # Recoge los bundles (sus nombres llevan la versión; los renombramos a nombres estables que
+      # el Cloud sirve desde `latest/`). El target es el del workspace Cargo (raíz del repo).
+      - name: Stage artifacts
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p dist
+          # $1 = patrón de nombre, $2 = nombre estable de destino.
+          copy_one() {
+            local found
+            found=$(find . -path '*/release/bundle/*' -name "$1" 2>/dev/null | head -1)
+            if [ -n "$found" ]; then cp "$found" "dist/$2"; echo "  $found -> dist/$2"; fi
+          }
+          echo "Artefactos encontrados:"
+          copy_one '*.AppImage'  erplora-app.AppImage
+          copy_one '*.deb'       erplora-app.deb
+          copy_one '*-setup.exe' erplora-app-setup.exe
+          copy_one '*.msi'       erplora-app.msi
+          copy_one '*.dmg'       erplora-app.dmg
+          echo "--- dist/ ---"; ls -la dist/
+
+      # `retention-days` NO es cosmética: sin ella el artefacto vive el máximo del repo (90 días) y
+      # el release de `v1.1.8` murió por eso — «Artifact storage quota has been hit», con Windows
+      # subido y Android/Linux fuera, o sea media release publicada y `latest.json` sin actualizar.
+      # Estos bundles son intermedios: su único consumidor es `upload-s3`, en ESTE mismo run. Su
+      # sitio permanente es Object Storage, no la cuota de Actions. 3 días deja margen para bajar
+      # uno a mano y depurar sin volver a acumular 8 GB (app-linux solo eran 5,5 GB en 54 copias).
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-${{ matrix.label }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 3
+
+      # ------------------------------------------------------------------------------
+      # Canal Microsoft Store (ADR-0136): MSIX SIN FIRMAR (la Store re-firma tras la
+      # certificación → sin comprar cert Authenticode). Post-build puro sobre el exe que
+      # este mismo job acaba de compilar (no duplica el build Windows, que factura ×2).
+      # Gate: solo si el repo tiene la identidad de Partner Center en Variables
+      # (MSIX_IDENTITY_NAME · MSIX_PUBLISHER · MSIX_PUBLISHER_DISPLAY) — hasta que Ioan
+      # reserve «ERPlora» en Partner Center, estos pasos se saltan en silencio.
+      # Runbook completo: MICROSOFT-STORE.md
+      # ------------------------------------------------------------------------------
+      - name: Install winapp CLI
+        if: matrix.os == 'windows-latest' && vars.MSIX_IDENTITY_NAME != ''
+        run: winget install microsoft.winappcli --source winget --accept-source-agreements --accept-package-agreements --disable-interactivity
+
+      - name: Pack MSIX (Store, unsigned)
+        if: matrix.os == 'windows-latest' && vars.MSIX_IDENTITY_NAME != ''
+        shell: pwsh
+        run: |
+          $v = if ('${{ github.ref }}'.StartsWith('refs/tags/v')) { '${{ github.ref_name }}' } else {
+            (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
+          }
+          pwsh scripts/pack-msix.ps1 -Version $v `
+            -IdentityName '${{ vars.MSIX_IDENTITY_NAME }}' `
+            -Publisher '${{ vars.MSIX_PUBLISHER }}' `
+            -PublisherDisplay '${{ vars.MSIX_PUBLISHER_DISPLAY }}' `
+            -OutDir dist-msix
+
+      - name: Upload MSIX artifact
+        if: matrix.os == 'windows-latest' && vars.MSIX_IDENTITY_NAME != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-msix
+          path: dist-msix/erplora-app.msix
+          if-no-files-found: error
+          retention-days: 3
+
+  # Publica el MSIX en Microsoft Store vía msstore CLI (solo productos GRATUITOS, que es
+  # nuestro caso: app gratis + suscripción/módulos en erplora.com). Requisitos previos
+  # (manuales, una vez): app publicada y LIVE en Partner Center + app Entra con rol Manager.
+  # Gate por Variable MICROSOFT_STORE_PRODUCT_ID (vacía = job saltado). Solo en tag v*:
+  # cada release etiquetada pasa la certificación de Microsoft (horas–3 días) y la Store
+  # entrega la actualización sola a las instalaciones existentes.
+  publish-store:
+    name: Publish to Microsoft Store
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') && vars.MICROSOFT_STORE_PRODUCT_ID != ''
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Download MSIX
+        uses: actions/download-artifact@v4
+        with:
+          name: app-msix
+          path: artifacts
+
+      - name: Configure Microsoft Store CLI
+        uses: microsoft/microsoft-store-apppublisher@v1.1
+
+      - name: Authenticate with Partner Center
+        shell: pwsh
+        run: |
+          msstore reconfigure `
+            --tenantId "${{ secrets.AZURE_AD_TENANT_ID }}" `
+            --sellerId "${{ secrets.SELLER_ID }}" `
+            --clientId "${{ secrets.AZURE_AD_APPLICATION_CLIENT_ID }}" `
+            --clientSecret "${{ secrets.AZURE_AD_APPLICATION_SECRET }}"
+
+      - name: Publish MSIX
+        shell: pwsh
+        run: msstore publish "${{ github.workspace }}/artifacts/erplora-app.msix" -id "${{ vars.MICROSOFT_STORE_PRODUCT_ID }}"
+
+  # ------------------------------------------------------------------------------
+  # Android — la MISMA app Tauri, no una app aparte (deroga el §2 de ADR-0159, que
+  # daba Android por la app Kotlin: el Bluetooth SPP que era su única ventaja real
+  # se retiró, y las impresoras de red cubren el norte). Identidad única
+  # `com.erplora.app` (ADR-0160).
+  #
+  # Requiere `gen/android` commiteado: ahí vive el AndroidManifest con los permisos
+  # de red local y notificaciones, y regenerarlo los borraría.
+  # ------------------------------------------------------------------------------
+  build-android:
+    name: Build android
+    # Android es Linux: sale del presupuesto igual que el resto. Ojo con lo que este job da por
+    # supuesto de la imagen — el `node -e` de más abajo usa «el Node preinstalado del runner»
+    # (declarado a propósito, hub#465). `ci-runner-1` lo trae instalado a nivel de sistema por eso.
+    runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # No pnpm/Node setup here either (hub#465): the Android build is Rust + Kotlin, its CLI
+      # comes from `cargo install tauri-cli` below, and nothing bundles a frontend. See the
+      # matrix job above for the full reasoning.
+      # El módulo Kotlin del plugin compila con jvmTarget 17.
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # Este paso baja las command line tools de `dl.google.com` y es EL que se cayó en `v1.1.0`
+      # con un 404 — no porque la versión estuviera retirada (el zip sigue ahí; `curl -4` lo trae),
+      # sino porque desde `ci-runner-1` ese host contesta 404 por IPv6 y Node lo prefiere. La
+      # vuelta a IPv4 está en el `env` del workflow, arriba, porque no es cosa de este paso: es de
+      # la máquina, y le pasa a cualquier acción JS que descargue de Google (hub#878).
+      # Sin `cmdline-tools-version`: el default de la acción es correcto y clavarlo aquí habría
+      # sido tratar el síntoma.
+      # Only `platform-tools`: the action's default is `tools platform-tools`, and Google
+      # retired the legacy `tools` package on 2026-09-16 — `sdkmanager` exits 1 on it and
+      # takes the job down with it (hub#1881). Nothing here ever used `tools`.
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install NDK
+        run: |
+          sdkmanager --install "ndk;27.1.12297006" "platforms;android-36" "build-tools;36.0.0"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.1.12297006" >> "$GITHUB_ENV"
+
+      # Mismo motivo que en el job de escritorio: la acción de abajo USA rustup, no lo instala.
+      - name: Bootstrap rustup (runner propio)
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v rustup >/dev/null 2>&1; then
+            echo "rustup ausente en este runner — instalándolo"
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --no-modify-path --default-toolchain none
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      # 🔴 `cache-bin: false`: ver `test-shell.yml`. Aquí además el job hace
+      # `cargo install tauri-cli`, que escribe justo en `$CARGO_HOME/bin`.
+      # 🔴 `save-if` apagado en el runner propio: este job es la VÍCTIMA del `cleanRegistry` del
+      # job de escritorio (explicación completa allí), pero el suyo hace lo mismo al terminar —y
+      # el de escritorio dura menos, así que sería su verdugo en el orden contrario.
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          cache-bin: false
+          save-if: ${{ runner.environment != 'self-hosted' }}
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          node -e "const f='src-tauri/tauri.conf.json';const c=require('./'+f);c.version='${V}';require('fs').writeFileSync(f, JSON.stringify(c,null,2)+'\n');console.log('version →','${V}')"
+
+      # MISMA keystore y alias `erplora` que la app Kotlin (ADR-0053): sin eso, una instalación
+      # existente NO puede actualizarse por encima — Android rechaza el cambio de firma.
+      - name: Keystore
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          cd src-tauri/gen/android
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > erplora.keystore
+          {
+            echo "storeFile=$(pwd)/erplora.keystore"
+            echo "keyAlias=erplora"
+            echo "password=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
+          } > keystore.properties
+
+      # `ERPLORA_DISTRIBUTION=play` marca el binario como «me distribuye Play» (hub#757): con eso
+      # el shell deja de ofrecer la descarga del APK, que es lo que Google prohíbe a una app que
+      # ella misma reparte. Se hornea aquí porque el AAB es su propio build y solo va a Play; el
+      # `.exe`, el `.msi` y Linux no llevan la marca y conservan su aviso, que es lo correcto:
+      # a esos nadie los actualiza por ellos.
+      - name: Build APK + AAB
+        env:
+          ERPLORA_DISTRIBUTION: play
+        run: cargo tauri android build --apk --aab
+
+      # DESPUÉS del build a propósito: `tauri.settings.gradle` —que es quien incluye el módulo del
+      # plugin— lo GENERA el propio build y no está en git. Correrlo antes falla con «Could not
+      # read script tauri.settings.gradle as it does not exist». Y no vale generarlo con
+      # `android init`: eso reescribe `AndroidManifest.xml` y se llevaría por delante los permisos.
+      #
+      # Estos tests son donde vive la lógica de qué se pide en cada nivel de API, y cazan las dos
+      # trampas que dejan el `invoke` colgado para siempre: pedir fuera de la fontanería de Tauri,
+      # y un permiso ausente de la anotación.
+      - name: Kotlin unit tests (plugin de permisos)
+        working-directory: src-tauri/gen/android
+        run: ./gradlew :tauri-plugin-erplora-android:testDebugUnitTest
+
+      # `versionCode` es puerta de UN SOLO SENTIDO en Play: publicado uno, ese número queda
+      # quemado para siempre. Se comprueba contra la fórmula de ADR-0160 en el artefacto REAL,
+      # no en la config — que es donde de verdad importa.
+      - name: Verificar identidad y versionCode
+        run: |
+          set -euo pipefail
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt2 | sort | tail -1)
+          APK=$(find . -name '*.apk' -path '*release*' | head -1)
+          echo "APK: $APK"
+          BADGING=$("$AAPT" dump badging "$APK")
+          echo "$BADGING" | head -3
+          echo "$BADGING" | grep -q "package: name='com.erplora.app'" \
+            || { echo "::error::identidad equivocada (ADR-0160 exige com.erplora.app)"; exit 1; }
+          VN=$(echo "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
+          VC=$(echo "$BADGING" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")
+          ESPERADO=$(echo "$VN" | awk -F. '{print $1*1000000 + $2*1000 + $3}')
+          echo "versionName=$VN versionCode=$VC esperado=$ESPERADO"
+          [ "$VC" = "$ESPERADO" ] \
+            || { echo "::error::versionCode $VC != $ESPERADO (fórmula de ADR-0160)"; exit 1; }
+
+      # Los permisos, LEÍDOS DEL APK (hub#337). Es el único sitio donde existe el manifest
+      # FUSIONADO: los tests de Rust comprueban los dos ficheros fuente —el del proyecto generado
+      # `gen/android` y el del módulo Android del plugin, que es la copia que `cargo tauri android
+      # init` no puede llevarse—, pero que el manifest merger los junte de verdad solo se ve aquí.
+      #
+      # Sin ACCESS_LOCAL_NETWORK, Android bloquea la LAN POR DEBAJO de la API: el barrido del 9100
+      # son timeouts, no errores. Se instala, arranca y no encuentra una impresora encendida — y
+      # nadie lo reporta. Por eso se comprueba en el artefacto que se publica, no en la config.
+      - name: Verificar permisos de hardware en el APK
+        run: |
+          set -euo pipefail
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt2 | sort | tail -1)
+          APK=$(find . -name '*.apk' -path '*release*' | head -1)
+          PERMISOS=$("$AAPT" dump permissions "$APK")
+          echo "$PERMISOS"
+          for P in android.permission.INTERNET \
+                   android.permission.ACCESS_NETWORK_STATE \
+                   android.permission.CHANGE_WIFI_MULTICAST_STATE \
+                   android.permission.ACCESS_LOCAL_NETWORK \
+                   android.permission.POST_NOTIFICATIONS \
+                   android.permission.BLUETOOTH_CONNECT \
+                   android.permission.NFC \
+                   android.permission.FOREGROUND_SERVICE \
+                   android.permission.FOREGROUND_SERVICE_SPECIAL_USE \
+                   android.permission.ACCESS_FINE_LOCATION \
+                   android.permission.ACCESS_COARSE_LOCATION; do
+            echo "$PERMISOS" | grep -q "name='$P'" \
+              || { echo "::error::el APK NO declara $P — el hardware moriría EN SILENCIO (hub#337)"; exit 1; }
+          done
+          # 🔴 El permiso NFC arrastra un requisito IMPLÍCITO de `android.hardware.nfc` (hub#988):
+          # Play esconde la app de todo dispositivo sin chip —las tablets baratas de mostrador, que
+          # son justo las que no tienen lector USB— salvo que el manifest diga que es opcional. Solo
+          # el manifest FUSIONADO lo sabe, y `dump badging` es quien lo lee. Un `uses-feature` que
+          # se cuele como obligatorio no rompe nada: adelgaza la ficha de la tienda en silencio.
+          #
+          # El ` ?` del patrón NO es descuido: aapt1 imprime `uses-feature-not-required:name=` y
+          # aapt2 mete un espacio tras los dos puntos. Sin él, este control pasaría siempre —
+          # comprobado contra dos APKs de prueba, uno con `required="false"` y otro con `"true"`,
+          # porque un guard que nunca caza nada es peor que no tenerlo.
+          BADGING=$("$AAPT" dump badging "$APK")
+          echo "$BADGING" | grep -qE "uses-feature-not-required: ?name='android.hardware.nfc'" \
+            || { echo "::error::el APK EXIGE android.hardware.nfc — Play lo ocultaría de las tablets sin chip (hub#988)"; echo "$BADGING" | grep -i nfc; exit 1; }
+          # Same risk with location (hub#2552): ACCESS_COARSE/FINE_LOCATION imply
+          # `android.hardware.location` WHATEVER the targetSdk (only `.gps`/`.network` depend on
+          # it). The till does not need it; only a module such as `attendance` asks for a position.
+          echo "$BADGING" | grep -qE "uses-feature-not-required: ?name='android.hardware.location'" \
+            || { echo "::error::the APK REQUIRES android.hardware.location — Play would hide it from devices without location hardware (hub#2552)"; echo "$BADGING" | grep -i location; exit 1; }
+
+      - name: Stage artifacts
+        run: |
+          mkdir -p dist
+          find . -name '*.aab' -path '*release*' -exec cp {} dist/erplora-app.aab \;
+          find . -name '*.apk' -path '*release*' -exec cp {} dist/erplora-app.apk \;
+          ls -la dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-android
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 3
+
+  # Publica el AAB en Google Play (hub#308). Gemelo de `publish-store`: consume el artefacto que
+  # `build-android` acaba de subir — **no reconstruye nada** — y solo corre en tag `v*`.
+  #
+  # ⚠️ La PRIMERA subida de cada app es MANUAL, por requisito de Google: es la que registra la
+  # upload key y activa Play App Signing. Este job no la sustituye; empieza a servir DESPUÉS, para
+  # que cada release etiquetada llegue sola a la pista.
+  #
+  # Gate por Variable `PLAY_PACKAGE_NAME` (vacía = job saltado, igual que el de Microsoft). Ponerla
+  # ANTES de esa primera subida manual haría fallar el job en el primer tag: la API rechaza un
+  # paquete que aún no existe en la consola.
+  #
+  # `PLAY_TRACK` decide la pista y su default es `internal` a propósito — la promoción a producción
+  # se hace a mano en la consola mientras no haya confianza. Y hay una razón dura además de esa:
+  # este paso sube con `status: completed`, o sea **rollout al 100% de golpe**. Poner
+  # `PLAY_TRACK=production` creyendo que se remata la automatización mandaría cada tag, sin probar,
+  # a TODAS las cajas a la vez — en un TPV eso no es un despliegue, es un incidente. Automatizar la
+  # promoción exige antes un rollout escalonado (`status: inProgress` + `userFraction`), y mientras
+  # ese cableado no exista la Variable se queda como está.
+  #
+  # 🔴 `changesNotSentForReview: false` desde el 2026-08-19, y esto es lo contrario de lo que decía
+  # aquí antes. El argumento viejo era que mandar a revisión «decide por el humano»; lo que decide
+  # de verdad `true` es NO mandar: el AAB se sube y el cambio se queda en «Changes not yet
+  # submitted for review» esperando un clic que nadie sabe que tiene pendiente. Pasó con la primera
+  # ficha: 14 cambios guardados el 14/08 seguían sin enviarse el 19/08, `Submission activity` vacío
+  # y la app en `Draft` como `com.erplora.app (unreviewed)`, mientras cada tag salía verde. Un
+  # canal cuyo último paso es humano no está automatizado; y el peor de los dos fallos es el que
+  # PARECE que publicó. Guardado por `release_gate.rs`.
+  #
+  # La service account NO necesita roles IAM en GCP: los permisos se conceden invitándola en Play
+  # Console sobre esta app, con «Release to testing tracks» y nada más.
+  publish-play:
+    name: Publish to Google Play
+    needs: build-android
+    if: startsWith(github.ref, 'refs/tags/v') && vars.PLAY_PACKAGE_NAME != ''
+    # `jarsigner` (JDK) es lo que este job necesita de la imagen y no instala: en `ci-runner-1`
+    # va el JDK 17 del sistema, el mismo major que compila el módulo Kotlin del plugin.
+    runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    steps:
+      # Only for the preflight script below: this job builds nothing.
+      - uses: actions/checkout@v4
+
+      # Each tag SENDS the app to review (`changesNotSentForReview: false` below), so the account
+      # Google reviews with has to work BEFORE anything is uploaded (hub#1888). The control signs
+      # in as the reviewer and demands a living hub with modules (hub#1718: on 09/09 the reviewer
+      # landed on the signup screen, then on an empty hub). No `if:` and no `continue-on-error` on
+      # purpose: missing configuration is red `missing_credentials` naming the variables, never a
+      # silent skip. Contract: `scripts/tests/play-reviewer-preflight-on-publish.test.sh`.
+      - name: Google's reviewer account signs in and lands on a living hub
+        env:
+          PLAY_REVIEWER_EMAIL: ${{ vars.PLAY_REVIEWER_EMAIL }}
+          PLAY_REVIEWER_HUB: ${{ vars.PLAY_REVIEWER_HUB }}
+          PLAY_REVIEWER_PASSWORD: ${{ secrets.PLAY_REVIEWER_PASSWORD }}
+        run: python3 scripts/ci/play-reviewer-preflight.py
+
+      - name: Download AAB
+        uses: actions/download-artifact@v4
+        with:
+          name: app-android
+          path: artifacts
+
+      # El AAB que se sube tiene que ser EL del build, firmado con la keystore de ADR-0053. Si el
+      # `Keystore` de arriba se saltó (secret ausente), aquí llegaría uno sin firmar y Play lo
+      # rechazaría con un error que no dice eso — mejor pararlo aquí, nombrando la causa.
+      - name: Verificar que el AAB va firmado
+        run: |
+          set -euo pipefail
+          AAB=artifacts/erplora-app.aab
+          [ -f "$AAB" ] || { echo "::error::no hay $AAB en el artefacto app-android"; exit 1; }
+          jarsigner -verify "$AAB" | grep -q "jar verified" \
+            || { echo "::error::el AAB NO está firmado — ¿faltó ANDROID_KEYSTORE_BASE64 en el build?"; exit 1; }
+          echo "AAB firmado ✓"
+
+      - name: Publish to Google Play
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ vars.PLAY_PACKAGE_NAME }}
+          releaseFiles: artifacts/erplora-app.aab
+          track: ${{ vars.PLAY_TRACK || 'internal' }}
+          status: completed
+          changesNotSentForReview: false
+
+  upload-s3:
+    name: Upload to Object Storage
+    # También el AAB/APK: si no, la app de Android se construye y se queda en los artifacts del
+    # run, sin llegar nunca a la página de descargas.
+    needs: [build, build-android]
+    # tag v* → sube a v{version}/ + latest/ ; dispatch manual → refresca latest/ salvo que se pida
+    # lo contrario con `publish: false` (probar el empaquetado sin tocar el canal de descargas).
+    # En un tag el input no existe, así que la release publica siempre.
+    #
+    # ⚠️ Se compara contra el booleano Y contra la cadena a propósito. `gh workflow run -f
+    # publish=false` manda `"false"`, y una cadena no vacía es CIERTA en una expresión de Actions:
+    # un `&& inputs.publish` a secas publicaría precisamente en el run con el que uno intenta NO
+    # publicar. Aquí el fallo silencioso sería sobrescribir `latest/` con una build de prueba.
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish != false && inputs.publish != 'false')
+    # De la imagen usa `aws` (CLI v2) y el `node -p` que lee la versión de `tauri.conf.json`;
+    # ninguno de los dos lo instala este job. `ci-runner-1` trae ambos a nivel de sistema.
+    runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
+    # Un `aws s3 cp` colgado (red/endpoint) no debe quedarse horas ocupando el run: mejor fallar
+    # rápido y re-lanzar solo este job (`gh run rerun --failed`, los artifacts persisten). Visto
+    # 2026-07-09: el upload del run de #82 se quedó colgado 15 min hasta que el run se canceló.
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.HETZNER_S3_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.HETZNER_S3_SECRET_KEY }}
+      AWS_DEFAULT_REGION: fsn1
+      S3_ENDPOINT: ${{ secrets.HETZNER_S3_ENDPOINT }}
+    steps:
+      # Solo para leer `tauri.conf.json`: en un dispatch manual la versión publicada es la del
+      # fichero (no hay tag del que sacarla) y el manifiesto tiene que decir la verdad.
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Upload to Hetzner Object Storage
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${{ github.ref_name }}"
+          else
+            VERSION="latest"
+          fi
+
+          FILES="erplora-app-setup.exe erplora-app.msi erplora-app.AppImage erplora-app.deb erplora-app.dmg erplora-app.apk"
+          for f in $FILES; do
+            if [ -f "artifacts/$f" ]; then
+              aws s3 cp "artifacts/$f" "s3://erplora-saas/downloads/app/${VERSION}/$f" \
+                --endpoint-url "$S3_ENDPOINT"
+            fi
+          done
+
+          # ── El manifiesto de versión (hub#400) ──────────────────────────────────────────────
+          # Un instalador NO dice qué versión es: el nombre del fichero es fijo (`latest/` los
+          # sobrescribe) y leer un .exe o un .deb para averiguarlo no es algo que el Cloud pueda
+          # hacer. Sin este JSON no hay NADA contra lo que la app instalada compare su versión, y
+          # cada TPV se queda en `unknown` para siempre — que es exactamente lo que hace un TPV sano
+          # sin noticias, así que el canal roto no se distingue del canal sano.
+          #
+          # Se escribe en el MISMO paso que sube los instaladores, a propósito: así el manifiesto y
+          # los binarios de `latest/` no pueden discrepar sobre qué hay ahí.
+          # `version` va SIN la `v` del tag, para que sea idéntica a la de `tauri.conf.json` — que
+          # es la que `plugin:app|version` devuelve en el dispositivo.
+          if [[ "$VERSION" == "latest" ]]; then
+            APP_VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          else
+            APP_VERSION="${VERSION#v}"
+          fi
+          printf '{"version":"%s","published_at":"%s"}\n' \
+            "$APP_VERSION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > latest.json
+          cat latest.json
+          aws s3 cp latest.json "s3://erplora-saas/downloads/app/${VERSION}/latest.json" \
+            --endpoint-url "$S3_ENDPOINT" --content-type application/json
+
+          # En tag push, además refresca latest/.
+          if [[ "$VERSION" != "latest" ]]; then
+            for f in $FILES; do
+              aws s3 cp "s3://erplora-saas/downloads/app/${VERSION}/$f" \
+                "s3://erplora-saas/downloads/app/latest/$f" \
+                --endpoint-url "$S3_ENDPOINT" 2>/dev/null || true
+            done
+            # El manifiesto NO lleva `|| true`: si `latest/` conserva el número anterior, la flota
+            # entera se pasa el día ofreciendo una actualización que ya tiene instalada.
+            aws s3 cp latest.json "s3://erplora-saas/downloads/app/latest/latest.json" \
+              --endpoint-url "$S3_ENDPOINT" --content-type application/json
+          fi
+
+          echo "Subido a s3://erplora-saas/downloads/app/${VERSION}/ (Hetzner Object Storage)"
+
+  # ------------------------------------------------------------------------------
+  # Release gate (hub#895) — «tag verde» tiene que volver a significar «publicado».
+  #
+  # Cada job de publicación está gateado por una Variable del repo, y una Variable vacía
+  # deja el job en `skipped`. Un job saltado NO colorea el run: tres tags seguidos (el
+  # último v1.0.3, hub#839) terminaron EN VERDE sin publicar nada, y desde fuera el run
+  # que lo subió todo y el que no subió nada eran idénticos.
+  #
+  # Este job es el último y mira el resultado de TODOS los demás:
+  #   · canal publicado                          → bien
+  #   · canal saltado con su Variable vacía      → ROJO, nombrando la Variable
+  #   · canal DECLARADO pendiente                → verde, pero dicho en voz alta
+  #   · canal en failure/cancelled               → ROJO (declarar excusa un skip, nunca un fallo)
+  #   · canal OBLIGATORIO (sin Variable que lo gatee) → no se puede declarar pendiente
+  #
+  # Declarar un canal = Variable `RELEASE_CHANNELS_PENDING` (lista separada por comas:
+  # `store`, `play`). Es la diferencia entre «sabemos que Play aún no está enchufado» y
+  # «nadie se dio cuenta». Hoy: MICROSOFT_STORE_PRODUCT_ID se retiró a propósito y la
+  # decisión de restaurarla es de Ioan (hub#392); PLAY_PACKAGE_NAME espera la primera
+  # subida manual que exige Google (hub#308). Mientras esas dos sigan así, la Variable
+  # debe valer `store,play` — y el run lo dirá en cada tag con un warning, que es
+  # exactamente lo que se pedía: hacer VISIBLE el estado, no ocultarlo.
+  #
+  # `upload-s3` NO lleva Variable: es obligatorio. Es quien escribe `latest.json`, lo
+  # único contra lo que la app instalada compara su versión (hub#400); sin él la flota
+  # se queda sin canal de actualización.
+  #
+  # La decisión vive en `scripts/release-gate.sh` porque ahí SÍ se puede probar
+  # (`scripts/release-gate.test.sh`, 25 casos): dentro del YAML solo se ejecutaría en un
+  # tag, que no se puede re-lanzar. El cableado —`always()`, `needs` completo, y que el
+  # resultado de cada job llegue de verdad al script— lo guarda
+  # `src-tauri/tests/release_gate.rs`.
+  # ------------------------------------------------------------------------------
+  release-gate:
+    name: Release gate
+    # TODOS los jobs: los de publicación porque son lo que se juzga, y los de build porque
+    # un build en rojo salta a los de publicación y el gate tiene que señalar la causa real
+    # en vez de mandar a nadie a buscar una Variable que está perfectamente puesta.
+    needs: [build, build-android, publish-store, publish-play, upload-s3]
+    # `always()` es el fondo del asunto: sin él, el gate hereda «solo si todos los `needs`
+    # fueron success» y los jobs saltados lo saltarían a él también — la guarda desaparecería
+    # justo en la situación para la que se escribió. Solo en tags: un dispatch manual puede
+    # no publicar nada a propósito (`-f publish=false`).
+    if: always() && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check that every expected channel actually published
+        shell: bash
+        env:
+          RELEASE_CHANNELS_PENDING: ${{ vars.RELEASE_CHANNELS_PENDING }}
+          # id | nombre | resultado del job | Variable que lo gatea | ¿puesta? | referencia
+          # Sin Variable que lo gatee = canal OBLIGATORIO (no se puede declarar pendiente).
+          CHANNELS: |
+            store|Microsoft Store|${{ needs.publish-store.result }}|MICROSOFT_STORE_PRODUCT_ID|${{ vars.MICROSOFT_STORE_PRODUCT_ID != '' }}|hub#392
+            play|Google Play|${{ needs.publish-play.result }}|PLAY_PACKAGE_NAME|${{ vars.PLAY_PACKAGE_NAME != '' }}|hub#308
+            s3|Object Storage (latest.json)|${{ needs.upload-s3.result }}|||hub#400
+          # id | nombre | resultado del job
+          BUILDS: |
+            build|Desktop bundles (linux/windows/macos)|${{ needs.build.result }}
+            build-android|Android AAB + APK|${{ needs.build-android.result }}
+        run: ./scripts/release-gate.sh

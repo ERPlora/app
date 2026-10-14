@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-device-context"
+description = "Enables the device_context command without any pre-configured scope."
+commands.allow = ["device_context"]
+
+[[permission]]
+identifier = "deny-device-context"
+description = "Denies the device_context command without any pre-configured scope."
+commands.deny = ["device_context"]

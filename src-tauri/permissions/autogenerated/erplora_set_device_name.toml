@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-erplora-set-device-name"
+description = "Enables the erplora_set_device_name command without any pre-configured scope."
+commands.allow = ["erplora_set_device_name"]
+
+[[permission]]
+identifier = "deny-erplora-set-device-name"
+description = "Denies the erplora_set_device_name command without any pre-configured scope."
+commands.deny = ["erplora_set_device_name"]
