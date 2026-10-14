@@ -465,12 +465,23 @@ mod tests {
         }
     }
 
-    /// La política se **respeta**: con `max_attempts: 1` no hay reintento. Fijarlo evita que un
-    /// bucle mal contado convierta un solo intento en tres (o al revés, que el default de 3 se
-    /// quede en uno y la recuperación de arriba deje de existir).
+    /// The policy is **honoured**: with `max_attempts: 1` there is no retry. Pinning it stops a
+    /// miscounted loop from turning one attempt into three (or the default of 3 into one, which
+    /// would remove the recovery tested above).
+    ///
+    /// Measured against the backoff, not against a fixed 10 ms: a retry is only visible as the
+    /// backoff it waits. On Windows a refused loopback connect is not instant (the stack retries
+    /// the SYN), so the single attempt alone took 1.004 s there — ERPlora/app run 38564104951, the
+    /// first time this crate ran on Windows. A long backoff keeps the test about the retry, not
+    /// about how fast each OS says «refused».
     #[tokio::test]
     async fn a_single_attempt_policy_does_not_retry() {
-        let queue = Arc::new(PrintQueue::new(fast_policy(1)));
+        let policy = RetryPolicy {
+            backoff_ms: 10_000,
+            ..fast_policy(1)
+        };
+        let backoff = Duration::from_millis(policy.backoff_ms);
+        let queue = Arc::new(PrintQueue::new(policy));
         let started = std::time::Instant::now();
         let outcome = queue
             .process(job(unreachable_target(), b"one shot"))
@@ -478,8 +489,8 @@ mod tests {
 
         assert!(matches!(outcome, JobOutcome::Failed { .. }));
         assert!(
-            started.elapsed() < Duration::from_millis(10),
-            "con un solo intento no se espera ningún backoff (tardó {:?})",
+            started.elapsed() < backoff,
+            "a single attempt must not wait any backoff (took {:?}, backoff {backoff:?})",
             started.elapsed()
         );
     }
@@ -543,7 +554,17 @@ mod tests {
     /// **A printer that accepts and then wedges cannot hold the worker either.** The write gets
     /// its own deadline: a payload bigger than the socket buffers against a peer that never
     /// reads would otherwise block `write_all` until TCP retransmission gives up (minutes).
+    ///
+    /// Not on Windows: there the premise does not hold. Winsock takes the whole 16 MiB of a
+    /// non-blocking send into its own buffers while the peer reads nothing, so `write_all` returns
+    /// `Ok` and no stall exists for the deadline to cut (ERPlora/app run 38564104951, the first time
+    /// this crate ran on Windows: `got Ok(())`). The deadline is the same code on every OS
+    /// (`tokio::time::timeout` around the write) and Linux and macOS still exercise it.
     #[tokio::test]
+    #[cfg_attr(
+        windows,
+        ignore = "Winsock buffers the whole payload of a non-blocking send: the write never stalls"
+    )]
     async fn send_once_gives_up_on_a_printer_that_accepts_but_never_reads() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
