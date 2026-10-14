@@ -20,7 +20,7 @@
 #   · a MANDATORY channel (no gating Variable)  → can never be declared pending
 #
 # Declaring a channel is the repository Variable `RELEASE_CHANNELS_PENDING`, a
-# comma-separated list of channel ids (`store`, `play`). It is the difference
+# comma-separated list of channel ids (`store`, `play`, `s3`). It is the difference
 # between "we know Play is not wired yet" and "nobody noticed". Anything in it
 # that is not an optional channel of this workflow is itself an error: a guard
 # that does not validate its payload fails open, which is the failure mode this

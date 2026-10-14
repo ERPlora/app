@@ -239,7 +239,7 @@ jobs:
       # which die with the job — still save. The cache key carries the OS, so the three systems
       # never share an entry.
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
           save-if: ${{ runner.environment != 'self-hosted' }}
@@ -271,7 +271,7 @@ jobs:
       # takes the job down with it (hub#1881). Nothing here ever used `tools`.
       - name: Setup Android SDK
         if: matrix.label == 'linux'
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
         with:
           packages: platform-tools
 

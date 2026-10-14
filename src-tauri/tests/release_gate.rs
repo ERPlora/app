@@ -247,18 +247,31 @@ fn the_tag_is_created_only_after_the_gate_passes() {
         "`{TAG_JOB}` needs `always()`: a pending (skipped) store job upstream would otherwise \
          skip it and no released version would ever be tagged"
     );
+    // The release is opened earlier, as a DRAFT, by `collect` (before any channel publishes: the
+    // mark that publication started). A draft has no tag; publishing it is what creates the tag.
     assert!(
-        block.contains("gh release create"),
-        "`{TAG_JOB}` must create the tag and the GitHub Release (`gh release create`)"
+        block.contains("gh release edit") && block.contains("--draft=false"),
+        "`{TAG_JOB}` must publish the draft release (`gh release edit … --draft=false`): that is \
+         what creates the tag"
     );
 
     // Nothing else tags: a second writer would mark a version released behind the gate's back.
+    // Elsewhere a release may only be opened as a draft, which carries no tag.
     for id in job_ids(&code).iter().filter(|id| *id != TAG_JOB) {
         let other = job_block(&code, id).unwrap_or_default();
-        for writer in ["gh release create", "git tag", "git push"] {
+        for writer in ["--draft=false", "gh release edit", "git tag", "git push"] {
             assert!(
                 !other.contains(writer),
-                "the job `{id}` runs `{writer}`: only `{TAG_JOB}` may create the tag, after the gate"
+                "the job `{id}` runs `{writer}`: only `{TAG_JOB}` may publish the release and \
+                 create the tag, after the gate"
+            );
+        }
+        for line in other.lines().filter(|l| l.contains("gh release create")) {
+            assert!(
+                line.contains("--draft"),
+                "the job `{id}` creates a release that is not a draft (`{}`): that creates the \
+                 tag before the gate has spoken",
+                line.trim()
             );
         }
     }

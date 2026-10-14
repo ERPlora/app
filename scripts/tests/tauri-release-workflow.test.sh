@@ -11,7 +11,13 @@
 #   · S3 by OIDC with the repo Variables `AWS_DOWNLOADS_ROLE_ARN`, `DOWNLOADS_BUCKET`, `AWS_REGION`;
 #     without them a visible warning, never a silent skip and never Hetzner's static keys;
 #   · the store jobs fail LOUDLY when a secret is missing, naming it (scripts/ci/require-config.sh);
-#   · the tag `v<version>` and the GitHub Release are created LAST, after the release gate.
+#   · only `refs/heads/main` publishes (a dispatch on another ref builds only), one release at a
+#     time across refs (concurrency group `tauri-release`);
+#   · every installer is checked BEFORE any channel publishes (`collect`), which then opens a DRAFT
+#     release `v<version>`: the mark that publication started, so a later run cannot publish the
+#     same version again; S3 refuses to overwrite a version another run uploaded;
+#   · the tag `v<version>` is the draft published LAST, after the release gate;
+#   · third-party actions are pinned by commit SHA, never by a movable tag.
 #
 # Parsed as YAML (PyYAML), so a case names what is missing. `--workflow <path>` lets the guard be
 # proven on a mutated copy.
@@ -131,6 +137,13 @@ check(
     concurrency.get("cancel-in-progress") is False,
     f"cancel-in-progress is {concurrency.get('cancel-in-progress')!r}",
 )
+# One group for every ref: a dispatch on another branch queues behind a release of main instead of
+# running next to it.
+check(
+    "the concurrency group is exactly `tauri-release` (no ref in it)",
+    concurrency.get("group") == "tauri-release",
+    f"group is {concurrency.get('group')!r}",
+)
 top_permissions = doc.get("permissions") or {}
 check(
     "top-level permissions are `contents: read` only",
@@ -151,6 +164,34 @@ if gate_step is not None:
         "git ls-remote --tags" in run_of(step),
         run_of(step),
     )
+    env = step.get("env") or {}
+    check(
+        "the version gate gets the ref (`REF: ${{ github.ref }}`): only main publishes",
+        str(env.get("REF", "")).replace(" ", "") == "${{github.ref}}",
+        f"env is {env!r}",
+    )
+    check(
+        "the version gate gets this run's id (`RUN_ID: ${{ github.run_id }}`)",
+        str(env.get("RUN_ID", "")).replace(" ", "") == "${{github.run_id}}",
+        f"env is {env!r}",
+    )
+    check(
+        "the version gate reads the DRAFT releases (the mark of a publication in progress)",
+        "select(.draft)" in run_of(step) and "DRAFTS=" in run_of(step),
+        run_of(step),
+    )
+    check(
+        "…and the run that opened each one (`publishing-run`)",
+        "publishing-run" in run_of(step),
+        run_of(step),
+    )
+# Draft releases are only listed to a token with push access: with `contents: read` the check
+# would see none and pass — failing open.
+check(
+    "the `version` job has `contents: write` (a read token is never shown draft releases)",
+    (version.get("permissions") or {}) == {"contents": "write"},
+    f"permissions are {version.get('permissions')!r}",
+)
 outputs = version.get("outputs") or {}
 for key in ("version", "tag", "build", "release"):
     check(f"the `version` job exposes `{key}`", key in outputs, f"outputs are {list(outputs)}")
@@ -182,12 +223,70 @@ for job_id in ("build", "build-android"):
     check(f"`{job_id}` needs `version`", "version" in needs(job_id), f"needs are {needs(job_id)}")
     check(f"`{job_id}` only runs when the version gate says build", BUILD in cond(job(job_id)), f"if is {cond(job(job_id))!r}")
 
-# ── 4 · Publishing: only a release, only after BOTH builds ───────────────────────────────────
+# ── 4 · Publishing: only a release, only after `collect` saw every installer ─────────────────
+INSTALLER_CHECK = INSTALLERS + ("erplora-app.aab",)
+collect = job("collect")
+check("the workflow has the `collect` job", bool(collect), f"jobs are {list(jobs)}")
+for wanted in ("version", "build", "build-android"):
+    check(f"`collect` needs `{wanted}`", wanted in needs("collect"), f"needs are {needs('collect')}")
+check("`collect` only runs on a release", RELEASE in cond(collect), f"if is {cond(collect)!r}")
+check(
+    "`collect` has `contents: write` (it opens the draft release)",
+    (collect.get("permissions") or {}) == {"contents": "write"},
+    f"permissions are {collect.get('permissions')!r}",
+)
+collect_download = index_of("collect", lambda s: uses(s, "actions/download-artifact@"))
+check("`collect` downloads every artifact of the run", collect_download is not None)
+verify = index_of("collect", lambda s: all(n in run_of(s) for n in INSTALLER_CHECK) and "::error::" in run_of(s))
+check("`collect` checks the six installers AND the AAB, red on a missing one", verify is not None)
+if verify is not None:
+    body = run_of(steps("collect")[verify])
+    check("…and exits non-zero when one is missing", "exit 1" in body, body)
+    check("…and also the MSIX when the Store is on", "erplora-app.msix" in body and "MICROSOFT_STORE_PRODUCT_ID" in str(steps("collect")[verify]), body)
+draft = index_of("collect", lambda s: "gh release create" in run_of(s))
+check("`collect` opens the release as a DRAFT", draft is not None)
+if draft is not None:
+    step = steps("collect")[draft]
+    body = run_of(step)
+    create_line = next((l for l in body.splitlines() if "gh release create" in l), "")
+    check("…`gh release create … --draft` (a draft has no tag yet)", "--draft" in create_line, create_line)
+    check("…for the tag of the `version` job", "needs.version.outputs.tag" in str(step.get("env") or {}), f"env is {step.get('env')!r}")
+    check("…on the commit that was built (`--target`)", "--target" in body, body)
+    check("…recording which run opened it (`publishing-run`)", "publishing-run" in body and "GITHUB_RUN_ID" in body, body)
+    for name in INSTALLERS:
+        check(f"…attaching `{name}`", name in body)
+    check("…only after the installers were checked", verify is not None and verify < draft)
 for job_id in ("publish-store", "publish-play", "upload-s3"):
     check(f"the workflow has `{job_id}`", bool(job(job_id)), f"jobs are {list(jobs)}")
-    for wanted in ("version", "build", "build-android"):
-        check(f"`{job_id}` needs `{wanted}`", wanted in needs(job_id), f"needs are {needs(job_id)}")
+    for wanted in ("version", "collect"):
+        check(f"`{job_id}` needs `{wanted}` (no channel before every installer is there)", wanted in needs(job_id), f"needs are {needs(job_id)}")
     check(f"`{job_id}` only runs on a release", RELEASE in cond(job(job_id)), f"if is {cond(job(job_id))!r}")
+
+# A bundle that did not come out is red where it is built, not after Play and the Store published.
+stage = index_of("build", lambda s: str(s.get("name", "")) == "Stage artifacts")
+check("the desktop build has `Stage artifacts`", stage is not None)
+if stage is not None:
+    body = run_of(steps("build")[stage])
+    expected = {
+        "linux": ("erplora-app.AppImage", "erplora-app.deb"),
+        "windows": ("erplora-app-setup.exe", "erplora-app.msi"),
+        "macos": ("erplora-app.dmg",),
+    }
+    for label, names in expected.items():
+        line = next((l for l in body.splitlines() if l.strip().startswith(f"{label})")), "")
+        for name in names:
+            check(f"`Stage artifacts` expects `{name}` on {label}", name in line, line or "no case for it")
+    check("`Stage artifacts` is red on a missing bundle", "::error::" in body and "exit 1" in body, body)
+    check("`Stage artifacts` is red on an unknown platform", "*)" in body, body)
+astage = index_of("build-android", lambda s: str(s.get("name", "")) == "Stage artifacts")
+check("the Android build has `Stage artifacts`", astage is not None)
+if astage is not None:
+    body = run_of(steps("build-android")[astage])
+    check(
+        "the Android `Stage artifacts` is red unless BOTH the AAB and the APK are there",
+        "erplora-app.aab" in body and "erplora-app.apk" in body and "::error::" in body and "exit 1" in body,
+        body,
+    )
 
 pack = index_of("build", lambda s: "pack-msix.ps1" in run_of(s))
 check("the Windows leg packs the MSIX", pack is not None)
@@ -213,8 +312,12 @@ others_with_oidc = [j for j, body in jobs.items() if j != "upload-s3" and "id-to
 check("no other job gets `id-token`", not others_with_oidc, f"also on {others_with_oidc}")
 
 VARS_SET = ("vars.AWS_DOWNLOADS_ROLE_ARN != ''", "vars.DOWNLOADS_BUCKET != ''")
-creds = index_of("upload-s3", lambda s: uses(s, "aws-actions/configure-aws-credentials@v4"))
-check("`upload-s3` takes credentials with aws-actions/configure-aws-credentials@v4", creds is not None)
+creds = index_of("upload-s3", lambda s: uses(s, "aws-actions/configure-aws-credentials@"))
+check("`upload-s3` takes credentials with aws-actions/configure-aws-credentials", creds is not None)
+check(
+    "…the v4 line of it, pinned by SHA",
+    re.search(r"aws-actions/configure-aws-credentials@[0-9a-f]{40}\s+#\s*v4", text) is not None,
+)
 if creds is not None:
     step = steps("upload-s3")[creds]
     with_ = step.get("with") or {}
@@ -247,6 +350,19 @@ if upload is not None:
     check("the manifest lands on `downloads/app/latest/latest.json` (the key the SaaS reads)", "/downloads/app/latest/latest.json" in body, body)
     for name in INSTALLERS:
         check(f"the upload ships `{name}`", name in body)
+    joined = body.replace("\\\n", " ")
+    guard_at = joined.find("scripts/ci/s3-version-guard.sh")
+    check(
+        "the upload runs scripts/ci/s3-version-guard.sh BEFORE the first copy (no overwrite by another run)",
+        guard_at != -1 and guard_at < joined.find("aws s3 cp"),
+        body,
+    )
+    manifest_cp = next((l for l in joined.splitlines() if "aws s3 cp" in l and "/downloads/app/v${VERSION}/latest.json" in l), "")
+    check(
+        "the versioned latest.json carries the run that wrote it (`--metadata run-id=`)",
+        "--metadata" in manifest_cp and "run-id=" in manifest_cp and "GITHUB_RUN_ID" in manifest_cp,
+        manifest_cp,
+    )
     cps = [line for line in body.splitlines() if "aws s3 cp" in line]
     check(
         "`latest/latest.json` is the LAST object written (never announces a missing installer)",
@@ -323,7 +439,7 @@ check("no job or step may `continue-on-error`", "continue-on-error" not in code)
 # ── 7 · The gate sees the S3 channel as it really went ───────────────────────────────────────
 gate = job("release-gate")
 check("the release gate runs only on a release", RELEASE in cond(gate) and "always()" in cond(gate), f"if is {cond(gate)!r}")
-for wanted in ("version", "test", "build", "build-android", "publish-store", "publish-play", "upload-s3"):
+for wanted in ("version", "test", "build", "build-android", "collect", "publish-store", "publish-play", "upload-s3"):
     check(f"the release gate needs `{wanted}`", wanted in needs("release-gate"), f"needs are {needs('release-gate')}")
 gate_env = ""
 for s in steps("release-gate"):
@@ -336,6 +452,7 @@ check(
     s3_line,
 )
 check("the gate also reports the tests", "needs.test.result" in gate_env, gate_env)
+check("the gate also reports `collect`", "needs.collect.result" in gate_env, gate_env)
 
 # ── 8 · The tag and the GitHub Release come last ─────────────────────────────────────────────
 rel = job("github-release")
@@ -350,24 +467,47 @@ check(
 # The implicit `success()` is also false when an ANCESTOR was skipped — a store channel declared
 # pending is one — so without `always()` no version would be tagged while a channel is pending.
 check("`github-release` evaluates with `always()` (pending channels upstream are skipped jobs)", "always()" in cond(rel), f"if is {cond(rel)!r}")
+WRITERS = {"version", "collect", "github-release"}
 check(
-    "`github-release` is the only job with `contents: write`",
-    (rel.get("permissions") or {}) == {"contents": "write"}
-    and not [j for j, b in jobs.items() if j != "github-release" and ((b or {}).get("permissions") or {}).get("contents") == "write"],
+    "`github-release` has `contents: write`",
+    (rel.get("permissions") or {}) == {"contents": "write"},
     f"permissions are {rel.get('permissions')!r}",
 )
-create = index_of("github-release", lambda s: "gh release create" in run_of(s))
-check("`github-release` creates the release with `gh release create`", create is not None)
-if create is not None:
-    step = steps("github-release")[create]
+writers = {j for j, b in jobs.items() if ((b or {}).get("permissions") or {}).get("contents") == "write"}
+check(f"only {sorted(WRITERS)} have `contents: write`", writers == WRITERS, f"writers are {sorted(writers)}")
+publish = index_of("github-release", lambda s: "gh release edit" in run_of(s))
+check("`github-release` publishes the draft (`gh release edit`)", publish is not None)
+if publish is not None:
+    step = steps("github-release")[publish]
     body = run_of(step)
-    env = step.get("env") or {}
-    check("…for the tag of the `version` job", "needs.version.outputs.tag" in str(env), f"env is {env!r}")
-    check("…on the commit that was built (`--target`)", "--target" in body, body)
-    for name in INSTALLERS:
-        check(f"…attaching `{name}`", name in body)
-download = index_of("github-release", lambda s: uses(s, "actions/download-artifact@"))
-check("`github-release` downloads the built installers first", download is not None and create is not None and download < create)
+    check("…with `--draft=false` (publishing it is what creates the tag)", "--draft=false" in body, body)
+    check("…for the tag of the `version` job", "needs.version.outputs.tag" in str(step.get("env") or {}), f"env is {step.get('env')!r}")
+check("`github-release` creates no second release", index_of("github-release", lambda s: "gh release create" in run_of(s)) is None)
+
+# ── 9 · Third-party actions are pinned by commit SHA ─────────────────────────────────────────
+# A tag (`@v1`) or a branch (`@stable`) can be moved by whoever controls that repository, and the
+# release job holds the keystore, the Store and Play credentials and an AWS role.
+OFFICIAL = ("actions/", "github/", "./")
+workflows_dir = os.path.dirname(path)
+for name in sorted(os.listdir(workflows_dir)):
+    if not name.endswith((".yml", ".yaml")):
+        continue
+    with open(os.path.join(workflows_dir, name), encoding="utf-8") as fh:
+        for number, line in enumerate(fh, 1):
+            m = re.match(r"\s*(?:-\s*)?uses:\s*([^\s#]+)(.*)$", line)
+            if not m or m.group(1).startswith(OFFICIAL):
+                continue
+            action, rest = m.group(1), m.group(2)
+            check(
+                f"{name}:{number} pins `{action.split('@')[0]}` by commit SHA",
+                re.search(r"@[0-9a-f]{40}$", action) is not None,
+                f"`{action}` is a movable ref",
+            )
+            check(
+                f"{name}:{number} says which version the SHA is (`# vX…`)",
+                rest.strip().startswith("#") and len(rest.strip()) > 1,
+                line.strip(),
+            )
 
 if failures:
     print(f"FAIL: {len(failures)} contract case(s) on {path}", file=sys.stderr)

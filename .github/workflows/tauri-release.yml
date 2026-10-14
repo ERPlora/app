@@ -11,15 +11,21 @@
 # `src-tauri/tauri.conf.json`; a released version is marked by its tag `v<version>`:
 #
 #   tag `v<version>` exists           ─► every other job is skipped (docs/CI push: nothing ships)
-#   missing, version > latest `v*`    ─► tests ─► build + build-android ─► Microsoft Store,
-#                                        Google Play, S3 ─► release gate ─► tag + GitHub Release
+#   missing, version > latest `v*`    ─► tests ─► build + build-android ─► collect (every installer
+#                                        there? open the DRAFT release) ─► Microsoft Store, Google
+#                                        Play, S3 ─► release gate ─► publish the draft = the tag
 #   missing, version <= latest tag    ─► RED (the stores only take a higher version)
-#   workflow_dispatch                 ─► the same; `-f publish=false` builds only (packaging check)
+#   a draft `v<version>` of another   ─► RED: that publication already started — resume it with
+#   run exists                           `gh run rerun <run> --failed`, or bump the version
+#   workflow_dispatch                 ─► the same on `main`; on any other ref, or with
+#                                        `-f publish=false`, it builds only (packaging check)
 #
 # To release: bump `version` in src-tauri/tauri.conf.json and push to `main`. The tag is created
 # LAST, by `github-release`, once the release gate is green: a failed channel is retried with
 # `gh run rerun --failed` (artifacts live 3 days); if code must change, bump the version again.
-# The jobs are the `jobs:` list of this file — do not restate them here.
+# The jobs are the `jobs:` list of this file — do not restate them here. Third-party actions are
+# pinned by commit SHA (the version in a comment): this job holds the keystore, the store
+# credentials and an AWS role.
 #
 # S3 LAYOUT (AWS, by OIDC; the SaaS reads `downloads/app/latest/latest.json`, saas-next
 # `public/appdist.py`):
@@ -73,9 +79,11 @@ on:
 
 # One release at a time, and a newer push NEVER cancels one in flight: cancelling between Play
 # and the tag would leave a version published and untagged. The newer run waits, and when it
-# starts the tag already exists, so it releases nothing.
+# starts the tag already exists, so it releases nothing. The group has NO ref in it: a dispatch on
+# another branch (build only) queues behind a release of main instead of running next to it.
+# GitHub keeps one PENDING run per group: a newer one replaces it (README, «CI/CD»).
 concurrency:
-  group: tauri-release-${{ github.ref }}
+  group: tauri-release
   cancel-in-progress: false
 
 permissions:
@@ -97,6 +105,11 @@ jobs:
     name: Version gate
     runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 5
+    # `write` only to SEE draft releases: GitHub lists drafts to a token with push access alone, so
+    # with `contents: read` the draft check below would find none and pass — failing open. This
+    # job writes nothing.
+    permissions:
+      contents: write
     outputs:
       version: ${{ steps.decide.outputs.version }}
       tag: ${{ steps.decide.outputs.tag }}
@@ -106,16 +119,23 @@ jobs:
       - uses: actions/checkout@v4
 
       # The tags come from the remote, not from the shallow checkout: a tag created by an earlier
-      # run is on GitHub whatever this clone fetched.
+      # run is on GitHub whatever this clone fetched. The DRAFT releases are the publications that
+      # started and did not finish (`collect` opens one before the first channel, with the run that
+      # opened it in a hidden `publishing-run` line). Only `refs/heads/main` publishes.
       - name: Is the version in tauri.conf.json new? (scripts/release-version.sh)
         id: decide
         env:
           EVENT_NAME: ${{ github.event_name }}
           PUBLISH: ${{ inputs.publish }}
+          REF: ${{ github.ref }}
+          RUN_ID: ${{ github.run_id }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           tags="$(git ls-remote --tags --refs origin | sed 's|.*refs/tags/||')"
-          TAGS="$tags" ./scripts/release-version.sh
+          drafts="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | select(.draft) | "\(.tag_name) \((.body // "") | (capture("publishing-run: (?<id>[0-9]+)").id)? // "unknown")"')"
+          TAGS="$tags" DRAFTS="$drafts" ./scripts/release-version.sh
 
   # ── Nothing is built — so nothing is published — on red ─────────────────────────────────────
   test:
@@ -199,7 +219,7 @@ jobs:
           fi
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable (branch head on 2026-10-14)
 
       # 🔴 `cache-bin: false`: this action's `Post` cleans `$CARGO_HOME/bin` and deletes the
       # runner's `rustup`, breaking the NEXT job on our own runner. Explained in `test-shell.yml`.
@@ -213,7 +233,7 @@ jobs:
       # with «No variants exist» for those four (hub#878). `save-if: false` returns BEFORE cleaning,
       # so the restore still works and hosted runners still save.
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: . -> target
           cache-bin: false
@@ -243,7 +263,7 @@ jobs:
       # is created by `github-release`, after every channel published. The version is the one in
       # `tauri.conf.json`, as committed: nothing rewrites it.
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -251,25 +271,37 @@ jobs:
           tauriScript: pnpm exec tauri
 
       # Collects the bundles (their names carry the version; they get the stable names the SaaS
-      # serves from `latest/`). The target dir is the Cargo workspace's (repo root).
+      # serves from `latest/`). The target dir is the Cargo workspace's (repo root). Each platform
+      # lists the bundles it MUST produce: one that did not come out is red here, where it is
+      # built — not after Play and the Store already published the others.
       - name: Stage artifacts
         shell: bash
+        env:
+          PLATFORM: ${{ matrix.label }}
         run: |
           set -uo pipefail
           mkdir -p dist
+          missing=0
           # $1 = name pattern, $2 = stable target name.
-          copy_one() {
+          expect() {
             local found
             found=$(find . -path '*/release/bundle/*' -name "$1" 2>/dev/null | head -1)
-            if [ -n "$found" ]; then cp "$found" "dist/$2"; echo "  $found -> dist/$2"; fi
+            if [ -z "$found" ]; then
+              echo "::error::no $1 bundle was built on $PLATFORM: $2 would be missing from the release"
+              missing=1
+              return
+            fi
+            cp "$found" "dist/$2" || { echo "::error::cannot stage $found as dist/$2"; missing=1; return; }
+            echo "  $found -> dist/$2"
           }
-          echo "Artifacts found:"
-          copy_one '*.AppImage'  erplora-app.AppImage
-          copy_one '*.deb'       erplora-app.deb
-          copy_one '*-setup.exe' erplora-app-setup.exe
-          copy_one '*.msi'       erplora-app.msi
-          copy_one '*.dmg'       erplora-app.dmg
+          case "$PLATFORM" in
+            linux)   expect '*.AppImage' erplora-app.AppImage; expect '*.deb' erplora-app.deb ;;
+            windows) expect '*-setup.exe' erplora-app-setup.exe; expect '*.msi' erplora-app.msi ;;
+            macos)   expect '*.dmg' erplora-app.dmg ;;
+            *)       echo "::error::unknown platform '$PLATFORM': no list of the bundles it must build"; exit 1 ;;
+          esac
           echo "--- dist/ ---"; ls -la dist/
+          [ "$missing" -eq 0 ] || exit 1
 
       # `retention-days` is NOT cosmetic: without it the artifact lives the repo maximum (90 days)
       # and the release of `v1.1.8` died of «Artifact storage quota has been hit», half published.
@@ -339,7 +371,7 @@ jobs:
       # Only `platform-tools`: the action's default is `tools platform-tools`, and Google retired
       # the legacy `tools` package on 2026-09-16 — `sdkmanager` exits 1 on it (hub#1881).
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
         with:
           packages: platform-tools
 
@@ -362,7 +394,7 @@ jobs:
           fi
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable (branch head on 2026-10-14)
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
 
@@ -371,7 +403,7 @@ jobs:
       # the VICTIM of the desktop job's `cleanRegistry` (explained there), and its own `Post` would
       # be the executioner in the opposite order.
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: . -> target
           cache-bin: false
@@ -472,11 +504,17 @@ jobs:
           echo "$BADGING" | grep -qE "uses-feature-not-required: ?name='android.hardware.location'" \
             || { echo "::error::the APK REQUIRES android.hardware.location — Play would hide it from devices without location hardware (hub#2552)"; echo "$BADGING" | grep -i location; exit 1; }
 
+      # Both or red: `if-no-files-found: error` below only fires when NEITHER is there.
       - name: Stage artifacts
         run: |
+          set -uo pipefail
           mkdir -p dist
-          find . -name '*.aab' -path '*release*' -exec cp {} dist/erplora-app.aab \;
-          find . -name '*.apk' -path '*release*' -exec cp {} dist/erplora-app.apk \;
+          aab=$(find . -name '*.aab' -path '*release*' | head -1)
+          apk=$(find . -name '*.apk' -path '*release*' | head -1)
+          [ -n "$aab" ] || { echo "::error::no release AAB was built: erplora-app.aab (Google Play) would be missing"; exit 1; }
+          [ -n "$apk" ] || { echo "::error::no release APK was built: erplora-app.apk would be missing from the release"; exit 1; }
+          cp "$aab" dist/erplora-app.aab || exit 1
+          cp "$apk" dist/erplora-app.apk || exit 1
           ls -la dist/
 
       - name: Upload artifact
@@ -487,17 +525,79 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+  # ── Every installer is there, then the release is opened — BEFORE any channel publishes ──────
+  # 1. The six installers and the AAB (and the MSIX when the Store is on) are all in this run's
+  #    artifacts: a hole is red here, not after Play and the Store published the rest.
+  # 2. The DRAFT release `v<version>` is opened, with the installers and the run that opened it.
+  #    It is the mark that publication STARTED: from here on Play, the Store or S3 may hold this
+  #    version, so the next run's `version` job refuses to publish the same number again (resume
+  #    this run with `gh run rerun <id> --failed`, or bump). A draft has no tag: `github-release`
+  #    publishes it after the gate, and that is what creates the tag.
+  collect:
+    name: Check installers + open draft release
+    needs: [version, build, build-android]
+    if: needs.version.outputs.release == 'true'
+    runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download every artifact of this run
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Every installer is there
+        env:
+          STORE_ON: ${{ vars.MICROSOFT_STORE_PRODUCT_ID != '' }}
+        run: |
+          set -uo pipefail
+          expected="erplora-app-setup.exe erplora-app.msi erplora-app.AppImage erplora-app.deb erplora-app.dmg erplora-app.apk erplora-app.aab"
+          # `publish-store` publishes the MSIX: with the Store on, it is expected as well.
+          if [ "$STORE_ON" = "true" ]; then expected="$expected erplora-app.msix"; fi
+          missing=0
+          for f in $expected; do
+            if [ -f "artifacts/$f" ]; then
+              echo "  ok $f"
+            else
+              echo "::error::artifacts/$f is missing: no channel publishes a release with a hole in it"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+
+      - name: Open the draft release (the mark that publication started)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          INSTALLERS="erplora-app-setup.exe erplora-app.msi erplora-app.AppImage erplora-app.deb erplora-app.dmg erplora-app.apk"
+          files=()
+          for f in $INSTALLERS; do files+=("artifacts/$f"); done
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # A re-run of THIS run: the version gate refuses a draft opened by any other run.
+            gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" "${files[@]}" --draft --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --title "ERPlora $VERSION" --generate-notes \
+              --notes "<!-- publishing-run: $GITHUB_RUN_ID -->"
+          fi
+          echo "Draft release $TAG opened by run $GITHUB_RUN_ID" >> "$GITHUB_STEP_SUMMARY"
+
   # ── Microsoft Store ─────────────────────────────────────────────────────────────────────────
   # Publishes the MSIX with the msstore CLI (FREE products only, which is our case). Prerequisites
   # (manual, once): the app published and LIVE in Partner Center + an Entra app with the Manager
   # role. Gated by the Variable MICROSOFT_STORE_PRODUCT_ID (empty = job skipped; the release gate
   # then fails unless `store` is declared in RELEASE_CHANNELS_PENDING). Every release goes through
   # Microsoft's certification (hours to 3 days) and the Store delivers the update by itself.
-  # Like every publisher, it waits for BOTH builds: a channel never publishes a version another
-  # platform failed to build.
+  # Like every publisher, it waits for `collect`: a channel never publishes before every installer
+  # of the release is there and the draft release marks the publication as started.
   publish-store:
     name: Publish to Microsoft Store
-    needs: [version, build, build-android]
+    needs: [version, collect]
     if: needs.version.outputs.release == 'true' && vars.MICROSOFT_STORE_PRODUCT_ID != ''
     runs-on: windows-latest
     timeout-minutes: 30
@@ -534,7 +634,7 @@ jobs:
           path: artifacts
 
       - name: Configure Microsoft Store CLI
-        uses: microsoft/microsoft-store-apppublisher@v1.1
+        uses: microsoft/microsoft-store-apppublisher@15abd1c50fcc164b19cb240fb04ef3c49bf715a2 # v1.1
 
       - name: Authenticate with Partner Center
         shell: pwsh
@@ -574,7 +674,7 @@ jobs:
   # «Release to testing tracks» and nothing else.
   publish-play:
     name: Publish to Google Play
-    needs: [version, build, build-android]
+    needs: [version, collect]
     if: needs.version.outputs.release == 'true' && vars.PLAY_PACKAGE_NAME != ''
     # `jarsigner` (JDK) is what this job takes from the image without installing it.
     runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
@@ -621,7 +721,7 @@ jobs:
           echo "AAB signed ✓"
 
       - name: Publish to Google Play
-        uses: r0adkll/upload-google-play@v1
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: ${{ vars.PLAY_PACKAGE_NAME }}
@@ -637,7 +737,7 @@ jobs:
   # as `skipped`, so it shows as «declared pending» or red — never as «published».
   upload-s3:
     name: Upload to S3 (installers + latest.json)
-    needs: [version, build, build-android]
+    needs: [version, collect]
     if: needs.version.outputs.release == 'true'
     runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
     # A hung `aws s3 cp` must not hold the run for hours: fail fast and re-run this job alone
@@ -667,6 +767,11 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           echo "result=skipped" >> "$GITHUB_OUTPUT"
 
+      # For scripts/ci/s3-version-guard.sh. BEFORE the download: checkout cleans the workspace.
+      - name: Checkout
+        if: vars.AWS_DOWNLOADS_ROLE_ARN != '' && vars.DOWNLOADS_BUCKET != ''
+        uses: actions/checkout@v4
+
       - name: Download artifacts
         if: vars.AWS_DOWNLOADS_ROLE_ARN != '' && vars.DOWNLOADS_BUCKET != ''
         uses: actions/download-artifact@v4
@@ -676,7 +781,7 @@ jobs:
 
       - name: AWS credentials (OIDC)
         if: vars.AWS_DOWNLOADS_ROLE_ARN != '' && vars.DOWNLOADS_BUCKET != ''
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ vars.AWS_DOWNLOADS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
@@ -687,11 +792,17 @@ jobs:
       # SAME step as the installers and LAST, so `latest/` never announces a version whose
       # installer is not there yet. `version` is without the `v`, identical to `tauri.conf.json`,
       # which is what `plugin:app|version` returns on the device.
+      #
+      # The versioned `latest.json` carries the run that wrote it (`run-id`). Before the first copy
+      # the guard refuses a version ANOTHER run already put here: re-uploading it would replace
+      # what the fleet downloads with a different build under the same number. A re-run of this
+      # same run resumes (same `github.run_id`).
       - name: Upload installers and latest.json to S3
         id: upload
         if: vars.AWS_DOWNLOADS_ROLE_ARN != '' && vars.DOWNLOADS_BUCKET != ''
         run: |
           set -euo pipefail
+          bash scripts/ci/s3-version-guard.sh
           INSTALLERS="erplora-app-setup.exe erplora-app.msi erplora-app.AppImage erplora-app.deb erplora-app.dmg erplora-app.apk"
           for f in $INSTALLERS; do
             [ -f "artifacts/$f" ] || { echo "::error::artifacts/$f is missing: every build succeeded, so a bundle was not staged — publishing without it would leave latest/ half old"; exit 1; }
@@ -703,7 +814,7 @@ jobs:
             "$VERSION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > latest.json
           cat latest.json
           aws s3 cp latest.json "s3://${DOWNLOADS_BUCKET}/downloads/app/v${VERSION}/latest.json" \
-            --content-type application/json
+            --content-type application/json --metadata "run-id=${GITHUB_RUN_ID}"
           for f in $INSTALLERS; do
             aws s3 cp "s3://${DOWNLOADS_BUCKET}/downloads/app/v${VERSION}/$f" \
               "s3://${DOWNLOADS_BUCKET}/downloads/app/latest/$f"
@@ -735,7 +846,7 @@ jobs:
   # ------------------------------------------------------------------------------
   release-gate:
     name: Release gate
-    needs: [version, test, build, build-android, publish-store, publish-play, upload-s3]
+    needs: [version, test, build, build-android, collect, publish-store, publish-play, upload-s3]
     # `always()` is the point: without it the gate inherits «only if every `needs` succeeded» and
     # the skipped jobs would skip it too. Only on a release: a docs push or a dispatch with
     # `publish=false` publishes nothing on purpose.
@@ -761,6 +872,7 @@ jobs:
             test|Tests (test-shell.yml)|${{ needs.test.result }}
             build|Desktop bundles (linux/windows/macos)|${{ needs.build.result }}
             build-android|Android AAB + APK|${{ needs.build-android.result }}
+            collect|Installers check + draft release|${{ needs.collect.result }}
         run: ./scripts/release-gate.sh
 
   # ── The tag and the GitHub Release: the LAST step ───────────────────────────────────────────
@@ -768,6 +880,10 @@ jobs:
   # once the gate is green: a tag on a half-published release would turn «re-run the failed job»
   # into «nothing to do». `always()` because a channel declared pending is a SKIPPED ancestor, and
   # the implicit `success()` would skip this job too; the explicit gate result is the guard.
+  #
+  # The release already exists as the DRAFT `collect` opened, with the installers attached and its
+  # target on the commit that was built: publishing it is what creates the tag. The direct
+  # downloads live there even while S3 is not configured.
   github-release:
     name: Tag + GitHub Release
     needs: [version, release-gate]
@@ -777,31 +893,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download the installers
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      # `gh release create` creates the tag on `--target` (the commit that was built) and attaches
-      # the installers: the direct downloads survive here even while S3 is not configured.
-      - name: Create the tag and the GitHub Release
+      - name: Publish the draft release (this creates the tag)
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.version.outputs.tag }}
-          VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
-          INSTALLERS="erplora-app-setup.exe erplora-app.msi erplora-app.AppImage erplora-app.deb erplora-app.dmg erplora-app.apk"
-          files=()
-          for f in $INSTALLERS; do
-            [ -f "artifacts/$f" ] || { echo "::error::artifacts/$f is missing: a release without one of its installers is not tagged"; exit 1; }
-            files+=("artifacts/$f")
-          done
-          gh release create "$TAG" "${files[@]}" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "ERPlora $VERSION" \
-            --generate-notes
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
           echo "## Released $TAG" >> "$GITHUB_STEP_SUMMARY"
           echo "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
