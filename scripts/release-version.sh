@@ -18,7 +18,15 @@
 #                                              (ADR-0160), checked on the APK
 #
 # A manual dispatch with `publish=false` only builds (packaging check): it never
-# releases, whatever the tags say.
+# releases, whatever the tags say. Neither does any ref but exactly
+# `refs/heads/main`: a dispatch can run on any branch, and publishing from there
+# would ship — and tag — a commit that is not on `main`.
+#
+# The tag is written LAST, so until then the DRAFT release `v<version>` (opened
+# before the first channel publishes) is the only trace that Play, the Store or
+# S3 may already hold this version. A draft opened by ANOTHER run is RED: that
+# release is resumed (`gh run rerun <run> --failed`) or the version is bumped —
+# never rebuilt from other code under the same number.
 #
 # Input (environment), so the decision is testable (scripts/release-version.test.sh):
 #   VERSION      the version; default: read from TAURI_CONF
@@ -26,6 +34,10 @@
 #   TAGS         the repository's tags, one per line (or space separated)
 #   EVENT_NAME   `push` or `workflow_dispatch`
 #   PUBLISH      the dispatch input (`true`/`false`); empty on a push
+#   REF          `github.ref`; only exactly `refs/heads/main` publishes
+#   DRAFTS       the draft releases, one `tag run_id` per line (`unknown` if
+#                the run cannot be told)
+#   RUN_ID       `github.run_id` of this run (the same across its re-runs)
 #
 # Output: `version`, `tag`, `build`, `release` in $GITHUB_OUTPUT, a job summary
 # in $GITHUB_STEP_SUMMARY, and the exit code (1 = this version cannot ship).
@@ -37,6 +49,10 @@ TAURI_CONF="${TAURI_CONF:-$ROOT/src-tauri/tauri.conf.json}"
 TAGS="${TAGS:-}"
 EVENT_NAME="${EVENT_NAME:-push}"
 PUBLISH="${PUBLISH:-}"
+REF="${REF:-}"
+DRAFTS="${DRAFTS:-}"
+RUN_ID="${RUN_ID:-}"
+MAIN_REF="refs/heads/main"
 GITHUB_OUTPUT="${GITHUB_OUTPUT:-/dev/null}"
 
 SEMVER='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
@@ -102,15 +118,22 @@ done
 version_key=$(printf '%010d%010d%010d' "$major" "$minor" "$patch")
 
 publish_requested=true
+build_only_reason=""
 if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$PUBLISH" = "false" ]; then
     publish_requested=false
+    build_only_reason="manual dispatch with \`publish=false\`"
+elif [ "$REF" != "$MAIN_REF" ]; then
+    # Equality, never a prefix: `refs/heads/main-hotfix` is not main.
+    publish_requested=false
+    build_only_reason="this run is on \`${REF:-an unknown ref}\`, and only \`$MAIN_REF\` publishes"
+    echo "::notice::${build_only_reason//\`/}: building only, nothing is published or tagged"
 fi
 
 # ── The decision ─────────────────────────────────────────────────────────────
 if [ "$tagged" = true ]; then
     if [ "$publish_requested" = false ]; then
-        echo "$tag is already released; dispatch with publish=false: building only, nothing is published"
-        summary "## Version gate" "" "🔧 **$tag** is already released. Manual dispatch with \`publish=false\`: build only, nothing is published."
+        echo "$tag is already released; $build_only_reason: building only, nothing is published"
+        summary "## Version gate" "" "🔧 **$tag** is already released. Build only, nothing is published: $build_only_reason."
         emit "$version" true false
         exit 0
     fi
@@ -127,11 +150,23 @@ if [ -n "$latest" ] && ! [[ "$version_key" > "$latest_key" ]]; then
 fi
 
 if [ "$publish_requested" = false ]; then
-    echo "$tag: dispatch with publish=false: building only, nothing is published"
-    summary "## Version gate" "" "🔧 **$tag** — manual dispatch with \`publish=false\`: build only, nothing is published or tagged."
+    echo "$tag: $build_only_reason: building only, nothing is published"
+    summary "## Version gate" "" "🔧 **$tag** — build only, nothing is published or tagged: $build_only_reason."
     emit "$version" true false
     exit 0
 fi
+
+# ── A publication of this version already started? ───────────────────────────
+while read -r draft_tag draft_run _; do
+    [ "$draft_tag" = "$tag" ] || continue
+    if [ -n "$RUN_ID" ] && [ "$draft_run" = "$RUN_ID" ]; then
+        echo "the draft release $tag is this run's own (run $RUN_ID re-run): going ahead"
+        continue
+    fi
+    fail "version $version already started publishing in run ${draft_run:-unknown} (draft release $tag): Play, the Store or S3 may already hold it. Re-run that run (gh run rerun ${draft_run:-<run>} --failed) or bump the version in src-tauri/tauri.conf.json"
+done <<EOF
+$DRAFTS
+EOF
 
 echo "$tag is new (latest released: ${latest:-none}): building, publishing and tagging it"
 summary "## Version gate" "" \

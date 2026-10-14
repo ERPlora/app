@@ -13,6 +13,9 @@
 #   · tag missing, version > latest tag      → build, publish, then tag
 #   · tag missing, version <= latest tag     → RED: the stores only go forward
 #   · not X.Y.Z, or minor/patch >= 1000      → RED: Play's versionCode formula
+#   · any ref but exactly `refs/heads/main`  → build only, never publish
+#   · a DRAFT release `v<version>` from another run → RED: that release already
+#     started publishing (Play, Store, S3); re-run it or bump the version
 #
 # Every case is fed as data (the version and the tag list), so the decision can
 # be tried here instead of on `main`, where a wrong "yes" publishes to Microsoft
@@ -32,6 +35,8 @@ tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/erplora-release-version-test.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
 
 # Runs the gate. $1 = version, $2 = existing tags, $3 = event, $4 = publish input.
+# The ref defaults to `refs/heads/main` (set GATE_REF to change it, even to empty);
+# DRAFTS_IN lists the draft releases as `tag run_id` lines and RUN_ID_IN is this run.
 # Leaves the exit code in $status, stdout+stderr in $out, the step outputs in
 # $outputs and the job summary in $summary — where Actions would put them.
 run_gate() {
@@ -43,6 +48,9 @@ run_gate() {
         TAGS="$2" \
         EVENT_NAME="${3:-push}" \
         PUBLISH="${4:-}" \
+        REF="${GATE_REF-refs/heads/main}" \
+        DRAFTS="${DRAFTS_IN:-}" \
+        RUN_ID="${RUN_ID_IN:-}" \
         GITHUB_OUTPUT="$outputs_file" \
         GITHUB_STEP_SUMMARY="$summary_file" \
         bash "$GATE" 2>&1
@@ -158,6 +166,64 @@ run_gate "1.1.30" "$TAGS_TODAY" workflow_dispatch false
 expect_green  "dispatch with publish=false on a tagged version → builds only (packaging check)"
 expect_output "…builds" "build=true"
 expect_output "…and never publishes" "release=false"
+
+# ── Only `main` publishes ────────────────────────────────────────────────────
+# A dispatch can run on any ref (`gh workflow run --ref feat/x`): publishing from
+# there would ship to the stores, and tag, a commit that is not on `main`.
+GATE_REF=refs/heads/feat/x run_gate "1.1.31" "$TAGS_TODAY" workflow_dispatch true
+expect_green  "a dispatch on another branch with a new version → green"
+expect_output "…builds" "build=true"
+expect_output "…and NEVER publishes" "release=false"
+expect_says   "…saying why, as a notice" "::notice::"
+expect_summary_says "…and naming the only ref that publishes" "refs/heads/main"
+
+GATE_REF=refs/heads/main-hotfix run_gate "1.1.31" "$TAGS_TODAY" push
+expect_output "a ref that only STARTS with main does not publish (equality, not prefix)" "release=false"
+
+GATE_REF=refs/tags/v1.1.31 run_gate "1.1.31" "$TAGS_TODAY" workflow_dispatch true
+expect_output "a tag ref does not publish" "release=false"
+
+GATE_REF= run_gate "1.1.31" "$TAGS_TODAY" push
+expect_output "an unknown (empty) ref does not publish" "release=false"
+
+GATE_REF=refs/heads/feat/x run_gate "1.1.30" "$TAGS_TODAY" workflow_dispatch true
+expect_green  "another branch with an already released version → builds only"
+expect_output "…builds" "build=true"
+expect_output "…and never publishes" "release=false"
+
+# ── A release that already started publishing ────────────────────────────────
+# The tag is written LAST. Until then the draft release `v<version>` (created
+# before the first channel) is the only trace that Play, the Store or S3 may
+# already hold this version: a second run must not rebuild other code and
+# publish it again under the same number.
+DRAFTS_IN=$'v1.1.31 111' RUN_ID_IN=222 run_gate "1.1.31" "$TAGS_TODAY" push
+expect_red  "a draft v<version> left by another run → RED"
+expect_says "…as an error annotation" "::error::"
+expect_says "…naming that run" "run 111"
+expect_says "…with the command that resumes it" "gh run rerun 111 --failed"
+expect_says "…or the other way out" "bump"
+expect_output "…and nothing is released" "release=false"
+
+DRAFTS_IN=$'v1.1.31 222' RUN_ID_IN=222 run_gate "1.1.31" "$TAGS_TODAY" push
+expect_green  "the draft of THIS run (a re-run of the same run) → goes ahead"
+expect_output "…releases" "release=true"
+
+DRAFTS_IN=$'v1.1.29\t111' RUN_ID_IN=222 run_gate "1.1.31" "$TAGS_TODAY" push
+expect_green  "a draft of ANOTHER version does not block this one"
+expect_output "…releases" "release=true"
+
+DRAFTS_IN=$'v1.1.31 unknown' RUN_ID_IN=222 run_gate "1.1.31" "$TAGS_TODAY" push
+expect_red "a draft whose run cannot be told → RED (never assume it is ours)"
+
+DRAFTS_IN=$'v1.1.31 111' RUN_ID_IN= run_gate "1.1.31" "$TAGS_TODAY" push
+expect_red "a draft and no run id for this run → RED"
+
+DRAFTS_IN=$'v1.1.31 111' RUN_ID_IN=222 run_gate "1.1.31" "$TAGS_TODAY" workflow_dispatch false
+expect_green  "a draft does not block a build-only dispatch"
+expect_output "…which still publishes nothing" "release=false"
+
+DRAFTS_IN=$'v1.1.31 111' RUN_ID_IN=222 GATE_REF=refs/heads/feat/x run_gate "1.1.31" "$TAGS_TODAY" workflow_dispatch true
+expect_green  "a draft does not block a build on another branch"
 
 # ── The version comes from tauri.conf.json when not given ────────────────────
 mkdir -p "$tmp_dir/conf"
