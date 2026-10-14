@@ -3,7 +3,9 @@
 Lógica de hardware POS reutilizable: renderiza **ESC/POS** y lo entrega por el transporte que
 nombre el `printer_id`.
 Diseño: la tabla de [transportes](#transportes-printer_id) de este README (venía de `ARQUITECTURA.md §2.7`, luego
-`architecture/hub/apps/bridge.md` del repo de arquitectura, que no está en este repo). Es el reemplazo en Rust del Bridge Python
+`architecture/hub/apps/bridge.md` del repo de arquitectura, copiado en
+[`docs/legacy/hub/apps/bridge.md`](../../docs/legacy/hub/apps/bridge.md); índice en
+[`docs/legacy/README.md`](../../docs/legacy/README.md)). Es el reemplazo en Rust del Bridge Python
 (`bridge/ERPlora-Bridge-desktop`), empaquetado como **librería** sin servidor ni UI.
 
 ## Consumidores
@@ -15,7 +17,8 @@ Diseño: la tabla de [transportes](#transportes-printer_id) de este README (ven�
 > `WS /ws` en `localhost:12321`), al que la web shell llegaba por localhost. ADR-0196 lo retiró y
 > **hub#340 lo borró del árbol**: el precio explícito es que una PWA en un navegador, sin la app,
 > no imprime tiques térmicos. Historia en `architecture/hub/apps/bridge.md` del repo de arquitectura
-> (`erplora-old/architecture`).
+> (`erplora-old/architecture`), copiado en
+> [`docs/legacy/hub/apps/bridge.md`](../../docs/legacy/hub/apps/bridge.md).
 
 Habla el **mismo protocolo JSON** que la web shell del Hub consume.
 

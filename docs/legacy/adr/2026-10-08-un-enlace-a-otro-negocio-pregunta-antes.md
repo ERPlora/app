@@ -1,0 +1,10 @@
+> Copia histórica de `erplora-old/architecture/00-overview/decision-log.d/2026-10-08-un-enlace-a-otro-negocio-pregunta-antes.md` @ `2113309c11a7201c8f61700d13008ba55f61db26`, 2026-10-14.
+> Describe el producto antiguo; la referencia vigente es `erplora-next/PLAN*.md`.
+> Índice, criterio de la copia y lo que no se copió: [`docs/legacy/README.md`](../README.md).
+
+## ADR-NNNN · Un enlace `erplora://hub/…` a otro negocio pregunta antes de enlazarlo — 2026-10-08
+- **Estado:** aceptada
+- **Contexto:** desde ERPlora/hub#2504 el hub enlazado es el único que maneja el hardware de la app instalada, y la app enlazaba por su cuenta el destino de cualquier enlace `erplora://hub/…`. Cualquiera puede mandar ese enlace (un correo, una web, un mensaje), así que bastaba un clic para que otro negocio pasara a usar la impresora, el cajón y el lector del TPV y a ser el que la app abre al arrancar (ERPlora/hub#2644, P1 seguridad). La guía de Android y la de OWASP para enlaces profundos piden lo mismo: un enlace no ejecuta una acción sensible sin confirmación; y el producto ya confirma «Cambiar de negocio».
+- **Decisión:** un enlace al hub ya enlazado sigue abriéndose directo; uno a cualquier otro (o con nada enlazado) se enlaza y se sigue solo si la persona contesta «Abrir» en un diálogo **del sistema**, nunca de la página (`apps/tauri/src-tauri/src/link_consent.rs`: `rfd` en escritorio, `AlertDialog` del plugin propio en Android, que ninguna página puede invocar). En frío, la ventana arranca donde lo haría sin enlace y pregunta encima. Sin quien pregunte, o con cualquier respuesta que no sea «Abrir», no se enlaza ni se navega. Se descarta `tauri-plugin-dialog` porque su `init` reemplaza `window.confirm` en todas las páginas.
+- **Consecuencias:** un enlace ajeno ya no cambia el negocio del mostrador ni le da el hardware sin que alguien delante lo acepte; «Open Terminal» del SaaS hacia otro negocio pide un toque más. Nuevas dependencias de escritorio: `rfd` y `sys-locale`. Siguen fuera `www`/`pre` como destino de un enlace (hub#2645) y el bucle local en producción (hub#2643).
+- **Docs afectados:** `hub/apps/tauri.md`.

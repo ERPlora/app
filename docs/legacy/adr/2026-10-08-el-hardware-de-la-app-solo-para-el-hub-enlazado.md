@@ -1,0 +1,10 @@
+> Copia histórica de `erplora-old/architecture/00-overview/decision-log.d/2026-10-08-el-hardware-de-la-app-solo-para-el-hub-enlazado.md` @ `2113309c11a7201c8f61700d13008ba55f61db26`, 2026-10-14.
+> Describe el producto antiguo; la referencia vigente es `erplora-next/PLAN*.md`.
+> Índice, criterio de la copia y lo que no se copió: [`docs/legacy/README.md`](../README.md).
+
+## ADR-NNNN · El hardware de la app instalada solo lo maneja el hub enlazado — 2026-10-08
+- **Estado:** aceptada
+- **Contexto:** la frontera del hardware de la app instalada era el ACL de Tauri por patrón (`capabilities/default.json`, `https://*.erplora.com/*`, ADR-0221). Un patrón no puede nombrar el negocio de un TPV, que se elige en el SaaS en tiempo de ejecución, así que cualquier página de erplora.com —otro negocio, `www`, `pre`— imprimía y abría el cajón del TPV (ERPlora/hub#2504, P1 seguridad).
+- **Decisión:** segunda puerta en `apps/tauri/src-tauri/src/hub_link.rs`, delante del despachador de las órdenes de la aplicación: solo la página cuyo ORIGEN es el hub enlazado **y que ha terminado de cargar** (`on_page_load` → `Finished`; tras una navegación a otro origen la puerta se cierra hasta entonces, porque la URL de la ventana cambia al empezar la navegación mientras la página anterior sigue viva) las ejecuta; `device_context`, `forget_hub` y `shell_retry` quedan abiertas; el resto contesta `not_the_linked_hub`, y falla cerrado. El enlace lo hace la app (hub recordado, enlace `erplora://hub/…`) o el SaaS con `?shell=1`, y un `?shell=1` solo enlaza si la ventana sale de la página de entrada del SaaS o es el hub ya enlazado. El ACL por patrón se mantiene como primera puerta.
+- **Consecuencias:** otro negocio, la web pública, el SaaS de pruebas y el bucle local no tocan el hardware salvo que sean el enlazado; toda orden nueva nace cerrada. Sin cambio de contrato para el hub enlazado ni para las órdenes (ningún nombre cambia). Quedan fuera las órdenes de los plugins (hub#2642), el enlace sin confirmación (hub#2644), `www`/`pre` como negocio (hub#2645) y el bucle local en producción (hub#2643).
+- **Docs afectados:** `hub/apps/tauri.md`.

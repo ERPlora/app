@@ -21,6 +21,10 @@ lo que allí era `apps/tauri/`. El README anterior de la app está en ese commit
 | `Cargo.lock` | el del monorepo, podado por Cargo a lo que usan estos crates (mismas versiones) |
 | `scripts/`, `.github/workflows/` | los scripts y los dos workflows de la app (`tauri-release.yml`, `test-shell.yml`) |
 
+**Documentación histórica**: lo que se sabía de la app fuera de `apps/tauri` (contexto, diseño y
+las ADR que el código cita por número, del repo `erplora-old/architecture`) está copiado en
+[`docs/legacy/`](docs/legacy/README.md).
+
 ## Cómo se compila
 
 Requisitos: Rust stable (`rust-toolchain.toml`), Node 22 con pnpm (`corepack enable`; versión fijada en
