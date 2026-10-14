@@ -97,8 +97,9 @@ lleva el id de su run. Desde ahí:
    lo escribió otra run (`scripts/ci/s3-version-guard.sh`, comprueba el metadato `run-id`).
 
 `release-gate` (`scripts/release-gate.sh`) pone la release en rojo si un canal no publicó, salvo que
-esté declarado en la Variable `RELEASE_CHANNELS_PENDING` (hoy `store,play,s3`: ninguno está
-enchufado en este repo); entonces pasa en verde con un aviso. Al enchufar un canal se quita de la lista.
+esté declarado en la Variable `RELEASE_CHANNELS_PENDING` (hoy `store,play`: S3 está enchufado desde el
+2026-10-14 y ya es obligatorio; la Store y Play, todavía no); entonces pasa en verde con un aviso. Al
+enchufar un canal se quita de la lista.
 
 **S3 (AWS, OIDC, sin claves estáticas).** `upload-s3` asume el rol `AWS_DOWNLOADS_ROLE_ARN` y escribe
 en `DOWNLOADS_BUCKET` las claves de siempre: `downloads/app/v<versión>/…` y `downloads/app/latest/…`,
@@ -108,16 +109,25 @@ El rol de aws-next debe confiar **solo** en los runs de `main` de este repo: suj
 el que llega de verdad es
 `repo:ERPlora@183305526/app@1418874207:ref:refs/heads/main` (org `ERPlora` = 183305526, repo
 `ERPlora/app` = 1418874207); la condición de confianza tiene que usar ese.
-El bucket y el rol los crea aws-next (PLAN-AWS, ronda 18) y **aún no existen**: mientras falten las
-dos Variables, el job avisa («S3 upload skipped: AWS_DOWNLOADS_ROLE_ARN/DOWNLOADS_BUCKET not set») y
-los instaladores solo van a la GitHub Release. Cuando existan:
+aws-next creó el bucket y el rol el 2026-10-14 (PLAN-AWS, ronda 18; `stacks/prod/s3_downloads.tf`):
+
+- Bucket `erplora-prod-downloads` (`eu-west-1`): privado, sin nada público. El SaaS lee `latest.json`
+  con el rol de su tarea y sirve cada descarga con una URL prefirmada de 300 s.
+- Rol `arn:aws:iam::363427305647:role/erplora-prod-app-release`. Confía solo en el sujeto inmutable de
+  `main` de este repo.
+- Permisos del rol: `s3:ListBucket` en el bucket, y `GetObject`, `GetObjectTagging`, `PutObject` y
+  `AbortMultipartUpload` en `downloads/app/*`. Sin borrar.
+- Variables del repo, puestas ese mismo día. Si hubiera que rehacerlas:
 
 ```bash
-gh variable set -R ERPlora/app AWS_DOWNLOADS_ROLE_ARN --body arn:aws:iam::<cuenta>:role/<rol>
-gh variable set -R ERPlora/app DOWNLOADS_BUCKET --body <bucket>
-# y quitar `s3` de RELEASE_CHANNELS_PENDING
-gh variable set -R ERPlora/app RELEASE_CHANNELS_PENDING --body store,play
+gh variable set -R ERPlora/app AWS_DOWNLOADS_ROLE_ARN --body arn:aws:iam::363427305647:role/erplora-prod-app-release
+gh variable set -R ERPlora/app DOWNLOADS_BUCKET --body erplora-prod-downloads
+gh variable set -R ERPlora/app RELEASE_CHANNELS_PENDING --body store,play   # `s3` ya no está pendiente
 ```
+
+Sin las dos Variables, el job avisa («S3 upload skipped: AWS_DOWNLOADS_ROLE_ARN/DOWNLOADS_BUCKET not set»)
+y los instaladores solo van a la GitHub Release. Con `s3` fuera de `RELEASE_CHANNELS_PENDING`,
+`release-gate` lo pone en rojo.
 
 **Secrets que hay que cargar** (no se pueden leer del repo antiguo; ninguno existe aún en
 `ERPlora/app`). Cada comando pide el valor por la entrada estándar:
