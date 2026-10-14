@@ -36,7 +36,7 @@
 #   RELEASE_CHANNELS_PENDING   comma-separated ids, case/space insensitive
 #
 # Output: `::error::` / `::warning::` annotations, a job summary table, and an
-# exit code. Exit 1 = this tag did not publish what it was supposed to.
+# exit code. Exit 1 = this release did not publish what it was supposed to.
 # ─────────────────────────────────────────────────────────────────────────────
 set -uo pipefail
 
@@ -138,10 +138,10 @@ while IFS='|' read -r id display result var_name var_set reference; do
     skipped)
         if is_pending "$id"; then
             add_row "$display" "NOT published — declared pending" "$reference"
-            add_note "$display did NOT publish: '$id' is declared pending in RELEASE_CHANNELS_PENDING, so this tag ships without it on purpose ($reference)."
+            add_note "$display did NOT publish: '$id' is declared pending in RELEASE_CHANNELS_PENDING, so this release ships without it on purpose ($reference)."
         elif [ -n "$var_name" ] && [ "$var_set" != "true" ]; then
             add_row "$display" "NOT published — \`$var_name\` empty" "$reference"
-            add_failure "$display did NOT publish: the repository Variable $var_name is missing or empty, so its job was skipped and this tag shipped nothing to that channel. Either set $var_name, or declare '$id' in RELEASE_CHANNELS_PENDING to say out loud that the channel is not live yet ($reference)."
+            add_failure "$display did NOT publish: the repository Variable $var_name is missing or empty, so its job was skipped and this release shipped nothing to that channel. Either set $var_name, or declare '$id' in RELEASE_CHANNELS_PENDING to say out loud that the channel is not live yet ($reference)."
         else
             add_row "$display" "NOT published — skipped" "$reference"
             add_failure "$display did NOT publish: its job was skipped even though nothing gates it out (${var_name:-no gating Variable}${var_name:+ is set}). Something upstream of it did not produce what it needed ($reference)."
@@ -159,7 +159,7 @@ EOF
 # ── Report ───────────────────────────────────────────────────────────────────
 report="| Channel | Status | Where |"$'\n'"| --- | --- | --- |"$'\n'"$rows"
 
-echo "Release channels for this tag:"
+echo "Release channels for this release:"
 echo
 printf '%s' "$report"
 echo
@@ -201,7 +201,7 @@ fi
 
 if [ -n "$failures" ]; then
     echo
-    echo "This tag did NOT publish everything it was supposed to. A green run here would have"
+    echo "This release did NOT publish everything it was supposed to. A green run here would have"
     echo "meant 'released' to everyone who looked at it, which is why this job is red instead."
     exit 1
 fi

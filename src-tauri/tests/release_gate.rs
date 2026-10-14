@@ -30,6 +30,12 @@ const GATE_JOB: &str = "release-gate";
 /// The script the gate delegates its decision to.
 const GATE_SCRIPT: &str = "scripts/release-gate.sh";
 
+/// What the `version` job answers when this run is a release (scripts/release-version.sh).
+const RELEASE_ONLY: &str = "needs.version.outputs.release == 'true'";
+
+/// The job that creates the tag `v<version>` and the GitHub Release: the LAST step of a release.
+const TAG_JOB: &str = "github-release";
+
 fn repo_root() -> PathBuf {
     // `src-tauri` → up one.
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -84,26 +90,40 @@ fn job_ids(code: &str) -> Vec<String> {
     ids
 }
 
-/// Everything the `release-gate:` job declares, up to where the next job starts.
-fn gate_block(code: &str) -> String {
-    let start = code.find(&format!("\n  {GATE_JOB}:\n")).unwrap_or_else(|| {
-        panic!(
-            "`tauri-release.yml` has no `{GATE_JOB}:` job. Without it a tag whose publishing \
-                 jobs were all skipped finishes GREEN and nobody learns that the release shipped \
-                 nothing — which happened three times, last with v1.0.3 (hub#895/hub#839)"
-        )
-    });
+/// Everything a job declares, up to where the next job starts.
+fn job_block(code: &str, id: &str) -> Option<String> {
+    let start = code.find(&format!("\n  {id}:\n"))?;
     let tail = &code[start + 1..];
     let mut block = String::new();
     for (i, line) in tail.lines().enumerate() {
-        // A new job starts at a two-space key that is not the gate's own header line.
+        // A new job starts at a two-space key that is not this job's own header line.
         if i > 0 && line.starts_with("  ") && !line.starts_with("   ") && line.ends_with(':') {
             break;
         }
         block.push_str(line);
         block.push('\n');
     }
+    Some(block)
+}
+
+/// The `needs:` line of a job block, or "" when it has none.
+fn needs_line(block: &str) -> String {
     block
+        .lines()
+        .find(|l| l.trim_start().starts_with("needs:"))
+        .unwrap_or("")
+        .to_string()
+}
+
+/// Everything the `release-gate:` job declares, up to where the next job starts.
+fn gate_block(code: &str) -> String {
+    job_block(code, GATE_JOB).unwrap_or_else(|| {
+        panic!(
+            "`tauri-release.yml` has no `{GATE_JOB}:` job. Without it a release whose publishing \
+                 jobs were all skipped finishes GREEN and nobody learns that it shipped \
+                 nothing — which happened three times, last with v1.0.3 (hub#895/hub#839)"
+        )
+    })
 }
 
 #[test]
@@ -120,12 +140,15 @@ fn the_release_ends_in_a_gate_that_runs_even_when_everything_else_did_not() {
          would skip the gate as well and the tag would go green with nothing published (hub#895)"
     );
 
-    // Only on tags: a `workflow_dispatch` with `publish: false` publishes nothing on purpose.
+    // Only on a release (ERPlora/app: every push to `main` runs the workflow, tags no longer do).
+    // A push whose version is already tagged and a dispatch with `publish: false` publish nothing
+    // on purpose; the `version` job is what says which runs are a release.
     assert!(
-        block.contains("startsWith(github.ref, 'refs/tags/v')"),
-        "the `{GATE_JOB}` job must be scoped to tags. A manual dispatch is allowed to publish \
-         nothing (`-f publish=false` exists for exactly that), so demanding publication there \
-         would make the gate cry wolf until someone removed it"
+        block.contains(RELEASE_ONLY),
+        "the `{GATE_JOB}` job must be scoped to a release (`{RELEASE_ONLY}`). A push that only \
+         touches docs and a manual dispatch with `-f publish=false` are allowed to publish \
+         nothing, so demanding publication there would make the gate cry wolf until someone \
+         removed it"
     );
 
     assert!(
@@ -147,14 +170,31 @@ fn the_gate_sees_every_other_job_of_the_release() {
     );
 
     let block = gate_block(&code);
-    let needs = block
-        .lines()
-        .find(|l| l.trim_start().starts_with("needs:"))
-        .unwrap_or_else(|| panic!("the `{GATE_JOB}` job declares no `needs:`"));
+    let needs = needs_line(&block);
+    assert!(!needs.is_empty(), "the `{GATE_JOB}` job declares no `needs:`");
+
+    // The jobs that run AFTER the gate (they need it) cannot be judged by it: today only the tag
+    // job, which exists precisely to act on the gate's verdict.
+    let downstream: Vec<&String> = ids
+        .iter()
+        .filter(|id| {
+            *id != GATE_JOB
+                && job_block(&code, id).is_some_and(|b| needs_line(&b).contains(GATE_JOB))
+        })
+        .collect();
+    assert_eq!(
+        downstream,
+        vec![TAG_JOB],
+        "only `{TAG_JOB}` may run after `{GATE_JOB}`: anything else downstream of the gate is a \
+         channel the gate cannot see"
+    );
 
     let mut missing = Vec::new();
     let mut unreported = Vec::new();
-    for id in ids.iter().filter(|id| *id != GATE_JOB) {
+    for id in ids
+        .iter()
+        .filter(|id| *id != GATE_JOB && !downstream.contains(id))
+    {
         if !needs.contains(id.as_str()) {
             missing.push(id.clone());
         }
@@ -178,6 +218,50 @@ fn the_gate_sees_every_other_job_of_the_release() {
          passed to `{GATE_SCRIPT}`: {unreported:?}. The gate would wait for them and then decide \
          without looking at them"
     );
+}
+
+/// The tag `v<version>` is what marks a version as released: the next push of the same version
+/// releases nothing (scripts/release-version.sh). So it is written LAST, and only when the gate
+/// says every channel that had to publish did — a tag on a half-published release would turn
+/// "retry the failed job" into "nothing to do".
+#[test]
+fn the_tag_is_created_only_after_the_gate_passes() {
+    let code = workflow_code();
+    let block = job_block(&code, TAG_JOB).unwrap_or_else(|| {
+        panic!("`tauri-release.yml` has no `{TAG_JOB}:` job: nothing tags a released version")
+    });
+    assert!(
+        needs_line(&block).contains(GATE_JOB),
+        "`{TAG_JOB}` must need `{GATE_JOB}`: the tag says «released», and only the gate knows"
+    );
+    assert!(
+        block.contains("needs.release-gate.result == 'success'") && block.contains(RELEASE_ONLY),
+        "`{TAG_JOB}` must run only on a release whose gate is green"
+    );
+    // `always()` is REQUIRED here, not tolerated: the implicit `success()` of a job-level `if:` is
+    // also false when an ANCESTOR was skipped, and a store channel declared pending is a skipped
+    // ancestor. Without it the tag would never be written while a channel is pending. What keeps
+    // a red gate from tagging is the explicit `needs.release-gate.result == 'success'` above.
+    assert!(
+        block.contains("always()"),
+        "`{TAG_JOB}` needs `always()`: a pending (skipped) store job upstream would otherwise \
+         skip it and no released version would ever be tagged"
+    );
+    assert!(
+        block.contains("gh release create"),
+        "`{TAG_JOB}` must create the tag and the GitHub Release (`gh release create`)"
+    );
+
+    // Nothing else tags: a second writer would mark a version released behind the gate's back.
+    for id in job_ids(&code).iter().filter(|id| *id != TAG_JOB) {
+        let other = job_block(&code, id).unwrap_or_default();
+        for writer in ["gh release create", "git tag", "git push"] {
+            assert!(
+                !other.contains(writer),
+                "the job `{id}` runs `{writer}`: only `{TAG_JOB}` may create the tag, after the gate"
+            );
+        }
+    }
 }
 
 #[test]

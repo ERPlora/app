@@ -127,6 +127,10 @@ fn keeping_the_build_from_other_pages_keeps_the_android_back_button() {
 // `the_page_and_the_shell_name_the_same_command` read `apps/web/src/lib/app-update.ts`, the page
 // half of this channel, which did not move with the app (README.md, «Tests retirados»).
 
+/// The step of `tauri-release.yml` that uploads the installers and the manifest to S3 (AWS, by
+/// OIDC; it was Hetzner's object storage in ERPlora/hub).
+const UPLOAD_STEP: &str = "Upload installers and latest.json to S3";
+
 #[test]
 fn the_release_publishes_the_version_the_cloud_reports() {
     // Without this file there is nothing to compare against: the bucket holds installers, and an
@@ -141,16 +145,22 @@ fn the_release_publishes_the_version_the_cloud_reports() {
         workflow.contains("downloads/app/latest/latest.json"),
         "the version manifest must land on the key the SaaS reads — `downloads/app/latest/latest.json`"
     );
+    // The SaaS reads the AWS bucket (saas-next `public/appdist.py`, `DOWNLOADS_BUCKET`): a manifest
+    // still written to Hetzner would be a channel nobody reads.
+    assert!(
+        !workflow.contains("HETZNER_S3_") && workflow.contains("vars.DOWNLOADS_BUCKET"),
+        "the manifest must go to the AWS downloads bucket (`vars.DOWNLOADS_BUCKET`), not Hetzner"
+    );
 }
 
 #[test]
 fn the_manifest_is_refreshed_for_every_channel_the_bucket_serves() {
-    // `latest/` is the folder the Cloud serves from, on a tag push AND on a manual dispatch. A
-    // manifest written only on tags would leave a hand-refreshed `latest/` announcing the previous
-    // version — an update that never stops being offered, and an installer that is already there.
+    // `latest/` is the folder the Cloud serves from. A manifest written apart from the installers
+    // could announce a version whose installer is not there yet, or leave `latest/` announcing the
+    // previous one — an update that never stops being offered.
     let workflow = read(".github/workflows/tauri-release.yml");
     let manifest_step = workflow
-        .split("Upload to Hetzner Object Storage")
+        .split(UPLOAD_STEP)
         .nth(1)
         .expect("the upload step is where the manifest is written");
     assert!(

@@ -22,7 +22,7 @@
 #                                    failure as `continue-on-error`, one line lower (rv-1993).
 #   · without `actions/checkout`   → the script does not exist on the runner.
 #
-# Hermetic: reads the workflow, never runs it. Wired in `.github/workflows/actionlint.yml`.
+# Hermetic: reads the workflow, never runs it. Run by the `scripts` job of `.github/workflows/test-shell.yml`.
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 

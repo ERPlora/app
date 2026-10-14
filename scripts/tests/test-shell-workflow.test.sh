@@ -17,6 +17,11 @@
 #
 # Also hub#2689: a push (to `main`) finishes; only a PR's newer head cancels its older run.
 #
+# And (ERPlora/app, 2026-10-14): the workflow is also CALLED by `tauri-release.yml` (`workflow_call`),
+# whose builds need it — nothing is published on red. Its `scripts` job runs actionlint over every
+# workflow and EVERY `scripts/*.test.sh` and `scripts/tests/*.test.sh` (this contract included):
+# in ERPlora/hub five of them ran only in `actionlint.yml`, which did not move with the app.
+#
 # Parsed as YAML (PyYAML, as `canonical-mirrors-workflow.test.sh`), so a case names what is
 # missing. `--workflow <path>` lets the guard be proven on a mutated copy.
 set -uo pipefail
@@ -43,6 +48,7 @@ fi
 
 WORKFLOW="$workflow" python3 - <<'PY'
 import os
+import re
 import sys
 
 import yaml
@@ -73,6 +79,13 @@ triggers = doc.get("on", doc.get(True)) or {}
 pr = triggers.get("pull_request") or {}
 push = triggers.get("push") or {}
 check("the workflow runs on `pull_request`", isinstance(triggers.get("pull_request"), dict), f"got {pr!r}")
+# The release calls this workflow and builds only after it (ERPlora/app): without `workflow_call`
+# the `uses:` of `tauri-release.yml` has nothing to call and the release cannot start.
+check(
+    "the workflow can be called (`workflow_call`) — the release needs it before building",
+    "workflow_call" in triggers,
+    f"triggers are {list(triggers)}",
+)
 check(
     "`pull_request.types` includes `ready_for_review`",
     "ready_for_review" in (pr.get("types") or []),
@@ -95,6 +108,9 @@ for event, block in (("pull_request", pr), ("push", push)):
         ".github/workflows/test-shell.yml",
         ".github/workflows/*.yml",
         SELF,
+        # Every script and its test (ERPlora/app): the `scripts` job runs all of them, so a change
+        # to any one alone must trigger it.
+        "scripts/**",
     ):
         check(
             f"`{event}.paths` includes `{wanted}`",
@@ -189,8 +205,6 @@ for s in cargo_steps:
     )
 
 for name in (
-    # Bash rules that do not depend on the OS: once is enough, and PowerShell cannot run them.
-    "Release gate rules (scripts/release-gate.test.sh)",
     "System deps (webkit2gtk + GTK)",
     "Setup JDK 17",
     "Setup Android SDK",
@@ -244,23 +258,72 @@ for s in steps:
             f"shell is {s.get('shell')!r} — PowerShell would choke on the bash body",
         )
 
-# ── 4 · This contract test RUNS somewhere ─────────────────────────────────────────────
-# `actionlint.yml` is not its home: this workflow already fires on every change to itself and to
-# this file (section 1), and runs it as a Linux step — a test nobody runs is a shopping list.
-contract_steps = [
-    s for s in steps
-    if any(line.strip() in (f"bash ./{SELF}", f"bash {SELF}") for line in run_of(s).splitlines())
-]
-check("a step runs this contract test (`bash ./" + SELF + "`)", len(contract_steps) == 1, f"found {len(contract_steps)}")
-for s in contract_steps:
+# ── 4 · actionlint and EVERY script test run, once, in the `scripts` job ─────────────────────
+# This contract, the release gate rules and the five tests that `actionlint.yml` ran in ERPlora/hub
+# (pack-msix, apt-lock-retry, setup-android-packages and the two Play reviewer preflights) are bash
+# rules that do not depend on the OS: one Linux job, by glob — a test nobody runs is a shopping
+# list, and a list of names forgets the next file.
+scripts_job = jobs.get("scripts") or {}
+check("the workflow has the `scripts` job", bool(scripts_job), f"jobs are {list(jobs)}")
+check(
+    "the `scripts` job skips draft PRs",
+    str(scripts_job.get("if", "")).strip() == DRAFT_IF,
+    f"if is {scripts_job.get('if')!r}",
+)
+check(
+    "the `scripts` job runs on the Linux runner",
+    str(scripts_job.get("runs-on", "")).strip() == expected_os["linux"],
+    f"runs-on is {scripts_job.get('runs-on')!r}",
+)
+script_steps = [s for s in (scripts_job.get("steps") or []) if isinstance(s, dict)]
+script_runs = "\n".join(run_of(s) for s in script_steps)
+install = next((s for s in script_steps if "download-actionlint.bash" in run_of(s)), None)
+check("the `scripts` job installs actionlint with its official downloader", install is not None)
+if install is not None:
+    pinned = str((install.get("env") or {}).get("ACTIONLINT_VERSION", ""))
     check(
-        "the contract step runs on Linux only (once, not three times)",
-        str(s.get("if", "")).strip() == LINUX_ONLY,
-        f"if is {s.get('if')!r}",
+        "actionlint is pinned to an exact version",
+        bool(re.fullmatch(r"\d+\.\d+\.\d+", pinned)),
+        f"ACTIONLINT_VERSION is {pinned!r} — a moving version turns red on a day nothing changed",
     )
+lint = next((s for s in script_steps if "actionlint" in run_of(s) and "download-actionlint" not in run_of(s)), None)
+check("the `scripts` job runs actionlint over the workflows", lint is not None)
+if lint is not None:
+    check(
+        "actionlint runs without the external linters (`-shellcheck= -pyflakes=`)",
+        "-shellcheck=" in run_of(lint) and "-pyflakes=" in run_of(lint),
+        f"run is {run_of(lint)!r} — the verdict would depend on what the runner has installed",
+    )
+loop = next(
+    (s for s in script_steps if "scripts/*.test.sh" in run_of(s) and "scripts/tests/*.test.sh" in run_of(s)),
+    None,
+)
+check(
+    "the `scripts` job runs every `scripts/*.test.sh` and `scripts/tests/*.test.sh` by glob",
+    loop is not None,
+    f"runs are {script_runs!r}",
+)
+if loop is not None:
+    check(
+        "the loop reports every red test, not only the first (no `set -e` stop mid-loop)",
+        "failed" in run_of(loop),
+        run_of(loop),
+    )
+# Not twice: the old Linux steps of the `test` job ran two of them; the loop runs all.
+for name in ("release-gate.test.sh", SELF.rsplit("/", 1)[1]):
+    dupes = [s for s in steps if name in run_of(s)]
+    check(f"`{name}` is not also run by the `test` job", not dupes, f"found {len(dupes)}")
 
 # ── 5 · A push finishes; only a PR's newer head cancels (hub#2689) ────────────────────
 concurrency = doc.get("concurrency") or {}
+# Called by the release, `github.*` is the CALLER's context: with a group of `github.ref` alone the
+# release's call and the push's own run share it, and a third push cancels the release's PENDING
+# tests (one pending per group). `github.workflow` keeps the two apart.
+check(
+    "the concurrency group carries `github.workflow` (the release's call never queues behind a push)",
+    "github.workflow" in str(concurrency.get("group", "")),
+    f"group is {concurrency.get('group')!r}",
+)
 check(
     "a push finishes; only a PR's newer head cancels its older run (hub#2689)",
     str(concurrency.get("cancel-in-progress")).strip() == "${{ github.event_name == 'pull_request' }}",

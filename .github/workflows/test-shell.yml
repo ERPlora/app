@@ -22,7 +22,15 @@
 # did — a `save-if` written differently in `test-hub.yml` — and `develop` stayed red in the shell
 # without a single run saying so, because nothing that runs this suite had been triggered.
 #
-# Contract: `scripts/tests/test-shell-workflow.test.sh`, run as the first Linux step below.
+# It is also CALLED by `tauri-release.yml` (`workflow_call`): the release builds nothing until these
+# tests are green, so nothing is ever published on red.
+#
+# Its `scripts` job runs `actionlint` over every workflow and EVERY `scripts/*.test.sh` and
+# `scripts/tests/*.test.sh` — this workflow's own contract, the rules of both release gates, the MSIX
+# packaging, the apt lock, the Android SDK setup and the Play reviewer preflight. In ERPlora/hub five
+# of them ran only in `actionlint.yml`, which did not move with the app.
+#
+# Contract: `scripts/tests/test-shell-workflow.test.sh`, run by the `scripts` job below.
 # ==============================================================================
 
 name: Shell tests (Tauri thin client)
@@ -42,22 +50,16 @@ on:
       - "rust-toolchain.toml"
       - "crates/peripherals/**"
       - "crates/tauri-plugin-erplora-android/**"
-      - "scripts/kotlin-plugin-tests.sh"
       - ".github/workflows/test-shell.yml"
       # Its contract (hub#2705): a PR that only touches the test must run it.
       - "scripts/tests/test-shell-workflow.test.sh"
-      # `release_runner_assumptions.rs` reads EVERY workflow (see the header): any of them can
-      # turn this suite red.
+      # `release_runner_assumptions.rs` reads EVERY workflow (see the header), and the `scripts`
+      # job lints them all: any of them can turn this suite red. That includes `tauri-release.yml`,
+      # whose APK permission check `android_local_network.rs` guards (hub#337).
       - ".github/workflows/*.yml"
-      # `android_local_network.rs` lee este workflow: comprueba que el job de release sigue
-      # leyendo los permisos DEL APK construido (hub#337). Sin esta ruta, un PR que solo tocase
-      # el release podría quitar ese paso sin que la guarda llegase a correr.
-      - ".github/workflows/tauri-release.yml"
-      # Las reglas del `release-gate` (hub#895) y su test: viven en `scripts/`, así que un cambio
-      # que solo las tocase no dispararía nada sin esta ruta — y el gate es lo único que impide
-      # que un tag que no publica nada salga verde.
-      - "scripts/release-gate.sh"
-      - "scripts/release-gate.test.sh"
+      # Every script and its test: the `scripts` job runs all of them (both release gates, the
+      # MSIX packer, the apt wrapper, the Play preflight…) and the `test` job the Kotlin runner.
+      - "scripts/**"
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
@@ -72,26 +74,25 @@ on:
       - "rust-toolchain.toml"
       - "crates/peripherals/**"
       - "crates/tauri-plugin-erplora-android/**"
-      - "scripts/kotlin-plugin-tests.sh"
       - ".github/workflows/test-shell.yml"
       # Its contract (hub#2705): a PR that only touches the test must run it.
       - "scripts/tests/test-shell-workflow.test.sh"
-      # `release_runner_assumptions.rs` reads EVERY workflow (see the header): any of them can
-      # turn this suite red.
+      # `release_runner_assumptions.rs` reads EVERY workflow (see the header), and the `scripts`
+      # job lints them all: any of them can turn this suite red. That includes `tauri-release.yml`,
+      # whose APK permission check `android_local_network.rs` guards (hub#337).
       - ".github/workflows/*.yml"
-      # `android_local_network.rs` lee este workflow: comprueba que el job de release sigue
-      # leyendo los permisos DEL APK construido (hub#337). Sin esta ruta, un PR que solo tocase
-      # el release podría quitar ese paso sin que la guarda llegase a correr.
-      - ".github/workflows/tauri-release.yml"
-      # Las reglas del `release-gate` (hub#895) y su test: viven en `scripts/`, así que un cambio
-      # que solo las tocase no dispararía nada sin esta ruta — y el gate es lo único que impide
-      # que un tag que no publica nada salga verde.
-      - "scripts/release-gate.sh"
-      - "scripts/release-gate.test.sh"
+      # Every script and its test: the `scripts` job runs all of them (both release gates, the
+      # MSIX packer, the apt wrapper, the Play preflight…) and the `test` job the Kotlin runner.
+      - "scripts/**"
   workflow_dispatch:
+  # `tauri-release.yml` calls this workflow and builds only after it is green.
+  workflow_call:
 
 concurrency:
-  group: test-shell-${{ github.ref }}
+  # `github.workflow` is the CALLER's name when `tauri-release.yml` calls this workflow: without it
+  # the release's call and the push's own run share one group, and a third push would cancel the
+  # release's pending tests (one pending run per group).
+  group: test-shell-${{ github.workflow }}-${{ github.ref }}
   # hub#2689 — a PR's newer head cancels its older run; a push always finishes.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -105,6 +106,55 @@ env:
   NODE_OPTIONS: --dns-result-order=ipv4first
 
 jobs:
+  # ── Workflows and scripts: actionlint + every script test, once, on Linux ──────────────────
+  #
+  # Bash and Python rules that do not depend on the OS: this workflow's contract, the release's
+  # contract, both release gates (version and publication), the MSIX packer, the apt lock wrapper,
+  # the Android SDK setup and the Play reviewer preflight. By GLOB, not by name: a new
+  # `*.test.sh` runs the day it is committed, and a list of names forgets the next file.
+  scripts:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    name: actionlint + script tests
+    runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Pinned version + official downloader (a static Go binary, no package manager), as
+      # `actionlint.yml` did in ERPlora/hub. Bump the version deliberately, not via a moving tag.
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+        run: |
+          set -euo pipefail
+          bash <(curl -fsSL "https://raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/scripts/download-actionlint.bash") \
+            "${ACTIONLINT_VERSION}" "${RUNNER_TEMP}"
+
+      # A workflow GitHub cannot parse "fails" with 0 jobs and no log. `-shellcheck= -pyflakes=`:
+      # the verdict must not depend on what the runner happens to have installed.
+      - name: actionlint (all workflows)
+        run: '"${RUNNER_TEMP}/actionlint" -color -shellcheck= -pyflakes='
+
+      # Every test runs and every red is listed: stopping at the first one hides the others for a
+      # whole round trip.
+      - name: Script tests (scripts/*.test.sh, scripts/tests/*.test.sh)
+        run: |
+          set -uo pipefail
+          failed=""
+          for t in scripts/*.test.sh scripts/tests/*.test.sh; do
+            echo "::group::$t"
+            if ! bash "$t"; then
+              failed="$failed $t"
+            fi
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            for t in $failed; do echo "::error::$t failed"; done
+            exit 1
+          fi
+          echo "every script test passed"
+
   test:
     # Draft = no CI. PRs are born as drafts: they are reviewed and fixed WITHOUT runs in flight and
     # the suite runs ONCE, when they are marked ready (ready_for_review). Measured on 29/08: half
@@ -146,21 +196,6 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v4
-
-      # This workflow's own contract (hub#2705): the matrix, what runs where, the draft filter.
-      # First and on Linux only — it takes a second and does not depend on the OS.
-      - name: Contract of test-shell.yml (scripts/tests/test-shell-workflow.test.sh)
-        if: matrix.label == 'linux'
-        run: bash ./scripts/tests/test-shell-workflow.test.sh
-
-      # BEFORE the system deps on purpose: it takes under a second and needs nothing from the
-      # machine, so a failure shows at once instead of after compiling the whole Tauri stack. These
-      # are the rules of the `release-gate` of `tauri-release.yml` (hub#895) — the job that makes
-      # "green tag" mean "published". Its only other place to run would be a tag, which cannot be
-      # re-run. Linux only: the rules are bash and OS-independent.
-      - name: Release gate rules (scripts/release-gate.test.sh)
-        if: matrix.label == 'linux'
-        run: ./scripts/release-gate.test.sh
 
       # Tauri v2 system deps on Linux (webview + GTK). No appindicator/librsvg: the shell uses no
       # tray and nothing is bundled here. Through the apt-lock wrapper: another job on the shared
