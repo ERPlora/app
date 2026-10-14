@@ -56,22 +56,45 @@ vive solo ahí; una versión publicada se marca con su tag `v<versión>`, que cr
 terminar. No hay que crear tags a mano.
 
 `tauri-release.yml` corre en cada push a `main` (y a mano, `gh workflow run tauri-release.yml -R
-ERPlora/app`; con `-f publish=false` solo construye). Su primer job, `version`
-(`scripts/release-version.sh`), decide:
+ERPlora/app`; con `-f publish=false` solo construye). **Solo publica desde `refs/heads/main`**
+(igualdad exacta): lanzado a mano en otra rama (`--ref feat/x`) construye y avisa con un
+`::notice::`, pero no publica ni crea el tag. Su primer job, `version` (`scripts/release-version.sh`),
+decide:
 
 - el tag `v<versión>` **ya existe** → todo lo demás se salta y el resumen del run lo dice (un push de
   docs o de CI no publica nada);
 - **no existe** y la versión es mayor que el último tag `vX.Y.Z` → tests (`test-shell.yml`, llamado)
-  → builds (escritorio ×3 y Android) → Microsoft Store, Google Play y S3 → `release-gate` →
-  tag `v<versión>` + GitHub Release con los instaladores (`.exe`, `.msi`, AppImage, `.deb`, `.dmg`,
-  `.apk`);
+  → builds (escritorio ×3 y Android; cada plataforma sale en rojo si le falta uno de sus bundles) →
+  `collect` (están los seis instaladores y el AAB, y abre la **GitHub Release en borrador**
+  `v<versión>` con los instaladores) → Microsoft Store, Google Play y S3 → `release-gate` → publica
+  el borrador, que es lo que crea el tag `v<versión>`;
+- **existe un borrador `v<versión>` abierto por otra run** → **rojo**: esa publicación ya empezó
+  (ver «Si una release se queda a medias»);
 - **no existe** y no es mayor (o no es `X.Y.Z`, o minor/patch ≥ 1000) → **rojo** con el motivo: la
   Store y Play solo aceptan versiones crecientes y el `versionCode` es `major·10⁶ + minor·10³ + patch`.
 
 Para publicar: subir `version` en `src-tauri/tauri.conf.json` (hoy 1.1.30, la última publicada desde
-el monorepo; la siguiente es 1.1.31 o mayor) y hacer push a `main`. Si un canal falla a mitad, se
-reintenta con `gh run rerun <id> --failed` (los artefactos duran 3 días): el tag no se crea hasta que
-el gate está en verde. Si hay que cambiar código, se sube otra vez la versión.
+el monorepo; la siguiente es 1.1.31 o mayor) y hacer push a `main`.
+
+Una release a la vez para todas las ramas: el grupo de concurrencia es `tauri-release`, sin la ref, y
+un push nunca cancela una release en curso. GitHub guarda **una** run pendiente por grupo: si llega
+otra, la pendiente anterior se cancela (la nueva, si es de `main`, lleva sus commits; si una run de
+otra rama desplaza un push de `main` con versión nueva, se relanza con
+`gh workflow run tauri-release.yml -R ERPlora/app --ref main`).
+
+**Si una release se queda a medias** (p. ej. Play y S3 publicados y la Store en rojo): el tag no
+existe todavía, pero sí el borrador `v<versión>`, que `collect` abre antes del primer canal y que
+lleva el id de su run. Desde ahí:
+
+1. Lo normal es **relanzar esa misma run**: `gh run rerun <id> --failed` (los artefactos duran 3 días).
+   Repite solo lo que falló; S3 acepta sobrescribir porque `latest.json` lleva el mismo `run-id`.
+2. Cualquier otra run de la misma versión (otro push a `main`, un dispatch) sale en **rojo** en
+   `version`: «version X already started publishing in run N … gh run rerun N --failed … or bump».
+   No recompila otro código ni lo vuelve a publicar con el mismo número.
+3. Si hay que cambiar código: **subir la versión** y borrar el borrador viejo, que no tiene tag
+   (`gh release delete v<versión> -R ERPlora/app`, solo si nunca llegó a publicarse).
+4. Segunda capa, en S3: `upload-s3` no sobrescribe `downloads/app/v<versión>/` si su `latest.json`
+   lo escribió otra run (`scripts/ci/s3-version-guard.sh`, comprueba el metadato `run-id`).
 
 `release-gate` (`scripts/release-gate.sh`) pone la release en rojo si un canal no publicó, salvo que
 esté declarado en la Variable `RELEASE_CHANNELS_PENDING` (hoy `store,play,s3`: ninguno está
@@ -80,6 +103,11 @@ enchufado en este repo); entonces pasa en verde con un aviso. Al enchufar un can
 **S3 (AWS, OIDC, sin claves estáticas).** `upload-s3` asume el rol `AWS_DOWNLOADS_ROLE_ARN` y escribe
 en `DOWNLOADS_BUCKET` las claves de siempre: `downloads/app/v<versión>/…` y `downloads/app/latest/…`,
 con `downloads/app/latest/latest.json` al final (lo que lee el SaaS en `GET /api/v1/app/release/`).
+El rol de aws-next debe confiar **solo** en los runs de `main` de este repo: sujeto OIDC
+`repo:ERPlora/app:ref:refs/heads/main`. Ojo: la organización emite sujetos con id inmutable, así que
+el que llega de verdad es
+`repo:ERPlora@183305526/app@1418874207:ref:refs/heads/main` (org `ERPlora` = 183305526, repo
+`ERPlora/app` = 1418874207); la condición de confianza tiene que usar ese.
 El bucket y el rol los crea aws-next (PLAN-AWS, ronda 18) y **aún no existen**: mientras falten las
 dos Variables, el job avisa («S3 upload skipped: AWS_DOWNLOADS_ROLE_ARN/DOWNLOADS_BUCKET not set») y
 los instaladores solo van a la GitHub Release. Cuando existan:
@@ -126,9 +154,15 @@ visibilidad solo para repos privados: `ERPlora/app` es público, no la ve, y tod
 en `ubuntu-latest` (lo correcto en un repo público: un runner propio no debe ejecutar código de PRs
 ajenas). No se ha copiado al repo.
 
+Las acciones de terceros (todo lo que no es `actions/*`) van fijadas por SHA de commit, con la
+versión en un comentario; el contrato lo exige en todos los workflows. Para subir una: resolver el SHA
+del tag nuevo (`git ls-remote https://github.com/<owner>/<repo> 'refs/tags/<tag>^{}'`) y cambiar
+SHA y comentario a la vez.
+
 Contratos: `scripts/tests/tauri-release-workflow.test.sh`, `scripts/tests/test-shell-workflow.test.sh`,
-`scripts/release-version.test.sh`, `scripts/release-gate.test.sh`, `scripts/tests/require-config.test.sh`
-y los tests Rust `release_gate.rs`, `release_runner_assumptions.rs`, `app_update_channel.rs`.
+`scripts/release-version.test.sh`, `scripts/release-gate.test.sh`, `scripts/tests/require-config.test.sh`,
+`scripts/tests/s3-version-guard.test.sh` y los tests Rust `release_gate.rs`,
+`release_runner_assumptions.rs`, `app_update_channel.rs`.
 
 ## Secrets y variables de la CI (solo nombres)
 
@@ -231,3 +265,11 @@ lo que se puede comprobar en este repo sigue. El port del puente JS en `hub-next
 - `src-tauri/tests/app_update_channel.rs`: el paso que escribe `latest.json` se llama
   `Upload installers and latest.json to S3` (antes `Upload to Hetzner Object Storage`), y se exige que
   vaya al bucket de AWS (`vars.DOWNLOADS_BUCKET`) y no a Hetzner.
+- Revisión del 2026-10-14 (publicar solo desde `main`, release a medias, instaladores ausentes):
+  en `release_gate.rs` el job del tag ya no hace `gh release create`, publica el borrador
+  (`gh release edit … --draft=false`, que es lo que crea el tag), y fuera de él un `gh release create`
+  solo vale con `--draft`. En `tauri-release-workflow.test.sh`, los jobs que publican necesitan
+  `collect` (que necesita los dos builds) en vez de los builds directamente; «`github-release` es el
+  único con `contents: write`» pasa a «solo `version` (para ver borradores), `collect` y
+  `github-release`»; y la acción de credenciales de AWS se reconoce por nombre, fijada por SHA de la
+  línea v4, en vez de por `@v4`.
