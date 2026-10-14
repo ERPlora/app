@@ -422,8 +422,12 @@ mod tests {
             }
         });
 
+        // The window to come back must outlast a slow runner, not just the 40 ms above: with 8
+        // attempts it was ~160 ms, and on a loaded macOS runner (~200 tests in parallel on 3
+        // cores) the printer came back later and the job failed (ERPlora/app run 38573290656).
+        // 50 attempts × 20 ms ≈ 1 s; the test still ends as soon as the printer is back.
         let queue = Arc::new(PrintQueue::new(RetryPolicy {
-            max_attempts: 8,
+            max_attempts: 50,
             backoff_ms: 20,
             connect_timeout_ms: 1000,
             write_timeout_ms: 1000,

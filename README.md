@@ -273,3 +273,7 @@ lo que se puede comprobar en este repo sigue. El port del puente JS en `hub-next
   único con `contents: write`» pasa a «solo `version` (para ver borradores), `collect` y
   `github-release`»; y la acción de credenciales de AWS se reconoce por nombre, fijada por SHA de la
   línea v4, en vez de por `@v4`.
+- `crates/peripherals/src/queue.rs`, test `a_printer_that_comes_back_still_gets_its_job`: la ventana
+  para que la impresora vuelva era de 8 intentos × 20 ms (~160 ms) y en macOS, con ~200 tests en
+  paralelo en 3 núcleos, la impresora volvía más tarde y el trabajo fallaba (run `38573290656`). Ahora
+  son 50 intentos (~1 s); el test sigue acabando en cuanto la impresora vuelve (~60 ms).
