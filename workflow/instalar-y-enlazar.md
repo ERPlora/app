@@ -18,7 +18,7 @@ Pasos:
    dispositivo y la oculta dentro de la propia aplicación.
 Entra: el instalador del canal; en el instalador de Windows y en el de la Store, el esquema
 `erplora://` queda registrado al instalar.
-Sale: la aplicación `com.erplora.app` con su versión (la de `tauri.conf.json`, que cada publicación sobrescribe con el tag; 1.0.1 es el valor del repo) y su canal
+Sale: la aplicación `com.erplora.app` con su versión (la de `tauri.conf.json`, única fuente: cada publicación la toma tal cual y crea el tag `v<versión>`; hoy 1.1.30) y su canal
 (`play`, `msstore` o `direct`), horneado al compilar en Android y deducido en ejecución en Windows
 (una copia que corre desde `WindowsApps` es `msstore`). Ante la duda es `direct`, a propósito.
 Si falla: Windows muestra su aviso de editor desconocido; macOS, el de desarrollador no verificado;

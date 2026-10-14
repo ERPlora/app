@@ -7,6 +7,9 @@ la **MISMA app Tauri** de este repo, bajo la identidad única **`com.erplora.app
 job **`build-android`**. ADR-0196 remata la dirección: **la app Kotlin de
 `ERPlora-Bridge-android` muere**, y con ella el bridge como proceso aparte.
 
+> Una **release** es un push a `main` con una versión nueva en `src-tauri/tauri.conf.json` (README,
+> «CI/CD»); ya no hay tags `v*` a mano: el tag lo crea la propia release al terminar.
+
 > ✅ **El job `publish-play` ya existe** en este workflow y el AAB sale firmado del pipeline. Lo
 > que falta es trámite, no cableado — ver «Estado real» aquí abajo. Seguimiento: hub#984 (hub#308
 > se consolidó ahí).
@@ -26,8 +29,8 @@ landing no ofrece APK: el endpoint de descarga del SaaS hace **redirect 302** a 
 | Formularios | **Los 10 completos** y en «Ready to send for review»: content rating, target audience 18+, privacy policy, ads, data safety, health apps, government apps, financial features, advertising ID, sign in details |
 | Cuenta para el revisor | Declarada («ERPlora reviewer account», usuario + contraseña + instrucciones) |
 | Envío a revisión | ⚠️ **Nunca se había hecho.** `Submission activity` estaba vacío y los 14 cambios llevaban desde el 14/08 guardados sin enviar. La app seguía en `Draft` como `com.erplora.app (unreviewed)` |
-| `PLAY_PACKAGE_NAME` / `PLAY_SERVICE_ACCOUNT_JSON` | ❌ No existen → `publish-play` sale **skipped** en cada tag |
-| `RELEASE_CHANNELS_PENDING` | `store,play` → el gate deja pasar el tag en VERDE aunque no publique |
+| `PLAY_PACKAGE_NAME` / `PLAY_SERVICE_ACCOUNT_JSON` | ❌ No existen (tampoco en `ERPlora/app`) → `publish-play` sale **skipped** en cada release |
+| `RELEASE_CHANNELS_PENDING` | `store,play,s3` → el gate deja pasar la release en VERDE (avisando) aunque no publique en esos canales |
 
 **Orden que queda**, y no se salta ninguno:
 
@@ -43,18 +46,21 @@ landing no ofrece APK: el endpoint de descarga del SaaS hace **redirect 302** a 
    vacío de módulos. Los cuatro son el mismo rechazo: el revisor no ve la app. **Sale en rojo si
    faltan las credenciales**, nunca en verde por no poder comprobarlo. Si falla, se arregla el hub
    o la variable y se vuelve a correr: **no se envía con esto en rojo.** Con el canal de CI
-   encendido (paso 3) la corre además el job `publish-play` antes de subir cada tag (hub#1888).
+   encendido (paso 3) la corre además el job `publish-play` antes de subir cada release (hub#1888).
 
 1. Enviar a revisión el lote de la Alpha cerrada (botón «Submit N changes for review»).
 2. Aprobada: crear release de **Producción** y enviarla también. Hasta que Producción esté LIVE,
    `play.google.com/store/apps/details?id=com.erplora.app` responde **404**.
 3. Service account (invitada en Play Console con «Release to testing tracks») → secret
-   `PLAY_SERVICE_ACCOUNT_JSON` + Variable `PLAY_PACKAGE_NAME` **en el repo `ERPlora/hub`**: las
-   Variables de la organización NO llegan a un repo privado con el plan Free. En el MISMO repo y
-   **antes** de poner `PLAY_PACKAGE_NAME`: Variables `PLAY_REVIEWER_EMAIL` y `PLAY_REVIEWER_HUB` +
-   secret `PLAY_REVIEWER_PASSWORD` (los valores del `.env`). El job corre la guardia del paso 0
-   antes de subir, y sin ellas cada tag sale en rojo `missing_credentials` (hub#1888).
-4. Quitar **`play`** de `RELEASE_CHANNELS_PENDING` — hacerlo antes deja los tags en rojo.
+   `PLAY_SERVICE_ACCOUNT_JSON` + Variable `PLAY_PACKAGE_NAME` **en el repo `ERPlora/app`**
+   (`gh secret set -R ERPlora/app PLAY_SERVICE_ACCOUNT_JSON < service-account.json`,
+   `gh variable set -R ERPlora/app PLAY_PACKAGE_NAME --body com.erplora.app`): las Variables de la
+   organización con visibilidad privada NO llegan a un repo público. En el MISMO repo y **antes** de
+   poner `PLAY_PACKAGE_NAME`: Variables `PLAY_REVIEWER_EMAIL` y `PLAY_REVIEWER_HUB` + secret
+   `PLAY_REVIEWER_PASSWORD` (los valores del `.env`). El job corre la guardia del paso 0 antes de
+   subir, y sin ellas cada release sale en rojo `missing_credentials` (hub#1888); sin
+   `PLAY_SERVICE_ACCOUNT_JSON`, en rojo nombrándolo.
+4. Quitar **`play`** de `RELEASE_CHANNELS_PENDING` — hacerlo antes deja las releases en rojo.
 5. Mergear el cambio del SaaS que retira el APK de Android (`store_url_for`), **solo cuando el
    paso 2 esté LIVE**: antes mandaría al usuario a un 404 de Google.
 
@@ -81,7 +87,7 @@ landing no ofrece APK: el endpoint de descarga del SaaS hace **redirect 302** a 
 | Pieza | Dónde |
 | --- | --- |
 | Build del AAB | este repo, [`tauri-release.yml`](.github/workflows/tauri-release.yml) job `build-android` |
-| Subida a Object Storage | ídem, job `upload-s3` |
+| Subida a S3 (AWS, OIDC) | ídem, job `upload-s3` |
 | Publicación en Play | ídem, job **`publish-play`** — gateado por la Variable `PLAY_PACKAGE_NAME` (vacía = saltado) |
 | Redirect 302 a Play | SaaS `apps/public/downloads.py::store_url_for` + setting `GOOGLE_PLAY_APP_ID` |
 
@@ -95,11 +101,11 @@ No se repite en «Orden que queda» porque no queda: se deja escrito para que na
 3. **Formularios**: Data safety · content rating IARC · privacy policy · target audience · ads ·
    screenshots + feature graphic 1024×500 + icono 512×512. Los 10, completos.
 4. **Job `publish-play`** cableado en este repo, con el AAB firmado y verificado (`jarsigner`) y
-   `changesNotSentForReview: false` (hub#984) para que el tag envíe a revisión de verdad.
+   `changesNotSentForReview: false` (hub#984) para que la release envíe a revisión de verdad.
 
 ⚠️ **La promoción `internal` → `production` sigue siendo MANUAL, y automatizarla no es solo
 cuestión de confianza.** `publish-play` sube con `status: completed`, o sea **rollout al 100% de
-golpe**: poner `PLAY_TRACK=production` creyendo que se remata la automatización mandaría cada tag,
+golpe**: poner `PLAY_TRACK=production` creyendo que se remata la automatización mandaría cada release,
 sin probar, a **todas las cajas a la vez**. Para automatizarla hace falta antes un rollout
 escalonado (`status: inProgress` + `userFraction`), que hoy no está cableado.
 

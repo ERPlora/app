@@ -2,19 +2,20 @@
 
 Lógica de hardware POS reutilizable: renderiza **ESC/POS** y lo entrega por el transporte que
 nombre el `printer_id`.
-Diseño en [architecture/hub/apps/bridge.md](../../../architecture/hub/apps/bridge.md) (reubicado desde `ARQUITECTURA.md §2.7`). Es el reemplazo en Rust del Bridge Python
+Diseño: la tabla de [transportes](#transportes-printer_id) de este README (venía de `ARQUITECTURA.md §2.7`, luego
+`architecture/hub/apps/bridge.md` del repo de arquitectura, que no está en este repo). Es el reemplazo en Rust del Bridge Python
 (`bridge/ERPlora-Bridge-desktop`), empaquetado como **librería** sin servidor ni UI.
 
 ## Consumidores
 
-- **`apps/tauri`** — **la** app instalable (ADR-0196/0204): sus `invoke` de hardware llaman a este
+- **La app de este repo** (`src-tauri/`; antes `apps/tauri` en ERPlora/hub) — **la** app instalable (ADR-0196/0204): sus `invoke` de hardware llaman a este
   crate **in-process**. No hay servidor local, ni puerto, ni token de emparejamiento.
 
 > 🪦 Hubo un segundo consumidor, el **Bridge standalone** (`apps/bridge`, Axum `GET /status` +
 > `WS /ws` en `localhost:12321`), al que la web shell llegaba por localhost. ADR-0196 lo retiró y
 > **hub#340 lo borró del árbol**: el precio explícito es que una PWA en un navegador, sin la app,
-> no imprime tiques térmicos. Historia en
-> [architecture/hub/apps/bridge.md](../../../architecture/hub/apps/bridge.md).
+> no imprime tiques térmicos. Historia en `architecture/hub/apps/bridge.md` del repo de arquitectura
+> (`erplora-old/architecture`).
 
 Habla el **mismo protocolo JSON** que la web shell del Hub consume.
 

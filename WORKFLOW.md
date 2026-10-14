@@ -3,7 +3,7 @@
 Prefijo: HUB_APP
 Alcance MVP: transversal
 
-> Contrato de comportamiento de `apps/tauri` y, por referencia, de `crates/tauri-plugin-erplora-android`
+> Contrato de comportamiento de la app de este repo (`ERPlora/app`; antes `apps/tauri` en ERPlora/hub) y, por referencia, de `crates/tauri-plugin-erplora-android`
 > (el Kotlin de Android: permisos, Bluetooth, NFC, aviso permanente, guardar y imprimir). Contrastado
 > contra `origin/develop` del hub el 05/10/2026. Todo lo que aquí se afirma está **leído en el código,
 > sin ejecutar**: no se ha instalado la aplicación ni tocado ningún emulador. Lo técnico vive en
@@ -22,7 +22,7 @@ fuera de la ventana. La usan el **administrador** y el **responsable** (la insta
 y montan las impresoras) y, sin saberlo, el **cajero**, la **camarera** y el **empleado** cada vez que
 cobran, disparan una comanda o pasan la placa.
 
-Gobierna `apps/tauri/` y, **por referencia**, `crates/tauri-plugin-erplora-android/` (sus comandos y su
+Gobierna este repo (`src-tauri/`, `shell-dist/`) y, **por referencia**, `crates/tauri-plugin-erplora-android/` (sus comandos y su
 Kotlin son la mitad Android de los flujos de aquí). No gobierna `crates/peripherals` (qué bytes salen
 por la impresora: `HUB_PERIPHERALS`), ni el servidor del hub, ni lo que las pantallas del hub pintan.
 Hay un solo binario por sistema bajo una sola identidad, `com.erplora.app`.
@@ -384,7 +384,7 @@ Se resuelven con `market-decision`; no las decide el worker.
 
 - `GOOGLE-PLAY.md` dice «Sin declaración de FGS… la app no corre en segundo plano»: **ya no es cierto**; el
   manifiesto declara el servicio en primer plano `specialUse` desde hub#2307 y lo arranca la página.
-- `apps/tauri/README.md` y los comentarios de `app-update.ts` dicen que macOS «se construye solo en local»;
+- El README antiguo de la app (`apps/tauri/README.md` en ERPlora/hub) y los comentarios de `app-update.ts` decían que macOS «se construye solo en local»;
   `tauri-release.yml` ya construye el `.dmg` en CI (sin notarizar).
 - El guion de QA de Android (`qa-hub-android.md`) no tiene identificadores de escenario, solo fases;
   `PRINTING` cita `qa-hub-android §15`, que es el paso 15 de la Fase 3: debería escribirse `qa-hub-android Fase 3`.

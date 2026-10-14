@@ -38,33 +38,108 @@ cargo tauri android build --apk --aab # Android: JDK 17, SDK 36, NDK 27.1.122970
 ```bash
 cargo test --workspace --no-fail-fast      # los tres crates (erplora-tauri, plugin Android, peripherals)
 scripts/kotlin-plugin-tests.sh             # tests Kotlin del plugin: JDK 17 + platforms;android-36, tras un cargo build
-bash scripts/tests/test-shell-workflow.test.sh
-bash scripts/release-gate.test.sh
-bash scripts/pack-msix.test.sh
-bash scripts/tests/apt-lock-retry.test.sh
-bash scripts/tests/setup-android-packages.test.sh
-bash scripts/tests/play-reviewer-preflight.test.sh
-bash scripts/tests/play-reviewer-preflight-on-publish.test.sh
+for t in scripts/*.test.sh scripts/tests/*.test.sh; do bash "$t"; done   # contratos de los workflows y scripts de CI (PyYAML)
+actionlint -shellcheck= -pyflakes=         # los workflows (versión fijada en CI: 1.7.12)
 cargo test -p erplora-peripherals --test hardware_smoke -- --ignored --nocapture   # a mano, con impresora real
 ```
 
-En CI, `test-shell.yml` corre el `cargo test` en Linux, Windows y macOS y, solo en Linux, su propio
-contrato, las reglas del `release-gate` y los tests Kotlin. Los otros cinco tests de scripts de la
-lista de arriba los ejecutaba `actionlint.yml` del monorepo, que no se ha traído: hoy se corren a
-mano y quedan para la adaptación de los workflows.
+En CI, `test-shell.yml` tiene dos jobs: `test` corre el `cargo test` en Linux, Windows y macOS y, solo
+en Linux, los tests Kotlin; `scripts` corre `actionlint` y **todos** los `scripts/*.test.sh` y
+`scripts/tests/*.test.sh` por glob (en el monorepo cinco de ellos solo los corría `actionlint.yml`,
+que no se trajo). Se dispara en push a `main` y en PR cuando cambia algo de la app, de `scripts/` o
+de un workflow, y lo **llama** `tauri-release.yml` antes de construir nada.
 
-`tauri-release.yml` sigue tal cual (release con un tag `vX.Y.Z`), solo con las rutas corregidas; su
-paso a «release al hacer push a `main`» es otro trabajo.
+## CI/CD
+
+**Una release es un push a `main` con una versión nueva en `src-tauri/tauri.conf.json`.** La versión
+vive solo ahí; una versión publicada se marca con su tag `v<versión>`, que crea la propia release al
+terminar. No hay que crear tags a mano.
+
+`tauri-release.yml` corre en cada push a `main` (y a mano, `gh workflow run tauri-release.yml -R
+ERPlora/app`; con `-f publish=false` solo construye). Su primer job, `version`
+(`scripts/release-version.sh`), decide:
+
+- el tag `v<versión>` **ya existe** → todo lo demás se salta y el resumen del run lo dice (un push de
+  docs o de CI no publica nada);
+- **no existe** y la versión es mayor que el último tag `vX.Y.Z` → tests (`test-shell.yml`, llamado)
+  → builds (escritorio ×3 y Android) → Microsoft Store, Google Play y S3 → `release-gate` →
+  tag `v<versión>` + GitHub Release con los instaladores (`.exe`, `.msi`, AppImage, `.deb`, `.dmg`,
+  `.apk`);
+- **no existe** y no es mayor (o no es `X.Y.Z`, o minor/patch ≥ 1000) → **rojo** con el motivo: la
+  Store y Play solo aceptan versiones crecientes y el `versionCode` es `major·10⁶ + minor·10³ + patch`.
+
+Para publicar: subir `version` en `src-tauri/tauri.conf.json` (hoy 1.1.30, la última publicada desde
+el monorepo; la siguiente es 1.1.31 o mayor) y hacer push a `main`. Si un canal falla a mitad, se
+reintenta con `gh run rerun <id> --failed` (los artefactos duran 3 días): el tag no se crea hasta que
+el gate está en verde. Si hay que cambiar código, se sube otra vez la versión.
+
+`release-gate` (`scripts/release-gate.sh`) pone la release en rojo si un canal no publicó, salvo que
+esté declarado en la Variable `RELEASE_CHANNELS_PENDING` (hoy `store,play,s3`: ninguno está
+enchufado en este repo); entonces pasa en verde con un aviso. Al enchufar un canal se quita de la lista.
+
+**S3 (AWS, OIDC, sin claves estáticas).** `upload-s3` asume el rol `AWS_DOWNLOADS_ROLE_ARN` y escribe
+en `DOWNLOADS_BUCKET` las claves de siempre: `downloads/app/v<versión>/…` y `downloads/app/latest/…`,
+con `downloads/app/latest/latest.json` al final (lo que lee el SaaS en `GET /api/v1/app/release/`).
+El bucket y el rol los crea aws-next (PLAN-AWS, ronda 18) y **aún no existen**: mientras falten las
+dos Variables, el job avisa («S3 upload skipped: AWS_DOWNLOADS_ROLE_ARN/DOWNLOADS_BUCKET not set») y
+los instaladores solo van a la GitHub Release. Cuando existan:
+
+```bash
+gh variable set -R ERPlora/app AWS_DOWNLOADS_ROLE_ARN --body arn:aws:iam::<cuenta>:role/<rol>
+gh variable set -R ERPlora/app DOWNLOADS_BUCKET --body <bucket>
+# y quitar `s3` de RELEASE_CHANNELS_PENDING
+gh variable set -R ERPlora/app RELEASE_CHANNELS_PENDING --body store,play
+```
+
+**Secrets que hay que cargar** (no se pueden leer del repo antiguo; ninguno existe aún en
+`ERPlora/app`). Cada comando pide el valor por la entrada estándar:
+
+```bash
+# Android (obligatorios para CUALQUIER release: sin ellos build-android sale en rojo nombrándolos)
+gh secret set -R ERPlora/app ANDROID_KEYSTORE_BASE64      # base64 de la keystore (alias erplora, ADR-0053)
+gh secret set -R ERPlora/app ANDROID_KEYSTORE_PASSWORD
+# Microsoft Store (MICROSOFT-STORE.md, fase 3)
+gh secret set -R ERPlora/app AZURE_AD_TENANT_ID
+gh secret set -R ERPlora/app AZURE_AD_APPLICATION_CLIENT_ID
+gh secret set -R ERPlora/app AZURE_AD_APPLICATION_SECRET
+gh secret set -R ERPlora/app SELLER_ID
+# Google Play (GOOGLE-PLAY.md, paso 3)
+gh secret set -R ERPlora/app PLAY_SERVICE_ACCOUNT_JSON < service-account.json
+gh secret set -R ERPlora/app PLAY_REVIEWER_PASSWORD
+```
+
+Y las Variables que encienden cada tienda (sin ellas su job se salta y cuenta como pendiente):
+
+```bash
+gh variable set -R ERPlora/app MICROSOFT_STORE_PRODUCT_ID --body <Store ID>   # tras la 1.ª publicación manual
+gh variable set -R ERPlora/app PLAY_PACKAGE_NAME --body com.erplora.app
+gh variable set -R ERPlora/app PLAY_REVIEWER_EMAIL --body <email del revisor>
+gh variable set -R ERPlora/app PLAY_REVIEWER_HUB --body <slug del hub del revisor>
+gh variable set -R ERPlora/app PLAY_TRACK --body internal                      # opcional; internal por defecto
+```
+
+Un job de tienda que corre sin uno de sus secrets sale en **rojo nombrándolo**
+(`scripts/ci/require-config.sh`), nunca se salta en silencio.
+
+**Runner.** `CI_RUNNER_LABEL` es una Variable de la organización `ERPlora` (`self-hosted`) con
+visibilidad solo para repos privados: `ERPlora/app` es público, no la ve, y todos los jobs Linux caen
+en `ubuntu-latest` (lo correcto en un repo público: un runner propio no debe ejecutar código de PRs
+ajenas). No se ha copiado al repo.
+
+Contratos: `scripts/tests/tauri-release-workflow.test.sh`, `scripts/tests/test-shell-workflow.test.sh`,
+`scripts/release-version.test.sh`, `scripts/release-gate.test.sh`, `scripts/tests/require-config.test.sh`
+y los tests Rust `release_gate.rs`, `release_runner_assumptions.rs`, `app_update_channel.rs`.
 
 ## Secrets y variables de la CI (solo nombres)
 
 - **Secrets**: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `PLAY_SERVICE_ACCOUNT_JSON`,
   `PLAY_REVIEWER_PASSWORD`, `AZURE_AD_TENANT_ID`, `AZURE_AD_APPLICATION_CLIENT_ID`,
-  `AZURE_AD_APPLICATION_SECRET`, `SELLER_ID`, `HETZNER_S3_ACCESS_KEY`, `HETZNER_S3_SECRET_KEY`,
-  `HETZNER_S3_ENDPOINT` (y el `GITHUB_TOKEN` automático).
-- **Variables**: `CI_RUNNER_LABEL`, `MSIX_IDENTITY_NAME`, `MSIX_PUBLISHER`, `MSIX_PUBLISHER_DISPLAY`,
-  `MICROSOFT_STORE_PRODUCT_ID`, `PLAY_PACKAGE_NAME`, `PLAY_TRACK`, `PLAY_REVIEWER_EMAIL`,
-  `PLAY_REVIEWER_HUB`, `RELEASE_CHANNELS_PENDING`.
+  `AZURE_AD_APPLICATION_SECRET`, `SELLER_ID` (y el `GITHUB_TOKEN` automático). Los de Hetzner
+  (`HETZNER_S3_*`) ya no se usan: S3 va por OIDC.
+- **Variables**: `AWS_REGION` (`eu-west-1`), `AWS_DOWNLOADS_ROLE_ARN`, `DOWNLOADS_BUCKET`,
+  `MSIX_IDENTITY_NAME`, `MSIX_PUBLISHER`, `MSIX_PUBLISHER_DISPLAY`, `MICROSOFT_STORE_PRODUCT_ID`,
+  `PLAY_PACKAGE_NAME`, `PLAY_TRACK`, `PLAY_REVIEWER_EMAIL`, `PLAY_REVIEWER_HUB`,
+  `RELEASE_CHANNELS_PENDING`, `CI_RUNNER_LABEL` (de la organización, no visible aquí).
 
 Ningún secreto vive en el repo: la keystore y `keystore.properties` los escribe el job de Android
 desde los secrets, y `.gitignore` excluye `*.jks`, `*.keystore`, `keystore.properties` y
@@ -92,6 +167,16 @@ siguen igual).
 - `scripts/`: rutas de `pack-msix.ps1`, `pack-msix.test.sh`, `kotlin-plugin-tests.sh` y
   `gen-tauri-icon.py` sin el prefijo `apps/tauri/`.
 - Tests Rust que leían `../../..` (raíz del monorepo) ahora leen `..` (raíz de este repo).
+
+Después (2026-10-14), la CI/CD de este repo (sección «CI/CD»): release al hacer push a `main` con
+compuerta de versión en vez de tags `v*`, S3 de AWS por OIDC en vez de Hetzner, tag y GitHub Release
+al final, secrets de las tiendas comprobados con nombre, y `test-shell.yml` llamado por la release
+con un job `scripts` (actionlint + todos los tests de scripts). `tauri.conf.json` pasa de `1.0.1` (el
+valor que el workflow antiguo sobrescribía con el tag) a `1.1.30`, la última versión publicada desde
+el monorepo (`erplora-old/hub`, tag `v1.1.30` → `ce584178`). El tag `v1.1.30` de este repo la marca
+como publicada; va anotado sobre el commit que trae el workflow nuevo y esa versión, no sobre
+`f252e71`: el `tauri-release.yml` de `f252e71` aún se disparaba con tags `v*` y habría lanzado una
+release con el flujo antiguo.
 
 ## Tests retirados
 
@@ -126,3 +211,23 @@ lo que se puede comprobar en este repo sigue. El port del puente JS en `hub-next
   darse por descartado en el documento que se lee antes de tocar la impresión.
 - `scripts/tests/apt-lock-retry.test.sh`: su lista de pasos con apt conocidos ya no incluye
   `test-web.yml` ni `visual-baselines.yml`, que se quedaron en el monorepo.
+- `crates/peripherals/src/queue.rs` (tests): en el monorepo este crate solo se probaba en Linux; aquí
+  `test-shell.yml` lo corre también en Windows, donde dos tests fallaron en el primer run
+  (`38564104951`). `a_single_attempt_policy_does_not_retry` exigía < 10 ms y en Windows un `connect`
+  rechazado en loopback tarda ~1 s: ahora se mide contra el backoff (10 s), que es lo que delataría un
+  reintento. `send_once_gives_up_on_a_printer_that_accepts_but_never_reads` se ignora **solo en
+  Windows**: Winsock acepta los 16 MiB del envío no bloqueante en sus búferes aunque el otro extremo no
+  lea, así que no hay atasco que cortar; el plazo es el mismo código en todos los sistemas y Linux y
+  macOS lo siguen ejercitando.
+- `scripts/tests/test-shell-workflow.test.sh`: las dos aserciones «el paso `Release gate rules` corre
+  en Linux» y «un paso corre este contrato en Linux» pasan a «el job `scripts` corre todos los
+  `scripts/*.test.sh` y `scripts/tests/*.test.sh` por glob, y el job `test` ya no los repite». Nuevas:
+  `workflow_call`, `scripts/**` en los `paths`, `github.workflow` en el grupo de concurrencia y
+  actionlint fijado.
+- `src-tauri/tests/release_gate.rs`: el gate ya no se acota a `startsWith(github.ref, 'refs/tags/v')`
+  sino a `needs.version.outputs.release == 'true'`; «el gate necesita todos los demás jobs» excluye
+  ahora el único job que va detrás de él (`github-release`, el del tag), y un test nuevo exige que el
+  tag solo se cree ahí y con el gate en verde.
+- `src-tauri/tests/app_update_channel.rs`: el paso que escribe `latest.json` se llama
+  `Upload installers and latest.json to S3` (antes `Upload to Hetzner Object Storage`), y se exige que
+  vaya al bucket de AWS (`vars.DOWNLOADS_BUCKET`) y no a Hetzner.

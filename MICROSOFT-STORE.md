@@ -30,9 +30,11 @@ bridge headless NO tiene ficha de Store — ver la última sección.
   **No stagea ningún `dist/` de frontend**: la UI la sirve el hub cloud y la página de respaldo va
   dentro del propio exe (`frontendDist` = `shell-dist/`, ADR-0154).
 - [`.github/workflows/tauri-release.yml`](.github/workflows/tauri-release.yml) —
-  en el leg Windows del build (tag `v*`): pack MSIX → artifact `app-msix` → job
-  `publish-store` (`msstore publish`). Todo **gated por Variables del repo**: hasta que
-  existan, los pasos se saltan en silencio y el workflow actual no cambia.
+  en el leg Windows del build de cada release (push a `main` con una versión nueva en
+  `src-tauri/tauri.conf.json`): pack MSIX → artifact `app-msix` → job `publish-store`
+  (`msstore publish`). El MSIX se empaqueta si existe `MSIX_IDENTITY_NAME`; `publish-store` corre si
+  existe `MICROSOFT_STORE_PRODUCT_ID` (si no, el release gate sale en rojo salvo que `store` esté en
+  `RELEASE_CHANNELS_PENDING`) y sale en **rojo nombrando el secret** que falte.
 
 En la ruta MSIX **no aplica** `webviewInstallMode` (el instalador NSIS no se ejecuta);
 Win10/11 actualizados traen WebView2 Evergreen. El updater de Tauri no está configurado en la
@@ -51,9 +53,11 @@ app; si algún día se añade, **excluirlo del build de Store** (las updates las
    - `PublisherDisplayName`
    - **Store ID / Product ID** (para los enlaces y `msstore publish`)
 
-### Fase 1 — variables del repo `hub`
+### Fase 1 — variables del repo `ERPlora/app`
 
-En GitHub → Settings → Secrets and variables → Actions → **Variables**:
+En GitHub → Settings → Secrets and variables → Actions → **Variables** (o
+`gh variable set -R ERPlora/app <NOMBRE> --body <valor>`). Las tres `MSIX_*` ya están copiadas del
+repo antiguo (`ERPlora.ERPlora`, `CN=9C6129A7-8AC4-42FF-BF87-1D6473A180BB`, `ERPlora`):
 
 | Variable | Valor (de Partner Center) |
 | --- | --- |
@@ -64,8 +68,9 @@ En GitHub → Settings → Secrets and variables → Actions → **Variables**:
 
 ### Fase 2 — primera publicación (manual, requisito de Microsoft)
 
-La automatización exige que la app esté **ya publicada y live**. Lanza un tag `v*` (o
-`workflow_dispatch`) con `MSIX_IDENTITY_NAME` ya puesto → descarga el artifact `app-msix`
+La automatización exige que la app esté **ya publicada y live**. Lanza
+`gh workflow run tauri-release.yml -R ERPlora/app -f publish=false` (solo construye) con
+`MSIX_IDENTITY_NAME` ya puesto → descarga el artifact `app-msix`
 → súbelo a mano en la submission de Partner Center → certificación → publicar → esperar
 a verla live en `apps.microsoft.com`.
 
@@ -79,13 +84,15 @@ a verla live en `apps.microsoft.com`.
    un client secret.
 2. En Partner Center → Account settings → User management → **Microsoft Entra applications**:
    añadir esa app con rol **Manager**.
-3. Secrets del repo `hub`: `AZURE_AD_TENANT_ID` · `AZURE_AD_APPLICATION_CLIENT_ID` ·
-   `AZURE_AD_APPLICATION_SECRET` · `SELLER_ID` (Partner Center → Account settings → Identifiers).
-4. Poner la Variable `MICROSOFT_STORE_PRODUCT_ID`. Desde entonces, cada tag `v*` publica la
-   actualización sola (build → MSIX → `msstore publish` → certificación → la Store la entrega).
+3. Secrets del repo `ERPlora/app` (`gh secret set -R ERPlora/app <NOMBRE>`): `AZURE_AD_TENANT_ID` ·
+   `AZURE_AD_APPLICATION_CLIENT_ID` · `AZURE_AD_APPLICATION_SECRET` · `SELLER_ID` (Partner Center →
+   Account settings → Identifiers).
+4. Poner la Variable `MICROSOFT_STORE_PRODUCT_ID`. Desde entonces, cada release (versión nueva en
+   `main`) publica la actualización sola (build → MSIX → `msstore publish` → certificación → la
+   Store la entrega).
 5. Quitar `store` de la Variable `RELEASE_CHANNELS_PENDING` (hub#895). Mientras esté ahí, el
-   job `release-gate` deja pasar el tag en verde avisando de que la Store no publicó; en cuanto
-   se quita, un tag que no publique en la Store sale **rojo**. Dejarla puesta con el canal ya
+   job `release-gate` deja pasar la release en verde avisando de que la Store no publicó; en cuanto
+   se quita, una release que no publique en la Store sale **roja**. Dejarla puesta con el canal ya
    vivo solo produce un warning de «lista sin limpiar», nunca un rojo.
 
 ### Fase 4 — botón en erplora.com (repo `saas`)
@@ -93,7 +100,7 @@ a verla live en `apps.microsoft.com`.
 Con la ficha live: generar la insignia en <https://apps.microsoft.com/badge> con
 **Launch mode: Direct** (Web Installer: stub de `get.microsoft.com`, instala y auto-abre —
 parece descarga propia pero firma/updates son de la Store) y ponerla en la página de
-descargas junto a macOS/Linux (que siguen sirviéndose de `downloads/` en Object Storage).
+descargas junto a macOS/Linux (que siguen sirviéndose de `downloads/` en S3, AWS).
 Enlace a ficha: `https://apps.microsoft.com/detail/<STORE_ID>`.
 
 ## 🪦 Bridge headless: retirado (ADR-0160 → ADR-0196, ejecutado en hub#340)
