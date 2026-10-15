@@ -95,20 +95,24 @@ def default_env_file() -> str:
 
 
 def read_env_file(path: str) -> dict:
-    """`KEY=value` pairs, quotes stripped. A missing file is not an error here: the caller decides,
-    because the variables may perfectly well come from the environment instead."""
+    """`KEY=value` pairs, quotes and end-of-line comments stripped. A missing file is not an error
+    here: the caller decides, because the variables may perfectly well come from the environment
+    instead."""
     values = {}
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
             for line in fh:
-                match = re.match(
-                    r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$", line
-                )
+                match = re.match(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$", line)
                 if not match:
                     continue
                 value = match.group(2).strip()
-                if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-                    value = value[1:-1]
+                quoted = re.fullmatch(r"([\"'])(.*?)\1(?:\s+#.*)?", value)
+                if quoted:
+                    value = quoted.group(2)
+                else:
+                    # The root `.env` annotates lines (`KEY=value   # [var]`): a `#` after
+                    # whitespace opens a comment, while one glued to the value (`p#ss`) is data.
+                    value = re.split(r"\s#", match.group(2), maxsplit=1)[0].strip()
                 values[match.group(1)] = value
     except OSError:
         return {}
