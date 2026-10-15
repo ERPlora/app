@@ -564,6 +564,65 @@ else
     ok "every multi-type \`except\` is parenthesized (Python < 3.14 parses it)"
 fi
 
+# ── 6. The `.env` is read the way dotenv reads it ────────────────────────────
+# The real root `.env` annotates its lines: `PLAY_REVIEWER_HUB=<slug>   # [var]`. Read raw, the
+# comment became part of the value: run locally, the control looked for the hub `<slug>   # [var]`
+# and signed in as `<email>   # [var]` (2026-10-15; CI never saw it, the values come exported).
+# A `#` glued to the value, or inside quotes, is data: a password may contain one.
+start_stub "$(healthy)"
+{
+    printf '# Google Play review account\n'
+    printf 'PLAY_REVIEWER_EMAIL=%s   # [var]\n' "$FAKE_EMAIL"
+    printf 'PLAY_REVIEWER_PASSWORD=%s\t# [secret]\n' "$FAKE_PASSWORD"
+    printf 'PLAY_REVIEWER_HUB=%s   # [var]\n' "$FAKE_SLUG"
+} > "$tmp/env.comments"
+run_preflight "$tmp/env.comments"
+if [ "$rc" -eq 0 ]; then
+    ok "end-of-line comments in the \`.env\` are not part of the values → GREEN"
+else
+    bad "end-of-line comments in the \`.env\` are not part of the values → GREEN" \
+        "the comment travelled with the value (exit $rc): $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-240)"
+fi
+no_password_in_output "end-of-line comments"
+
+# check_password_kept <case> <password> <how the .env line writes it>: the fake SaaS only lets in
+# this exact password, so a reader that cut it at the `#` comes out red.
+check_password_kept() {
+    local name=$1 saved=$FAKE_PASSWORD
+    FAKE_PASSWORD=$2
+    start_stub "$(healthy)"
+    {
+        printf 'PLAY_REVIEWER_EMAIL=%s\n' "$FAKE_EMAIL"
+        printf 'PLAY_REVIEWER_PASSWORD=%s\n' "$3"
+        printf 'PLAY_REVIEWER_HUB=%s\n' "$FAKE_SLUG"
+    } > "$tmp/env.password"
+    run_preflight "$tmp/env.password"
+    if [ "$rc" -eq 0 ]; then
+        ok "$name"
+    else
+        bad "$name" "the password reached the SaaS cut or changed (exit $rc): $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-240)"
+    fi
+    no_password_in_output "$name"
+    FAKE_PASSWORD=$saved
+}
+check_password_kept "a \`#\` glued to the value is part of it (p#ss) → GREEN" \
+    's3cr3t#not-a-real-one-8f2c' 's3cr3t#not-a-real-one-8f2c   # [secret]'
+check_password_kept "a \` # \` inside double quotes is part of the value → GREEN" \
+    's3cr3t # not-a-real-one-8f2c' '"s3cr3t # not-a-real-one-8f2c"   # [secret]'
+check_password_kept "a \` # \` inside single quotes is part of the value → GREEN" \
+    's3cr3t # not-a-real-one-8f2c' "'s3cr3t # not-a-real-one-8f2c'"
+
+# An empty value that only carries its note is still missing: read raw it became the slug `# set me`
+# and the red blamed the account (`hub_not_in_account`) instead of naming the variable to set.
+start_stub "$(healthy)"
+{
+    printf 'PLAY_REVIEWER_EMAIL=%s\n' "$FAKE_EMAIL"
+    printf 'PLAY_REVIEWER_PASSWORD=%s\n' "$FAKE_PASSWORD"
+    printf 'PLAY_REVIEWER_HUB=   # set me\n'
+} > "$tmp/env.empty-commented"
+expect_fail "🔴 an empty PLAY_REVIEWER_HUB with only a comment → missing, RED" \
+    "$tmp/env.empty-commented" "missing_credentials"
+
 printf '\n'
 if [ "$fail" -gt 0 ]; then
     printf 'FAIL: %d case(s) (%d ok)\n' "$fail" "$pass"
