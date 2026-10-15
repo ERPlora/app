@@ -1,55 +1,83 @@
 #!/usr/bin/env python3
 """Does the Google review account really get inside a living business? — ERPlora/hub#1718.
 
-The step a person runs BEFORE sending the app to Google (`GOOGLE-PLAY.md`). The
-instructions handed to the reviewer promise that signing in with the test account shows the app
-working; on 2026-09-09 that was measured and it was false — the account landed on the empty «Crea
-tu negocio gratis» screen, and once a hub existed, on a hub with zero modules installed. A reviewer
-who cannot see the app rejects it, and a rejection costs another whole round.
+The step a person runs BEFORE sending the app to Google (`GOOGLE-PLAY.md`, step 0), and the
+`publish-play` job before every upload. The instructions handed to the reviewer promise that
+signing in with the test account shows the app working; on 2026-09-09 that was measured and it was
+false — the account landed on the empty «Crea tu negocio gratis» screen, and once a hub existed, on
+a hub with zero modules. A reviewer who cannot see the app rejects it, and a rejection costs another
+whole round.
 
-Usage:  python3 scripts/ci/play-reviewer-preflight.py
+It walks the reviewer's own path on the platform live since 2026-10-14 — saas-next at `erplora.com`,
+hub-next at `https://<slug>.erplora.com`:
+
+  1. sign-in     allauth.headless, browser client: `GET /_allauth/browser/v1/config` (CSRF cookie)
+                 and `POST /_allauth/browser/v1/auth/login` → `meta.is_authenticated` + session;
+  2. businesses  `GET /api/hubs/businesses` with that session (`hubs.business.list`): the hub named
+                 by PLAY_REVIEWER_HUB is the account's and the SaaS can open it (`can_open`);
+  3. hub up      `GET <hub>/readyz` answers `{"status": "ok"}`;
+  4. the jump    the launcher's «Open»: `<hub>/auth/login` → the SaaS's `/hub-login/` (one-time code
+                 in a form) → `POST <hub>/auth/callback`, which opens the hub's session;
+  5. modules     `GET <hub>/api/me` with that session lists the apps the account sees.
+
 Exits 0 only when ALL of it holds, and 1 naming the first thing that does not:
 
   missing_credentials  the `.env` does not carry the reviewer account   → never a silent skip
   saas_unreachable     the SaaS did not answer
+  signup_open          the SaaS signs up unknown emails at its login: the credentials are NOT sent
   login_rejected       the account no longer signs in
-  hubs_unreadable      the SaaS would not list the account's hubs
+  hubs_unreadable      the SaaS would not list the account's businesses
   no_hubs              the account has no business at all               → the 09/09 signup screen
   hub_not_in_account   PLAY_REVIEWER_HUB names a hub that is not one of the account's
   hub_unreachable      that hub's address does not answer
-  hub_not_ready        it answers, but it is not `status: UP`
-  hub_session_refused  the hub would not open a session for the account (its module count is
-                       only shown to an owner/admin session since hub#2549)
-  hub_detail_withheld  it opened one, but the account does not administer that hub
+  hub_not_ready        the SaaS cannot open it, or it answers but is not ready
+  hub_session_refused  the jump into the hub did not open a session for the account
+  hub_detail_withheld  the hub opened one but would not say which apps the account sees
   hub_without_modules  it is up and EMPTY                               → the 09/09 shell
 
+What it writes on the platform: the SaaS session of the login, and, on success, one single-use code
+and the hub's session — exactly what the reviewer's own «Open» writes (the hub keeps its copy of the
+user on first entry). It never creates an account nor a hub: that is what `signup_open` is for.
+
 The slug is never written here: it comes from `PLAY_REVIEWER_HUB`. A hardcoded one would keep
-passing after the `.env` is pointed elsewhere, which is exactly how a stale `PLAY_REVIEWER_HUB`
-survived in the `.env` while its address answered 404 (2026-09-09).
+passing after the `.env` is pointed elsewhere (2026-09-09). The password is read and sent, never
+printed — not even on the failure paths.
 
-The password is read and sent, never printed — not even on the failure paths.
-
+Usage:  python3 scripts/ci/play-reviewer-preflight.py
 Contract test: `scripts/tests/play-reviewer-preflight.test.sh` (hermetic, fake SaaS and fake hub).
 """
 
+import http.cookiejar
 import json
 import os
 import re
 import sys
 import urllib.error
 import urllib.request
+from html.parser import HTMLParser
+from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 
-# 🪤 Measured 2026-09-16: with urllib's default User-Agent, Cloudflare answers the SaaS with
-# 403 «error code: 1010» and the control would die at the login without looking at anything.
+# 🪤 Measured 2026-09-16: with urllib's default User-Agent, Cloudflare answered 403 «error code:
+# 1010» and the control died at the login without looking at anything.
 USER_AGENT = "ERPlora-play-reviewer-preflight/1.0 (+https://erplora.com)"
 
 SAAS_URL = os.environ.get("PLAY_REVIEWER_SAAS_URL", "https://erplora.com").rstrip("/")
-# `{slug}` is filled from PLAY_REVIEWER_HUB. Hubs are served per-tenant under this domain.
-HUB_URL = os.environ.get("PLAY_REVIEWER_HUB_URL", "https://{slug}.a.erplora.com")
+# `{slug}` is filled from PLAY_REVIEWER_HUB: hub-next serves every hub at its own subdomain.
+HUB_URL = os.environ.get("PLAY_REVIEWER_HUB_URL", "https://{slug}.erplora.com")
 
 TIMEOUT = 30
 
 REQUIRED = ("PLAY_REVIEWER_EMAIL", "PLAY_REVIEWER_PASSWORD", "PLAY_REVIEWER_HUB")
+
+# saas-next's addresses (config/urls.py, hubs/api.py, accounts/handoff.py).
+CONFIG_PATH = "/_allauth/browser/v1/config"
+LOGIN_PATH = "/_allauth/browser/v1/auth/login"
+BUSINESSES_PATH = "/api/hubs/businesses"
+HUB_LOGIN_PATH = "/hub-login/"
+# hub-next's addresses (config/urls.py, base/auth_views.py, base/api.py).
+READYZ_PATH = "/readyz"
+JUMP_PATH = "/auth/login"
+ME_PATH = "/api/me"
 
 
 def fail(code: str, message: str) -> None:
@@ -101,9 +129,9 @@ def credentials() -> tuple[str, str, str]:
     if missing:
         fail(
             "missing_credentials",
-            f"falta {', '.join(missing)}. Ponlas en {env_file} (o expórtalas) con la cuenta con "
-            "la que Google revisa la app y el slug de su hub. Sin ellas esto NO se puede "
-            "comprobar, y enviar la app a Google a ciegas es lo que costó la ronda del 09/09.",
+            f"{', '.join(missing)} missing. Set them in {env_file} (or export them) with the "
+            "account Google reviews the app with and the slug of its hub. Without them this CANNOT "
+            "be checked, and sending the app to Google blind is what cost the 09/09 round.",
         )
     return (
         values["PLAY_REVIEWER_EMAIL"],
@@ -112,158 +140,357 @@ def credentials() -> tuple[str, str, str]:
     )
 
 
-def request(
-    url: str,
-    *,
-    data: dict | None = None,
-    token: str | None = None,
-    hub_session: str | None = None,
-) -> tuple[int, str]:
-    """`(status, body)`. An HTTP error is an answer, not a crash — the verdict reads its code."""
-    headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
-    if hub_session:
-        headers["X-Hub-Session"] = hub_session
-    body = None
-    if data is not None:
-        body = json.dumps(data).encode()
-        headers["Content-Type"] = "application/json"
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    req = urllib.request.Request(url, data=body, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as response:
-            return response.status, response.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as exc:
-        return exc.code, exc.read().decode("utf-8", "replace")
-    except (urllib.error.URLError, OSError) as exc:
-        return 0, str(exc.reason if isinstance(exc, urllib.error.URLError) else exc)
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Redirects are answers to read (where the jump goes, which error it names), never followed."""
 
-
-def as_json(raw: str) -> object:
-    try:
-        return json.loads(raw)
-    except (ValueError, TypeError):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+
+class Answer:
+    def __init__(self, status: int, body: str, headers=None) -> None:
+        self.status = status
+        self.body = body
+        self.headers = headers
+
+    def header(self, name: str) -> str:
+        return (self.headers.get(name) if self.headers is not None else None) or ""
+
+    def json(self) -> object:
+        try:
+            return json.loads(self.body)
+        except (ValueError, TypeError):
+            return None
+
+
+class Browser:
+    """One site's cookies, as a browser keeps them. The SaaS and the hub get one each, so a cookie
+    of `erplora.com` never reaches `<slug>.erplora.com` (both call their session `sessionid`)."""
+
+    def __init__(self) -> None:
+        self.jar = http.cookiejar.CookieJar()
+        self.opener = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(self.jar), _NoRedirect()
+        )
+
+    def cookie(self, name: str) -> str | None:
+        return next((c.value for c in self.jar if c.name == name), None)
+
+    def send(
+        self,
+        url: str,
+        *,
+        json_body: dict | None = None,
+        form: dict | None = None,
+        headers: dict | None = None,
+        accept: str = "application/json",
+    ) -> Answer:
+        """An HTTP error or a redirect is an answer, not a crash: the verdict reads its code.
+        `status` 0 means nothing answered, and `body` says why."""
+        sent = {"User-Agent": USER_AGENT, "Accept": accept, **(headers or {})}
+        data = None
+        if json_body is not None:
+            data = json.dumps(json_body).encode()
+            sent["Content-Type"] = "application/json"
+        elif form is not None:
+            data = urlencode(form).encode()
+            sent["Content-Type"] = "application/x-www-form-urlencoded"
+        req = urllib.request.Request(url, data=data, headers=sent)
+        try:
+            with self.opener.open(req, timeout=TIMEOUT) as response:
+                body = response.read().decode("utf-8", "replace")
+                return Answer(response.status, body, response.headers)
+        except urllib.error.HTTPError as exc:
+            with exc:
+                return Answer(
+                    exc.code, exc.read().decode("utf-8", "replace"), exc.headers
+                )
+        except (urllib.error.URLError, OSError) as exc:
+            reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+            return Answer(0, str(reason))
+
+
+class _HubLoginForm(HTMLParser):
+    """The SaaS's auto-submitted form of the jump (`accounts/hub_login_form.html`)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.action: str | None = None
+        self.fields: dict[str, str] = {}
+        self._inside = False
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "form" and attrs.get("id") == "hub-login-form":
+            self.action, self._inside = attrs.get("action") or "", True
+        elif tag == "input" and self._inside and attrs.get("name"):
+            self.fields[attrs["name"]] = attrs.get("value") or ""
+
+    def handle_endtag(self, tag):
+        if tag == "form":
+            self._inside = False
+
+
+def query_value(url: str, name: str) -> str | None:
+    return parse_qs(urlsplit(url).query).get(name, [None])[0]
+
+
+def allauth_reasons(payload: object) -> str:
+    """allauth's error codes and pending steps (`email_password_mismatch`, `mfa_authenticate`…).
+    Only identifiers: its messages are never echoed, whatever they may carry."""
+    if not isinstance(payload, dict):
+        return ""
+    errors = payload.get("errors")
+    codes = (
+        [e.get("code") for e in errors if isinstance(e, dict)]
+        if isinstance(errors, list)
+        else []
+    )
+    data = payload.get("data")
+    flows = data.get("flows") if isinstance(data, dict) else None
+    if isinstance(flows, list):
+        codes += [
+            f.get("id") for f in flows if isinstance(f, dict) and f.get("is_pending")
+        ]
+    codes = [
+        c for c in codes if isinstance(c, str) and re.fullmatch(r"[a-z0-9_]{1,64}", c)
+    ]
+    return f" ({', '.join(codes)})" if codes else ""
+
+
+def sign_in(saas: Browser, email: str, password: str) -> None:
+    # ── 1. The account signs in ──────────────────────────────────────────────
+    config = saas.send(f"{SAAS_URL}{CONFIG_PATH}")
+    if config.status == 0:
+        fail("saas_unreachable", f"{SAAS_URL} does not answer: {config.body}")
+    payload = config.json()
+    account = (
+        payload.get("data", {}).get("account") if isinstance(payload, dict) else None
+    )
+    if config.status != 200 or not isinstance(account, dict):
+        fail(
+            "saas_unreachable",
+            f"{SAAS_URL}{CONFIG_PATH} answers HTTP {config.status} without allauth's configuration: "
+            "the SaaS's sign-in is not there.",
+        )
+    # saas-next's unified sign-in (ADR-0154) signs UP an email it does not know when it is posted
+    # to the login: a review account that went missing would be CREATED by this control. While the
+    # SaaS says signup is open, the credentials stay here.
+    if account.get("is_open_for_signup") is not False:
+        fail(
+            "signup_open",
+            f"{SAAS_URL} has signup open (`is_open_for_signup`), so posting an unknown email to its "
+            "login may CREATE an account. The credentials were NOT sent. Check by hand that the "
+            "review account exists, then make this check able to prove it without signing up.",
+        )
+    csrf = saas.cookie("csrftoken")
+    if not csrf:
+        fail(
+            "login_rejected",
+            f"{SAAS_URL}{CONFIG_PATH} set no `csrftoken` cookie: without it the login is a 403",
+        )
+
+    answer = saas.send(
+        f"{SAAS_URL}{LOGIN_PATH}",
+        json_body={"email": email, "password": password},
+        headers={"X-CSRFToken": csrf, "Origin": SAAS_URL},
+    )
+    if answer.status == 0:
+        fail(
+            "saas_unreachable",
+            f"{SAAS_URL} stopped answering at the login: {answer.body}",
+        )
+    payload = answer.json()
+    meta = payload.get("meta") if isinstance(payload, dict) else None
+    if (
+        answer.status != 200
+        or not isinstance(meta, dict)
+        or meta.get("is_authenticated") is not True
+    ):
+        fail(
+            "login_rejected",
+            f"the review account does not sign in at {SAAS_URL} (HTTP {answer.status}"
+            f"{', not authenticated' if answer.status == 200 else ''}){allauth_reasons(payload)}. "
+            "Google uses exactly these credentials: if they do not get in, the reviewer does not either.",
+        )
+
+
+def find_business(saas: Browser, wanted_slug: str) -> dict:
+    # ── 2. …and has a business, the one the `.env` names, which the SaaS can open ─
+    answer = saas.send(f"{SAAS_URL}{BUSINESSES_PATH}?{urlencode({'limit': 100})}")
+    if answer.status == 0:
+        fail(
+            "saas_unreachable",
+            f"{SAAS_URL} stopped answering at the businesses: {answer.body}",
+        )
+    if answer.status != 200:
+        fail(
+            "hubs_unreadable",
+            f"the SaaS does not list the account's businesses (HTTP {answer.status})",
+        )
+    payload = answer.json()
+    rows = payload.get("rows") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        fail("hubs_unreadable", "the SaaS's answer carries no `rows` list")
+    rows = [r for r in rows if isinstance(r, dict) and r.get("slug")]
+    if not rows:
+        fail(
+            "no_hubs",
+            "the review account has NO business: whoever signs in sees the sign-up of a business, "
+            "which is exactly what the reviewer saw on 09/09.",
+        )
+    row = next((r for r in rows if r["slug"] == wanted_slug), None)
+    if row is None:
+        fail(
+            "hub_not_in_account",
+            f"PLAY_REVIEWER_HUB={wanted_slug} is not a business of the review account. Its own are: "
+            f"{', '.join(sorted(r['slug'] for r in rows))}. Set the variable to the right one "
+            "(sending the reviewer to an address that is not theirs is a guaranteed 404).",
+        )
+    if row.get("can_open") is not True:
+        fail(
+            "hub_not_ready",
+            f"the SaaS cannot open {wanted_slug}: status `{row.get('status')}`, reason "
+            f"`{row.get('open_blocked_reason')}`. The reviewer's «Open» would not work.",
+        )
+    return row
+
+
+def check_hub_up(hub: Browser, hub_url: str) -> None:
+    # ── 3. …that is actually up ──────────────────────────────────────────────
+    # hub-next's /readyz is the service's (database + migrations), not one hub's: which hub exists
+    # and may open is the SaaS's answer above, and what is inside is step 5.
+    answer = hub.send(f"{hub_url}{READYZ_PATH}")
+    if answer.status == 0:
+        fail(
+            "hub_unreachable", f"{hub_url}{READYZ_PATH} does not answer: {answer.body}"
+        )
+    if answer.status != 200:
+        fail(
+            "hub_not_ready",
+            f"{hub_url}{READYZ_PATH} answers HTTP {answer.status}: the reviewer would not see the app",
+        )
+    ready = answer.json()
+    if not isinstance(ready, dict) or ready.get("status") != "ok":
+        status = ready.get("status") if isinstance(ready, dict) else None
+        fail(
+            "hub_not_ready",
+            f"{hub_url}{READYZ_PATH} answers 200 but declares `{status}`. The 200 is not the "
+            "verdict: the `status` inside is.",
+        )
+
+
+def enter_hub(saas: Browser, hub: Browser, hub_url: str, slug: str) -> None:
+    # ── 4. …and lets the account in, through the reviewer's own «Open» ───────
+    # The hub has no login of its own: it sends to the SaaS with a `state` in its cookie, the SaaS
+    # answers a form with a single-use code, and the hub's callback opens the session.
+    start = hub.send(f"{hub_url}{JUMP_PATH}?{urlencode({'next': '/'})}")
+    if start.status == 0:
+        fail("hub_unreachable", f"{hub_url}{JUMP_PATH} does not answer: {start.body}")
+    target = urljoin(f"{hub_url}{JUMP_PATH}", start.header("Location"))
+    if start.status not in (301, 302, 303, 307, 308) or not target.startswith(
+        f"{SAAS_URL}{HUB_LOGIN_PATH}"
+    ):
+        fail(
+            "hub_session_refused",
+            f"{hub_url}{JUMP_PATH} does not send to {SAAS_URL}{HUB_LOGIN_PATH} (HTTP {start.status}): "
+            "the hub would not start the reviewer's sign-in.",
+        )
+
+    page = saas.send(target, accept="text/html")
+    if page.status == 0:
+        fail(
+            "saas_unreachable", f"{SAAS_URL} stopped answering at the jump: {page.body}"
+        )
+    if page.status != 200:
+        refused = urljoin(target, page.header("Location"))
+        reason = (
+            query_value(refused, "code")
+            or urlsplit(refused).path
+            or f"HTTP {page.status}"
+        )
+        fail(
+            "hub_session_refused",
+            f"the SaaS refuses the review account's jump into {slug} (`{reason}`): the reviewer's "
+            "«Open» would end there.",
+        )
+    form = _HubLoginForm()
+    form.feed(page.body)
+    action = urljoin(target, form.action or "")
+    if (
+        not form.action
+        or not form.fields.get("code")
+        or not action.startswith(f"{hub_url}/")
+    ):
+        fail(
+            "hub_session_refused",
+            f"the SaaS's jump page carries no form with a code for {hub_url}: nothing was posted "
+            "(a single-use code only goes to the hub it is for).",
+        )
+
+    callback = hub.send(action, form=form.fields, accept="text/html")
+    if callback.status == 0:
+        fail("hub_unreachable", f"{action} does not answer: {callback.body}")
+    landed = urljoin(action, callback.header("Location"))
+    if callback.status not in (301, 302, 303, 307, 308) or not landed.startswith(
+        f"{hub_url}/"
+    ):
+        reason = query_value(landed, "error") if callback.header("Location") else None
+        fail(
+            "hub_session_refused",
+            f"the hub {slug} does not open a session for the review account (HTTP {callback.status}"
+            f"{f', `{reason}`' if reason else ''}): if it does not let this account in, it does not "
+            "let the reviewer in either.",
+        )
+
+
+def count_modules(hub: Browser, hub_url: str, slug: str) -> list[str]:
+    # ── 5. …and is not an empty shell. This is the 09/09 failure ─────────────
+    answer = hub.send(f"{hub_url}{ME_PATH}")
+    if answer.status == 0:
+        fail("hub_unreachable", f"{hub_url}{ME_PATH} does not answer: {answer.body}")
+    me = answer.json()
+    if answer.status != 200 or not isinstance(me, dict):
+        fail(
+            "hub_not_ready",
+            f"{hub_url}{ME_PATH} answers HTTP {answer.status} without a JSON document",
+        )
+    if not me.get("user"):
+        fail(
+            "hub_session_refused",
+            f"the jump into {slug} ended, but {hub_url}{ME_PATH} still sees nobody: the session "
+            "did not stick, and the reviewer would be sent back to the sign-in.",
+        )
+    apps = me.get("apps")
+    if not isinstance(apps, list):
+        fail(
+            "hub_detail_withheld",
+            f"{hub_url}{ME_PATH} does not say which apps the review account sees (no `apps` list): "
+            "what the reviewer will find cannot be checked.",
+        )
+    labels = [a.get("label") for a in apps if isinstance(a, dict) and a.get("label")]
+    if not labels:
+        fail(
+            "hub_without_modules",
+            f"the hub {slug} is alive but the review account sees NO module in it: the reviewer "
+            "gets in and finds «Aquí aparecerán tus apps», no POS, no calendar, no till. Apply a "
+            "sector template before sending.",
+        )
+    return labels
 
 
 def main() -> None:
     email, password, wanted_slug = credentials()
-
-    # ── 1. The account signs in ──────────────────────────────────────────────
-    status, raw = request(
-        f"{SAAS_URL}/api/v1/auth/login/", data={"email": email, "password": password}
-    )
-    if status == 0:
-        fail("saas_unreachable", f"{SAAS_URL} no contesta: {raw}")
-    if status != 200:
-        fail(
-            "login_rejected",
-            f"la cuenta de revisión ya no entra en {SAAS_URL} (HTTP {status}). Google usa "
-            "exactamente estas credenciales: si no entran, el revisor tampoco.",
-        )
-    payload = as_json(raw)
-    token = payload.get("access") if isinstance(payload, dict) else None
-    if not token:
-        fail(
-            "login_rejected",
-            "el SaaS contestó 200 al login pero sin `access`: no hay sesión con la que seguir",
-        )
-
-    # ── 2. …and has a business ───────────────────────────────────────────────
-    status, raw = request(f"{SAAS_URL}/api/v1/hubs/", token=token)
-    if status == 0:
-        fail(
-            "saas_unreachable",
-            f"{SAAS_URL} dejó de contestar al listar los hubs: {raw}",
-        )
-    if status != 200:
-        fail(
-            "hubs_unreadable", f"el SaaS no lista los hubs de la cuenta (HTTP {status})"
-        )
-    payload = as_json(raw)
-    hubs = payload.get("hubs") if isinstance(payload, dict) else None
-    if not isinstance(hubs, list):
-        fail("hubs_unreadable", "la respuesta del SaaS no trae la lista `hubs`")
-    slugs = [h.get("slug") for h in hubs if isinstance(h, dict) and h.get("slug")]
-    if not slugs:
-        fail(
-            "no_hubs",
-            "la cuenta de revisión no tiene NINGÚN negocio: quien entre verá la pantalla de alta "
-            "«Crea tu negocio gratis», que es justo lo que vio el revisor el 09/09.",
-        )
-
-    # ── 3. …and it is the one the `.env` names ───────────────────────────────
-    if wanted_slug not in slugs:
-        fail(
-            "hub_not_in_account",
-            f"PLAY_REVIEWER_HUB={wanted_slug} no es un hub de la cuenta de revisión. "
-            f"Los suyos son: {', '.join(sorted(slugs))}. Corrige la variable al que toque "
-            "(mandar al revisor a una dirección que no es suya es un 404 garantizado).",
-        )
-
-    # ── 4. …that is actually up ──────────────────────────────────────────────
+    saas, hub = Browser(), Browser()
+    sign_in(saas, email, password)
+    row = find_business(saas, wanted_slug)
     hub_url = HUB_URL.replace("{slug}", wanted_slug).rstrip("/")
-    status, raw = request(f"{hub_url}/readyz")
-    if status == 0:
-        fail("hub_unreachable", f"{hub_url}/readyz no contesta: {raw}")
-    if status != 200:
-        fail(
-            "hub_not_ready",
-            f"{hub_url}/readyz contesta HTTP {status}: el revisor no vería la app",
-        )
-    ready = as_json(raw)
-    if not isinstance(ready, dict):
-        fail("hub_not_ready", f"{hub_url}/readyz no devolvió un documento JSON")
-    if ready.get("status") != "UP":
-        fail(
-            "hub_not_ready",
-            f"{hub_url}/readyz contesta 200 pero se declara `{ready.get('status')}`. "
-            "El 200 no es el veredicto: lo es el `status` de dentro.",
-        )
-
-    # ── 5. …and is not an empty shell. This is the 09/09 failure ─────────────
-    # Since hub#2549 an anonymous `/readyz` says only whether each part is up: the module count is
-    # for an owner/admin session. The account enters its hub through the same door the reviewer's
-    # app uses (the SaaS `access` → `/api/auth/cloud`), and asks again with that session.
-    status, raw = request(f"{hub_url}/api/auth/cloud", data={}, token=token)
-    if status == 0:
-        fail("hub_unreachable", f"{hub_url}/api/auth/cloud no contesta: {raw}")
-    session = as_json(raw)
-    hub_session = session.get("token") if isinstance(session, dict) else None
-    if status != 200 or not hub_session:
-        fail(
-            "hub_session_refused",
-            f"el hub {wanted_slug} no abre sesión a la cuenta de revisión (HTTP {status}): "
-            "si a esta cuenta no la deja entrar, al revisor tampoco.",
-        )
-    status, raw = request(f"{hub_url}/readyz", hub_session=hub_session)
-    ready = as_json(raw)
-    if status == 0 or not isinstance(ready, dict):
-        fail("hub_not_ready", f"{hub_url}/readyz dejó de contestar con sesión: {raw}")
-    modules = (
-        ready.get("checks", {}).get("modules", {})
-        if isinstance(ready.get("checks"), dict)
-        else {}
-    )
-    registered = modules.get("registered") if isinstance(modules, dict) else None
-    if registered is None:
-        fail(
-            "hub_detail_withheld",
-            f"el hub {wanted_slug} abre sesión a la cuenta de revisión pero no le enseña cuántos "
-            "módulos tiene: la cuenta no es dueña ni administradora de ese hub, así que no se "
-            "puede comprobar qué verá el revisor. Usa una cuenta que lo administre.",
-        )
-    if not isinstance(registered, int) or registered <= 0:
-        fail(
-            "hub_without_modules",
-            f"el hub {wanted_slug} está vivo pero con {registered if registered is not None else 'ningún'} "
-            "módulo registrado: el revisor entra y ve «Aquí aparecerán tus apps», sin TPV, sin "
-            "agenda y sin caja. Aplica una plantilla de sector antes de enviar.",
-        )
-
+    check_hub_up(hub, hub_url)
+    enter_hub(saas, hub, hub_url, wanted_slug)
+    labels = count_modules(hub, hub_url, wanted_slug)
     print(
-        f"OK: la cuenta de revisión entra, su hub `{wanted_slug}` responde UP "
-        f"(versión {ready.get('version', '?')}) y tiene {registered} módulos registrados."
+        f"OK: the review account signs in, its business `{wanted_slug}` is `{row.get('status')}` and "
+        f"opens at {hub_url}, and inside it sees {len(labels)} modules: {', '.join(labels)}."
     )
 
 

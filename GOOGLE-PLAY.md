@@ -41,12 +41,21 @@ landing no ofrece APK: el endpoint de descarga del SaaS hace **redirect 302** a 
    ```
 
    Entra con `PLAY_REVIEWER_EMAIL`/`PLAY_REVIEWER_PASSWORD` del `.env` de la raíz —las mismas
-   credenciales que recorre Google— y **para el envío** si la cuenta no tiene negocio, si
-   `PLAY_REVIEWER_HUB` nombra un hub que no es suyo, si ese hub no responde `status: UP` o si está
-   vacío de módulos. Los cuatro son el mismo rechazo: el revisor no ve la app. **Sale en rojo si
-   faltan las credenciales**, nunca en verde por no poder comprobarlo. Si falla, se arregla el hub
-   o la variable y se vuelve a correr: **no se envía con esto en rojo.** Con el canal de CI
-   encendido (paso 3) la corre además el job `publish-play` antes de subir cada release (hub#1888).
+   credenciales que recorre Google— y hace el mismo camino que el revisor en la plataforma nueva
+   (desde el 2026-10-14: saas-next en `erplora.com`, hub-next en `https://<slug>.erplora.com`):
+   login de allauth headless (`/_allauth/browser/v1/auth/login`, con CSRF), lista de negocios
+   (`/api/hubs/businesses`), `/readyz` del hub, el salto «Abrir» (`/auth/login` del hub →
+   `/hub-login/` del SaaS → `/auth/callback`) y las apps que ve dentro (`/api/me`). **Para el envío**
+   si la cuenta no entra, si no tiene negocio, si `PLAY_REVIEWER_HUB` nombra un hub que no es suyo o
+   que el SaaS no deja abrir, si el hub no responde `status: ok`, si no le abre sesión o si dentro
+   no ve ningún módulo. Todos son el mismo rechazo: el revisor no ve la app. **Sale en rojo si
+   faltan las credenciales**, nunca en verde por no poder comprobarlo, y en rojo `signup_open`
+   **sin mandar las credenciales** si el SaaS tiene el alta abierta: el login unificado (ADR-0154)
+   da de alta un correo desconocido, y la guardia nunca crea la cuenta del revisor. `/readyz` de
+   hub-next es del servicio, no de un hub: qué hub existe y se puede abrir lo dice el SaaS. Si
+   falla, se arregla el hub o la variable y se vuelve a correr: **no se envía con esto en rojo.**
+   Con el canal de CI encendido (paso 3) la corre además el job `publish-play` antes de subir cada
+   release (hub#1888).
 
 1. Enviar a revisión el lote de la Alpha cerrada (botón «Submit N changes for review»).
 2. Aprobada: crear release de **Producción** y enviarla también. Hasta que Producción esté LIVE,
