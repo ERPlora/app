@@ -197,7 +197,6 @@ mod tests {
     use super::*;
     use crate::escpos::{self, DocumentType};
     use crate::test_support::{unreachable_target, MockPrinter};
-    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
     use tokio::io::AsyncReadExt;
     use tokio::net::TcpListener;
@@ -396,40 +395,76 @@ mod tests {
         accepted.expect("and the listener sees the connection");
     }
 
+    /// A switched-on printer serves EVERY connection, as a real one does, and hands back the bytes
+    /// of the first one that brought any. One that arrives empty — the late handshake of an
+    /// attempt that already gave up — is neither the job nor a reason to switch off again: the
+    /// printer that served ONE connection and then closed its port turned it into a lost job
+    /// (ERPlora/app#3). The listener comes back still switched on, so the test can check what
+    /// else reached the paper afterwards.
+    async fn serve_until_a_job(listener: TcpListener) -> (Vec<u8>, TcpListener) {
+        loop {
+            let (mut sock, _) = listener.accept().await.expect("the printer accepts");
+            let mut buf = Vec::new();
+            let _ = sock.read_to_end(&mut buf).await;
+            if !buf.is_empty() {
+                return (buf, listener);
+            }
+        }
+    }
+
+    /// What the switched-on printer receives AFTER the job is on paper, within `wait`: a second
+    /// copy of the job is a ticket printed twice, which the old «one `accept` and off» printer
+    /// could not tell from one. Empty handshakes (attempts that gave up) are not paper.
+    async fn printed_afterwards(printer: &TcpListener, wait: Duration) -> Option<Vec<u8>> {
+        tokio::time::timeout(wait, async {
+            loop {
+                let (mut sock, _) = printer.accept().await.expect("the printer accepts");
+                let mut buf = Vec::new();
+                let _ = sock.read_to_end(&mut buf).await;
+                if !buf.is_empty() {
+                    return buf;
+                }
+            }
+        })
+        .await
+        .ok()
+    }
+
     /// **La impresora apagada un momento no pierde el trabajo.** Es el requisito §2.7 entero: el
     /// primer intento falla con el puerto cerrado y un reintento posterior, ya con la impresora de
     /// vuelta, entrega. Sin esto un tique se pierde cada vez que alguien tropieza con el cable.
     #[tokio::test]
     async fn a_printer_that_comes_back_still_gets_its_job() {
-        // Switched off at an address that comes back later; the port stays ours meanwhile.
+        // Off for longer than one attempt's connect deadline, so the first attempt FAILS while the
+        // printer is off on every kernel: Linux refuses the connect; macOS drops the SYN and the
+        // deadline gives up. With a 1 s deadline and 40 ms off, macOS kept that first SYN pending
+        // and delivered it on a retransmission: the job printed without a single retry, and a
+        // queue that never retries passed this test there (ERPlora/app#3).
+        const CONNECT_DEADLINE_MS: u64 = 100;
+        const OFF_FOR: Duration = Duration::from_millis(300);
         let printer = SwitchedOffPrinter::new();
-        let target = printer.target.clone();
-
-        let captured = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-        let accepted = Arc::new(AtomicU32::new(0));
-
-        let cap = captured.clone();
-        let seen = accepted.clone();
+        let (addr, target) = (printer.addr, printer.target.clone());
         let revive = tokio::spawn(async move {
-            // Comes back while the queue is backing off.
-            tokio::time::sleep(Duration::from_millis(40)).await;
+            tokio::time::sleep(OFF_FOR).await;
             let listener = printer.switch_on();
-            if let Ok((mut sock, _)) = listener.accept().await {
-                seen.fetch_add(1, Ordering::SeqCst);
-                let mut buf = Vec::new();
-                let _ = sock.read_to_end(&mut buf).await;
-                *cap.lock().await = buf;
-            }
+            // An attempt that gave up just as the printer came back can still finish its
+            // handshake: its connection reaches the printer EMPTY, and first — the red macOS run
+            // of ERPlora/app#3, where the 1 s deadline raced a SYN retransmission. Knock that way
+            // on purpose, so every run meets it.
+            let knock = TcpStream::connect(addr).await;
+            drop(knock.expect("the switched-on printer answers"));
+            serve_until_a_job(listener).await
         });
 
-        // The window to come back must outlast a slow runner, not just the 40 ms above: with 8
-        // attempts it was ~160 ms, and on a loaded macOS runner (~200 tests in parallel on 3
-        // cores) the printer came back later and the job failed (ERPlora/app run 38573290656).
-        // 50 attempts × 20 ms ≈ 1 s; the test still ends as soon as the printer is back.
+        // Deterministic by ORDER, not by speed: the worker and the printer share this test's one
+        // thread (`#[tokio::test]` is current-thread) and its timer, which fires deadlines in
+        // order. The printer's 300 ms falls after the first attempt's 100 ms deadline and before
+        // the 49 back-offs of 20 ms (980 ms) the queue waits at least before giving up, however
+        // late a loaded runner wakes the thread.
         let queue = Arc::new(PrintQueue::new(RetryPolicy {
             max_attempts: 50,
             backoff_ms: 20,
-            connect_timeout_ms: 1000,
+            connect_timeout_ms: CONNECT_DEADLINE_MS,
             write_timeout_ms: 1000,
         }));
         let mut outcomes = spawn_worker(queue.clone());
@@ -439,12 +474,18 @@ mod tests {
             matches!(outcomes.recv().await, Some(JobOutcome::Completed { .. })),
             "el trabajo se completa tras la recuperación, no se descarta"
         );
-        revive.await.unwrap();
-        assert_eq!(accepted.load(Ordering::SeqCst), 1);
+        let (paper, printer) = revive.await.unwrap();
         assert_eq!(
-            *captured.lock().await,
+            paper,
             b"resilient job".to_vec(),
             "y el payload entregado es el original, no uno truncado por los intentos fallidos"
+        );
+        // And ONCE: a queue that went on sending after the success would hand the printer a
+        // second copy — it is already in the printer's backlog by the time `Completed` arrives.
+        assert_eq!(
+            printed_afterwards(&printer, Duration::from_millis(50)).await,
+            None,
+            "y nada más llega al papel: el trabajo se imprime una sola vez"
         );
     }
 
@@ -721,10 +762,7 @@ mod tests {
             async move { queue.print(job(target, b"late")).await }
         });
         tokio::time::sleep(Duration::from_millis(200)).await;
-        let listener = printer.switch_on();
-        let (mut stream, _) = listener.accept().await.expect("the retry reaches the printer");
-        let mut got = Vec::new();
-        stream.read_to_end(&mut got).await.unwrap();
+        let (got, _printer) = serve_until_a_job(printer.switch_on()).await;
 
         printing.await.unwrap().expect("printed on a later attempt");
         assert_eq!(got, b"late");
