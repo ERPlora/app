@@ -399,16 +399,35 @@ mod tests {
     /// of the first one that brought any. One that arrives empty — the late handshake of an
     /// attempt that already gave up — is neither the job nor a reason to switch off again: the
     /// printer that served ONE connection and then closed its port turned it into a lost job
-    /// (ERPlora/app#3).
-    async fn serve_until_a_job(listener: TcpListener) -> Vec<u8> {
+    /// (ERPlora/app#3). The listener comes back still switched on, so the test can check what
+    /// else reached the paper afterwards.
+    async fn serve_until_a_job(listener: TcpListener) -> (Vec<u8>, TcpListener) {
         loop {
             let (mut sock, _) = listener.accept().await.expect("the printer accepts");
             let mut buf = Vec::new();
             let _ = sock.read_to_end(&mut buf).await;
             if !buf.is_empty() {
-                return buf;
+                return (buf, listener);
             }
         }
+    }
+
+    /// What the switched-on printer receives AFTER the job is on paper, within `wait`: a second
+    /// copy of the job is a ticket printed twice, which the old «one `accept` and off» printer
+    /// could not tell from one. Empty handshakes (attempts that gave up) are not paper.
+    async fn printed_afterwards(printer: &TcpListener, wait: Duration) -> Option<Vec<u8>> {
+        tokio::time::timeout(wait, async {
+            loop {
+                let (mut sock, _) = printer.accept().await.expect("the printer accepts");
+                let mut buf = Vec::new();
+                let _ = sock.read_to_end(&mut buf).await;
+                if !buf.is_empty() {
+                    return buf;
+                }
+            }
+        })
+        .await
+        .ok()
     }
 
     /// **La impresora apagada un momento no pierde el trabajo.** Es el requisito §2.7 entero: el
@@ -455,10 +474,18 @@ mod tests {
             matches!(outcomes.recv().await, Some(JobOutcome::Completed { .. })),
             "el trabajo se completa tras la recuperación, no se descarta"
         );
+        let (paper, printer) = revive.await.unwrap();
         assert_eq!(
-            revive.await.unwrap(),
+            paper,
             b"resilient job".to_vec(),
             "y el payload entregado es el original, no uno truncado por los intentos fallidos"
+        );
+        // And ONCE: a queue that went on sending after the success would hand the printer a
+        // second copy — it is already in the printer's backlog by the time `Completed` arrives.
+        assert_eq!(
+            printed_afterwards(&printer, Duration::from_millis(50)).await,
+            None,
+            "y nada más llega al papel: el trabajo se imprime una sola vez"
         );
     }
 
@@ -735,7 +762,7 @@ mod tests {
             async move { queue.print(job(target, b"late")).await }
         });
         tokio::time::sleep(Duration::from_millis(200)).await;
-        let got = serve_until_a_job(printer.switch_on()).await;
+        let (got, _printer) = serve_until_a_job(printer.switch_on()).await;
 
         printing.await.unwrap().expect("printed on a later attempt");
         assert_eq!(got, b"late");
