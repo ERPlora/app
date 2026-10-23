@@ -289,5 +289,13 @@ lo que se puede comprobar en este repo sigue. El port del puente JS en `hub-next
   línea v4, en vez de por `@v4`.
 - `crates/peripherals/src/queue.rs`, test `a_printer_that_comes_back_still_gets_its_job`: la ventana
   para que la impresora vuelva era de 8 intentos × 20 ms (~160 ms) y en macOS, con ~200 tests en
-  paralelo en 3 núcleos, la impresora volvía más tarde y el trabajo fallaba (run `38573290656`). Ahora
-  son 50 intentos (~1 s); el test sigue acabando en cuanto la impresora vuelve (~60 ms).
+  paralelo en 3 núcleos, la impresora volvía más tarde y el trabajo fallaba (run `38573290656`); se
+  subió a 50 intentos (~1 s). Volvió a caer en macOS (app#3, run `39903050741`) por otra causa: allí
+  la impresora apagada descarta el SYN en vez de rechazarlo, así que el primer intento se quedaba
+  pendiente y entraba con la retransmisión (el test pasaba con una cola que no reintenta), o su plazo
+  de 1 s chocaba con esa retransmisión y una conexión vacía gastaba el único `accept` de la
+  impresora del test, que cerraba el puerto. Ahora la impresora está apagada más que el plazo de un
+  intento (300 ms frente a 100 ms), vuelve antes de agotar los intentos por el orden de los
+  temporizadores (todo en el mismo hilo del test, no por velocidad) y atiende todas las conexiones
+  hasta recibir el trabajo, como una real; el test llama antes con una conexión vacía para
+  encontrarse siempre ese caso.
