@@ -365,20 +365,27 @@ Implicados: INVENTORY-F25, PRINTING-F12
 QA: qa-hub §8
 
 ### HUB_PERIPHERALS-F13 Sacar el cierre de caja, el albarán o un documento genérico
-Estado: parcial — la aplicación sabe sacarlos, pero ningún módulo los pide (cierre de caja: PRINTING-F17 no hecho; albarán y genérico sin productor), así que hoy no salen
+Estado: parcial — el informe de caja ya lo pide Caja (CASH_REGISTER-F16, por la cola de recibos de PRINTING-F17); el albarán y el genérico siguen sin productor, así que hoy no salen
 Actor: sistema
 Pantalla: ninguna
 Pasos:
 1. Un productor manda un documento de cierre de caja, de albarán o genérico.
-2. El **cierre de caja** sale con título, sesión, fecha, cajero, saldo de apertura, de cierre, la
-   diferencia (cierre menos apertura) y una línea por movimiento.
+2. El **informe de caja** sale titulado «INFORME PARCIAL (X)» si la sesión sigue abierta y «CIERRE DE
+   CAJA (Z)» si ya está cerrada (lo dice el número de sesión que manda Caja, «<número> (X)» o
+   «<número> (Z)»), como los titula la pantalla de Caja. Debajo, la sesión, la fecha, el cajero, el
+   fondo de apertura y una línea por cada cifra que manda Caja, ya en el idioma de quien imprime:
+   ventas por forma de pago, devoluciones, entradas, salidas, invitaciones, el esperado y, en el Z,
+   el contado y el descuadre. La aplicación no calcula ninguna diferencia propia: el descuadre es el
+   de Caja (contado menos esperado), y el esperado sale una sola vez.
+   Un informe que no dice X ni Z (otro productor) sale como «INFORME DE CAJA», nunca como cierre (puede
+   ser de una sesión abierta), con su fondo de apertura, su saldo de cierre y sus líneas.
 3. El **albarán** sale con número, fecha, cliente, dirección de entrega, líneas («2x Bacalao») y una
    línea para la firma.
 4. El **genérico** sale con título y una línea «clave: valor» por campo, sin formato.
 Entra: el documento estructurado de quien lo pida.
 Sale: el papel; fechas del momento de imprimir, como en HUB_PERIPHERALS-F09.
 Si falla: como el resto: un documento que no es objeto se rechaza; un campo que falta, en blanco.
-Implicados: PRINTING-F16, PRINTING-F17
+Implicados: PRINTING-F16, PRINTING-F17, CASH_REGISTER-F16
 QA: ninguno
 
 ### HUB_PERIPHERALS-F14 Hacer una hoja de prueba
@@ -460,7 +467,7 @@ QA: ninguno
 | Comanda con etiqueta de sala, ronda, suplementos y urgente | parcial: la hora es la de imprimir | F10 |
 | Cuenta no fiscal | parcial: con la red apagada el error vuelve a Ventas; el aviso con «Reintentar» del shell no la cubre | F11 |
 | Etiqueta con código de barras nativo | parcial: térmica de tiques, no de etiquetas | F12 |
-| Cierre de caja, albarán, genérico | parcial: sin productor | F13 |
+| Cierre de caja, albarán, genérico | parcial: el informe X/Z lo pide Caja; albarán y genérico sin productor | F13 |
 | Hoja de prueba | hecho | F14 |
 | Cajón (pin 2 y pin 5) | parcial: nunca por USB, error descartado, sin plazo | F15 |
 | Ancho 58 y 80 mm | no hecho: siempre 32 columnas | F16 |
