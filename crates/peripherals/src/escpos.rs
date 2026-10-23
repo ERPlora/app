@@ -473,12 +473,13 @@ enum Label {
     Number,
     Address,
     Signature,
-    // The cash-up report.
+    // The cash-up report: neutral, partial (X) and closing (Z) titles (CASH_REGISTER-F16).
     CashReportTitle,
+    PartialReportTitle,
+    CashClosingTitle,
     Session,
     Opening,
     Closing,
-    Difference,
     // Anything else.
     GenericTitle,
     // The test sheet (hub#1803).
@@ -586,11 +587,15 @@ impl Locale {
             Label::Number => ("No: ", "N: "),
             Label::Address => ("Addr: ", "Dir: "),
             Label::Signature => ("Signature: ___________", "Firma: _______________"),
-            Label::CashReportTitle => ("CASH REPORT", "CIERRE DE CAJA"),
+            // A report that says neither X nor Z may be an open session's: never «CIERRE».
+            Label::CashReportTitle => ("CASH REPORT", "INFORME DE CAJA"),
+            // The X and the Z as the Hub's screen titles them («Partial report (X)», «Cash
+            // closing (Z)»), so the paper and the browser print never disagree.
+            Label::PartialReportTitle => ("PARTIAL REPORT (X)", "INFORME PARCIAL (X)"),
+            Label::CashClosingTitle => ("CASH CLOSING (Z)", "CIERRE DE CAJA (Z)"),
             Label::Session => ("Session: ", "Sesion: "),
             Label::Opening => ("Opening", "Apertura"),
             Label::Closing => ("Closing", "Cierre"),
-            Label::Difference => ("Difference", "Diferencia"),
             Label::GenericTitle => ("Document", "Documento"),
             // The two lines of the test sheet (hub#1803). Unaccented like every other `es` entry
             // above: the column is ASCII from end to end, which is also what lets the tests read
@@ -1322,11 +1327,51 @@ fn render_barcode_label(b: &mut EscposBuilder, data: &serde_json::Value) {
     b.cut();
 }
 
-/// Porta `_print_cash_report`.
+/// **Which report a `cash_session_report` is** (CASH_REGISTER-F16).
+///
+/// The Hub queues one document type for both and says which in `receipt_id`: «<number> (X)» for
+/// an open session, «<number> (Z)» for a closed one. Anything else — an older or foreign producer —
+/// is neither, and gets the neutral title.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum CashReport {
+    /// The partial report of an open session (X).
+    Partial,
+    /// The cash closing of a closed session (Z).
+    Closing,
+}
+
+impl CashReport {
+    fn of(data: &serde_json::Value) -> Option<Self> {
+        let id = data.get("receipt_id").and_then(|v| v.as_str())?.trim_end();
+        // `get` refuses a cut inside a multi-byte character: such an ending is no «(X)» either.
+        let suffix = id.get(id.len().saturating_sub(3)..)?;
+        match suffix.to_ascii_uppercase().as_str() {
+            "(X)" => Some(Self::Partial),
+            "(Z)" => Some(Self::Closing),
+            _ => None,
+        }
+    }
+}
+
+/// Porta `_print_cash_report`, with the X and the Z of the Hub (CASH_REGISTER-F16).
+///
+/// The Hub's document: `receipt_id` (see [`CashReport`]), `cashier`, the float as
+/// `opening_balance`, the EXPECTED cash as `closing_balance`, and every figure of the report as
+/// `transactions` (`{label, amount}`, already in the language of whoever prints: «Expected» on
+/// both, «Counted» and «Over/short» on the Z). So an X or a Z prints the float and those lines,
+/// and nothing else: `closing_balance` again would say the expected cash twice, the second time
+/// as «Closing». No report prints a «Difference» of its own: closing − opening is not the
+/// over/short, and the Hub's over/short is already one of the lines.
 fn render_cash_report(b: &mut EscposBuilder, data: &serde_json::Value) {
     let t = Locale::from_document(data);
+    let report = CashReport::of(data);
+    let title = match report {
+        Some(CashReport::Partial) => Label::PartialReportTitle,
+        Some(CashReport::Closing) => Label::CashClosingTitle,
+        None => Label::CashReportTitle,
+    };
     b.set(Align::Center, true, false, false);
-    b.text(&format!("{}\n", t.label(Label::CashReportTitle)));
+    b.text(&format!("{}\n", t.label(title)));
     b.text("================================\n");
 
     b.set(Align::Left, false, false, false);
@@ -1340,12 +1385,11 @@ fn render_cash_report(b: &mut EscposBuilder, data: &serde_json::Value) {
     b.text("--------------------------------\n");
 
     let opening = data.get("opening_balance").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let closing = data.get("closing_balance").and_then(|v| v.as_f64()).unwrap_or(0.0);
     b.total_line(t.label(Label::Opening), opening);
-    b.total_line(t.label(Label::Closing), closing);
-
-    let diff = closing - opening;
-    b.total_line(t.label(Label::Difference), diff);
+    if report.is_none() {
+        let closing = data.get("closing_balance").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        b.total_line(t.label(Label::Closing), closing);
+    }
 
     b.text("--------------------------------\n");
 
@@ -3005,7 +3049,8 @@ mod tests {
             &json!({ "locale": "en", "receipt_id": "S-1", "cashier": "Ana",
                      "opening_balance": 100.0, "closing_balance": 150.0 }),
         );
-        for wanted in ["CASH REPORT", "Session: S-1", "Cashier: Ana", "Opening", "Closing", "Difference"] {
+        // No «Difference»: closing − opening is not the over/short (CASH_REGISTER-F16).
+        for wanted in ["CASH REPORT", "Session: S-1", "Cashier: Ana", "Opening", "Closing"] {
             assert!(report.contains(wanted), "the cash report says {wanted:?}:\n{report}");
         }
     }
@@ -3051,8 +3096,9 @@ mod tests {
                 DocumentType::CashSessionReport,
                 json!({ "receipt_id": "S-1", "cashier": "Ana",
                         "opening_balance": 100.0, "closing_balance": 150.0 }),
-                vec!["CIERRE DE CAJA", "Sesion: S-1", "Cajero: Ana", "Apertura", "Cierre",
-                     "Diferencia"],
+                // A report that does not say X or Z is titled neutrally and carries no invented
+                // «Diferencia» (CASH_REGISTER-F16): the two changes this paper made on purpose.
+                vec!["INFORME DE CAJA", "Sesion: S-1", "Cajero: Ana", "Apertura", "Cierre"],
             ),
         ];
         for (doc, data, spanish) in cases {
@@ -3838,6 +3884,260 @@ mod tests {
             vec!["Vuelva pronto"],
             "{lines:#?}"
         );
+    }
+
+    // ── CASH_REGISTER-F16 · the X and the Z report on paper ──────────────────────────────────────
+    //
+    // The Hub queues ONE document type for both reports (`cash_register.session.print`): the open
+    // session's partial report (X) and the closed session's cash closing (Z). It tells them apart
+    // in `receipt_id` («<number> (X)» / «<number> (Z)»), sends the float as `opening_balance`, the
+    // EXPECTED cash as `closing_balance`, and every figure of the report — «Expected» included
+    // and, on the Z only, «Counted» and «Over/short» — as `transactions`, already in the language
+    // of whoever prints. The paper used to title both «CIERRE DE CAJA», relabel the expected cash
+    // as «Cierre» and invent a «Diferencia» (closing − opening) next to the Hub's real over/short.
+
+    /// The Hub's `transactions` labels in `en` and in `es` (its `cash report` catalogue).
+    fn hub_report_label(locale: &str, en: &'static str) -> &'static str {
+        if locale == "en" {
+            return en;
+        }
+        match en {
+            "Sales" => "Ventas",
+            "Cash sales" => "Ventas en efectivo",
+            "Card sales" => "Ventas con tarjeta",
+            "Refunds" => "Devoluciones",
+            "Cash in" => "Entradas",
+            "Cash out" => "Salidas",
+            "Comps" => "Invitaciones",
+            "Expected" => "Esperado",
+            "Counted" => "Contado",
+            "Over/short" => "Descuadre",
+            other => panic!("no Spanish for {other:?}"),
+        }
+    }
+
+    /// The document the Hub queues today (`test_integration_printing.py`): a 100.00 float, a 1.50
+    /// cash sale and 0.50 taken out; `report` is `"X"` (open) or `"Z"` (closed, 100.90 counted).
+    fn hub_cash_report(report: &str, locale: &str) -> serde_json::Value {
+        let mut figures = vec![
+            ("Sales", 1.5),
+            ("Cash sales", 1.5),
+            ("Card sales", 0.0),
+            ("Refunds", 0.0),
+            ("Cash in", 0.0),
+            ("Cash out", -0.5),
+            ("Comps", 0.0),
+            ("Expected", 101.0),
+        ];
+        if report == "Z" {
+            figures.extend([("Counted", 100.9), ("Over/short", -0.1)]);
+        }
+        let transactions: Vec<serde_json::Value> = figures
+            .into_iter()
+            .map(|(en, amount)| json!({ "label": hub_report_label(locale, en), "amount": amount }))
+            .collect();
+        json!({
+            "locale": locale,
+            "receipt_id": format!("S-261023-0001 ({report})"),
+            "cashier": "tester",
+            "opening_balance": 100.0,
+            "closing_balance": 101.0,
+            "transactions": transactions,
+        })
+    }
+
+    /// The cash report's lines as they reach the roll, trimmed.
+    fn cash_paper(data: &serde_json::Value) -> Vec<String> {
+        money_paper(DocumentType::CashSessionReport, data)
+            .into_iter()
+            .map(|l| l.trim().to_string())
+            .collect()
+    }
+
+    /// How many lines of the roll start with `label` — a figure printed twice is two of them.
+    fn lines_starting(lines: &[String], label: &str) -> usize {
+        lines.iter().filter(|l| l.starts_with(label)).count()
+    }
+
+    /// An open session prints the PARTIAL report (X), titled as the Hub's screen titles it — never
+    /// «CIERRE DE CAJA»: the shift is not closed, and a cashier handing that paper over would be
+    /// handing over a closing that never happened.
+    #[test]
+    fn an_open_session_prints_the_partial_x_report_not_a_cash_closing() {
+        for (locale, title, closing) in [
+            ("es", "INFORME PARCIAL (X)", "CIERRE DE CAJA"),
+            ("en", "PARTIAL REPORT (X)", "CASH CLOSING"),
+        ] {
+            let lines = cash_paper(&hub_cash_report("X", locale));
+            assert!(
+                lines.iter().any(|l| l == title),
+                "{locale}: titled {title:?}:\n{lines:#?}"
+            );
+            assert!(
+                !lines.iter().any(|l| l.contains(closing)),
+                "{locale}: an X is not a closing:\n{lines:#?}"
+            );
+        }
+    }
+
+    /// The X carries no invented «Difference» and says the expected cash ONCE, under the Hub's own
+    /// label: `closing_balance` is that same expected cash, not a closing balance.
+    #[test]
+    fn the_x_report_has_no_invented_difference_and_says_the_expected_cash_once() {
+        for (locale, opening, expected, closing, difference) in [
+            ("es", "Apertura", "Esperado", "Cierre", "Diferencia"),
+            ("en", "Opening", "Expected", "Closing", "Difference"),
+        ] {
+            let lines = cash_paper(&hub_cash_report("X", locale));
+            assert!(
+                line_of(&lines, opening).ends_with(" 100.00"),
+                "{locale}:\n{lines:#?}"
+            );
+            assert_eq!(lines_starting(&lines, expected), 1, "{locale}:\n{lines:#?}");
+            assert!(
+                line_of(&lines, expected).ends_with(" 101.00"),
+                "{locale}:\n{lines:#?}"
+            );
+            assert_eq!(
+                lines_starting(&lines, closing),
+                0,
+                "{locale}: no «{closing}»:\n{lines:#?}"
+            );
+            assert_eq!(
+                lines_starting(&lines, difference),
+                0,
+                "{locale}:\n{lines:#?}"
+            );
+        }
+    }
+
+    /// A closed session prints the cash closing (Z) with the Hub's count and over/short as its
+    /// ONLY difference — not a second, false one (closing − opening = 1.00 here, against a real
+    /// over/short of −0.10).
+    #[test]
+    fn the_z_report_prints_the_hub_over_short_as_its_only_difference() {
+        for (locale, title, expected, counted, over_short, closing, difference) in [
+            (
+                "es",
+                "CIERRE DE CAJA (Z)",
+                "Esperado",
+                "Contado",
+                "Descuadre",
+                "Cierre",
+                "Diferencia",
+            ),
+            (
+                "en",
+                "CASH CLOSING (Z)",
+                "Expected",
+                "Counted",
+                "Over/short",
+                "Closing",
+                "Difference",
+            ),
+        ] {
+            let lines = cash_paper(&hub_cash_report("Z", locale));
+            assert!(
+                lines.iter().any(|l| l == title),
+                "{locale}: titled {title:?}:\n{lines:#?}"
+            );
+            assert_eq!(lines_starting(&lines, expected), 1, "{locale}:\n{lines:#?}");
+            assert!(
+                line_of(&lines, counted).ends_with(" 100.90"),
+                "{locale}:\n{lines:#?}"
+            );
+            assert_eq!(
+                lines_starting(&lines, over_short),
+                1,
+                "{locale}:\n{lines:#?}"
+            );
+            assert!(
+                line_of(&lines, over_short).ends_with(" -0.10"),
+                "{locale}:\n{lines:#?}"
+            );
+            assert_eq!(
+                lines_starting(&lines, closing),
+                0,
+                "{locale}: no «{closing}»:\n{lines:#?}"
+            );
+            assert_eq!(
+                lines_starting(&lines, difference),
+                0,
+                "{locale}:\n{lines:#?}"
+            );
+        }
+    }
+
+    /// A cash report that does not say X or Z (an older or foreign producer) gets a NEUTRAL title:
+    /// it may well be an open session's, so it is never titled a closing. The figures it sends
+    /// still reach the paper; the difference this printer used to invent does not.
+    #[test]
+    fn a_cash_report_without_x_or_z_gets_a_neutral_title() {
+        for receipt_id in [
+            json!("S-1"),
+            json!("S-1 (Y)"),
+            json!("(X) S-1"),
+            json!(null),
+        ] {
+            for (locale, title, closing_title, opening, closing, difference) in [
+                (
+                    "es",
+                    "INFORME DE CAJA",
+                    "CIERRE DE CAJA",
+                    "Apertura",
+                    "Cierre",
+                    "Diferencia",
+                ),
+                (
+                    "en",
+                    "CASH REPORT",
+                    "CASH CLOSING",
+                    "Opening",
+                    "Closing",
+                    "Difference",
+                ),
+            ] {
+                let lines = cash_paper(&json!({
+                    "locale": locale, "receipt_id": receipt_id,
+                    "opening_balance": 100.0, "closing_balance": 150.0,
+                }));
+                let case = format!("{locale}, receipt_id {receipt_id}");
+                assert!(
+                    lines.iter().any(|l| l == title),
+                    "{case}: titled {title:?}:\n{lines:#?}"
+                );
+                assert!(
+                    !lines.iter().any(|l| l.contains(closing_title)),
+                    "{case}:\n{lines:#?}"
+                );
+                assert!(
+                    line_of(&lines, opening).ends_with(" 100.00"),
+                    "{case}:\n{lines:#?}"
+                );
+                assert!(
+                    line_of(&lines, closing).ends_with(" 150.00"),
+                    "{case}:\n{lines:#?}"
+                );
+                assert_eq!(lines_starting(&lines, difference), 0, "{case}:\n{lines:#?}");
+            }
+        }
+    }
+
+    /// The Hub upper-cases the letter, but a report is an X or a Z however it is written, and the
+    /// spaces around it do not change that.
+    #[test]
+    fn the_report_letter_is_read_whatever_its_case_and_trailing_spaces() {
+        for (receipt_id, title) in [
+            ("S-261023-0001 (x)", "PARTIAL REPORT (X)"),
+            ("S-261023-0001 (z)  ", "CASH CLOSING (Z)"),
+            ("(Z)", "CASH CLOSING (Z)"),
+        ] {
+            let lines = cash_paper(&json!({ "locale": "en", "receipt_id": receipt_id }));
+            assert!(
+                lines.iter().any(|l| l == title),
+                "{receipt_id:?} → {title:?}:\n{lines:#?}"
+            );
+        }
     }
 }
 
