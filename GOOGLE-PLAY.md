@@ -87,9 +87,41 @@ landing no ofrece APK: el endpoint de descarga del SaaS hace **redirect 302** a 
 - **versionCode monotónico**: `major*1e6 + minor*1e3 + patch` → **1.0.0 = 1000000** (la serie
   arranca en 1.0.0, ADR-0160). Lo fija el Gradle, no el que calcula Tauri (ADR-0180 §4): en
   Play es una puerta de un solo sentido.
-- **Sin declaración de FGS.** ADR-0196 §2 retira el *foreground service*: la app no corre en
-  segundo plano. El `AndroidManifest.xml` de `gen/android` es la fuente — consúltalo en vez de
-  fiarte de una lista aquí.
+- **Los permisos los dicen los dos `AndroidManifest.xml`** (el del plugin, en
+  `crates/tauri-plugin-erplora-android/android/src/main/`, y el de `src-tauri/gen/android`): son la
+  fuente, consúltalos en vez de fiarte de una lista aquí. Los que exigen algo en Play Console, en
+  «Formularios de Play que dependen de un permiso». El servicio en primer plano que ADR-0196 §2
+  había retirado volvió con hub#2307.
+
+## Formularios de Play que dependen de un permiso
+
+Un permiso nuevo en el manifiesto puede exigir rellenar algo en Play Console **antes** de enviar a
+revisión la versión que lo lleva: sin ello Google la rechaza o la para. Lo hace Ioan en la consola.
+
+- **Micrófono** (`RECORD_AUDIO` + `MODIFY_AUDIO_SETTINGS`, para dictar al asistente del Hub, flujo
+  `BASE-F94` del Hub): *App content › Data safety*, tipo **Audio › Voice or sound recordings**.
+  - **Collected: sí.** El audio sale del dispositivo: la página lo graba (`getUserMedia`, dos minutos
+    como mucho), se lo manda al hub del negocio (`base.assistant.transcribe`), el hub a erplora.com
+    (`/internal/speech/transcribe`) y erplora.com al proveedor de transcripción (`whisper-1` de OpenAI
+    por defecto, `ASSISTANT_SERVICE_PROVIDER`). El texto vuelve a la caja del asistente y la persona lo
+    lee antes de enviarlo.
+  - **Shared: no.** El proveedor transcribe por cuenta de ERPlora (encargado del tratamiento), y Play no
+    cuenta como «compartir» lo que se pasa a un proveedor de servicios.
+  - **Processed ephemerally: no** (la respuesta prudente). Ni el hub ni erplora.com guardan el audio: la
+    operación del hub no abre su base de datos (`database=False`) y erplora.com lo pasa de memoria al
+    proveedor sin escribirlo (`assistant/media.py`). Pero cuánto lo retiene el proveedor lo fijan sus
+    condiciones de API, no nuestro código: solo se marca «sí» con retención cero por contrato.
+  - **Required or optional: optional.** Solo se graba cuando la persona pulsa el micrófono; el TPV vende
+    sin él.
+  - **Purpose: App functionality.**
+  - **La política de privacidad tiene que decir lo mismo** (Play contrasta las dos): que el dictado manda
+    el audio a un proveedor de transcripción, y cuál.
+
+  `RECORD_AUDIO` no está en el formulario de permisos sensibles (*Permissions declaration*): no hay
+  nada más que declarar. El manifiesto lo acompaña de `android.hardware.microphone` con
+  `required="false"`; sin eso Play ocultaría la app a los equipos sin micrófono.
+- **Servicio en primer plano** (`FOREGROUND_SERVICE_SPECIAL_USE`, hub#2307): *App content › Foreground
+  service permissions*, uso `specialUse` con su descripción y un vídeo (hub#2421).
 
 ## Cableado
 
@@ -146,3 +178,7 @@ escalonado (`status: inProgress` + `userFraction`), que hoy no está cableado.
     `printing`. Sale **en frío**, sin frase previa, y Android lo redacta como «buscar …
     dispositivos cercanos», que suena a rastreo — pendiente en hub#1773 (fuera de hub#1732:
     el disparo vive en el `module-sdk` y mover su contrato arrastra el espejo del toolkit).
+  - **Micrófono**: al pulsar el micrófono del asistente. No lo pide la app sino el WebView (wry,
+    `RustWebChromeClient.onPermissionRequest`), sin frase previa: el toque es el contexto. Si se
+    niega, el hub dice que el micrófono está denegado y el dictado no empieza; tras dos «no» Android
+    deja de preguntar y solo se reactiva en los ajustes del sistema.

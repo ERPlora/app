@@ -65,6 +65,19 @@
          from every device without it. The till does not need a position; only a module asks. -->
     <uses-feature android:name="android.hardware.location" android:required="false" />
 
+    <!-- Dictating to the assistant (the Hub's BASE-F94, hub#247): the page calls `getUserMedia`,
+         and wry's `RustWebChromeClient.onPermissionRequest` asks for both and grants the
+         microphone only if both come back granted. RECORD_AUDIO is a runtime permission (Android's
+         own dialog, when the person taps the microphone); MODIFY_AUDIO_SETTINGS is install-time.
+         Undeclared, the request is DENIED with no dialog. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!-- 🔴 Same trap as the NFC feature: RECORD_AUDIO makes Google Play add an IMPLICIT
+         android.hardware.microphone requirement (read back with aapt2 at targetSdk 36) and hide
+         the app from every device without one. The till sells without dictation. -->
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
 

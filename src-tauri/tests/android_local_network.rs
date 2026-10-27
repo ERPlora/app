@@ -97,6 +97,29 @@ const LOCATION_FEATURE: &str = "android.hardware.location";
 /// device lacking it.
 const OPTIONAL_FEATURES: &[&str] = &[NFC_FEATURE, LOCATION_FEATURE];
 
+/// What a page of the business needs to dictate to the assistant (the Hub's BASE-F94, hub#247):
+/// exactly the pair wry's `RustWebChromeClient.onPermissionRequest` (wry 0.55.1) asks Android for
+/// when `getUserMedia({ audio: true })` arrives as `RESOURCE_AUDIO_CAPTURE`, and it grants the
+/// capture only if BOTH come back granted. `RECORD_AUDIO` is a runtime permission and
+/// `MODIFY_AUDIO_SETTINGS` an install-time one, but an undeclared permission is answered DENIED
+/// with no dialog either way: the page gets `NotAllowedError` and the microphone never starts.
+///
+/// Kept apart from [`REQUIRED`] only because the release job does not read these back off the
+/// APK yet (`.github/workflows/tauri-release.yml`, outside this change).
+const DICTATION: &[&str] = &[
+    "android.permission.RECORD_AUDIO",
+    "android.permission.MODIFY_AUDIO_SETTINGS",
+];
+
+/// The hardware feature `RECORD_AUDIO` drags in behind it: same trap as [`NFC_FEATURE`].
+///
+/// Read back with aapt2 off an APK at minSdk 24 / targetSdk 36: the permission alone makes
+/// `uses-implied-feature: name='android.hardware.microphone' reason='requested
+/// android.permission.RECORD_AUDIO permission'`, a hard requirement, and Play would hide the app
+/// from every device without a microphone (Android TV boxes, counter terminals). Dictation is a
+/// convenience; the till sells without it.
+const MICROPHONE_FEATURE: &str = "android.hardware.microphone";
+
 /// The manifest of the generated Android project — the one a lost file makes `android init` rewrite.
 const APP_MANIFEST: &str = include_str!("../gen/android/app/src/main/AndroidManifest.xml");
 
@@ -372,5 +395,41 @@ fn the_location_permissions_are_declared_in_both_manifests_hub2552() {
                 "{label} manifest does not declare {permission} (hub#2552)"
             );
         }
+    }
+}
+
+/// The microphone pair, in both manifests: what the assistant's dictation needs inside the app
+/// (BASE-F94, hub#247). Without it the WebView answers `getUserMedia` with `NotAllowedError` and
+/// no dialog, on every device, forever.
+#[test]
+fn the_dictation_permissions_are_declared_in_both_manifests() {
+    let plugin = fs::read_to_string(plugin_manifest_path()).expect("the plugin manifest");
+    for (label, manifest) in [("gen/android", APP_MANIFEST), ("plugin", plugin.as_str())] {
+        let declared = declared_permissions(manifest);
+        for permission in DICTATION {
+            assert!(
+                declared.iter().any(|p| p == permission),
+                "{label} manifest does not declare {permission}: wry asks Android for it when a \
+                 page calls getUserMedia, and an undeclared permission is DENIED with no dialog — \
+                 the assistant's microphone never starts (BASE-F94, hub#247).\n\
+                 Declared right now: {declared:?}"
+            );
+        }
+    }
+}
+
+/// `RECORD_AUDIO` must not narrow who can install the app. Both copies, because the merger keeps
+/// the strictest of the two (see [`an_implied_feature_does_not_hide_the_app_from_devices_without_it`]).
+#[test]
+fn the_microphone_does_not_hide_the_app_from_devices_without_one() {
+    let plugin = fs::read_to_string(plugin_manifest_path()).expect("the plugin manifest");
+    for (label, manifest) in [("gen/android", APP_MANIFEST), ("plugin", plugin.as_str())] {
+        assert!(
+            feature_is_optional(manifest, MICROPHONE_FEATURE),
+            "{label} manifest declares RECORD_AUDIO without saying {MICROPHONE_FEATURE} is \
+             optional. Google Play adds that IMPLICIT requirement and hides the app from every \
+             device without a microphone. Put back: <uses-feature \
+             android:name=\"{MICROPHONE_FEATURE}\" android:required=\"false\" />"
+        );
     }
 }

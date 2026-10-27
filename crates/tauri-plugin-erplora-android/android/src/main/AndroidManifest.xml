@@ -108,6 +108,25 @@
         android:name="android.hardware.location"
         android:required="false" />
 
+    <!-- Dictating to the assistant (the Hub's BASE-F94, hub#247). The page calls
+         `getUserMedia({ audio: true })` and wry's `RustWebChromeClient.onPermissionRequest` asks
+         for BOTH of these, granting the microphone only if both come back granted. RECORD_AUDIO is
+         a RUNTIME permission: Android's own dialog shows when the person taps the microphone, the
+         tap being the context, so it stays OUT of `PermissionPolicy` like the location pair.
+         MODIFY_AUDIO_SETTINGS is install-time `normal`. Without the declaration the request is
+         answered DENIED with no dialog, forever, and the page reports the microphone as refused. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!-- 🔴 Load-bearing, same trap as the NFC and location features. RECORD_AUDIO makes Google
+         Play add an IMPLICIT `android.hardware.microphone` requirement (aapt2 at targetSdk 36:
+         `uses-implied-feature … reason='requested android.permission.RECORD_AUDIO permission'`)
+         and hide the app from every device without a microphone — Android TV boxes, some counter
+         terminals. Dictation is a convenience; the till sells without it. -->
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
+
     <application>
         <!-- `specialUse` because none of the typed foreground services (dataSync, mediaPlayback,
              …) describes «stay reachable for incoming orders»; Google Play asks for the subtype
