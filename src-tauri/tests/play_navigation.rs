@@ -67,6 +67,17 @@ fn the_play_copy_refuses_the_saas_pages_that_sell() {
             "https://erplora.com/dashboard/billing/",
             "https://erplora.com/dashboard/hubs/",
             "https://erplora.com/dashboard/marketplace/modules/pos/?hub=h1&utm_source=hub",
+            // The panel's Store and Billing where the SaaS serves them since saas#123, and their old
+            // addresses at the root, which answer 301 there.
+            "https://erplora.com/dashboard/store",
+            "https://erplora.com/dashboard/store/plans?business=7f8e1c2a-4b1d-4c3e-9f00-1a2b3c4d5e6f",
+            "https://erplora.com/dashboard/store/modules",
+            "https://erplora.com/dashboard/billing",
+            "https://erplora.com/dashboard/billing/invoices",
+            "https://erplora.com/dashboard/billing/subscriptions",
+            "https://erplora.com/dashboard/billing/payment",
+            "https://erplora.com/store/plans",
+            "https://erplora.com/billing/invoices",
             "https://erplora.com/modules/",
             "https://erplora.com/solutions/",
             "https://erplora.com/features/",
@@ -100,41 +111,48 @@ fn the_play_copy_sends_the_saas_home_page_to_the_app_s_own_start() {
 
 #[test]
 fn the_play_copy_follows_sign_in_sign_up_and_the_way_into_a_hub() {
+    // The SaaS's entry pages as it serves them today (a single-page app since saas-next): the
+    // launcher is the sign-in and sign-up, and the steps around it live at the root. None of them
+    // shows a price: the launcher's «Create business» card starts on Free without a card, and
+    // paying an unpaid invoice is offered on the web only.
     assert_all(
         NavigationVerdict::Allow,
         &[
-            // The app's own start: pick, open or create a hub.
+            // The app's own start: the launcher under the address the app boots on, and «Open».
             "https://erplora.com/shell/",
             "https://erplora.com/shell",
             "https://erplora.com/shell/?choose=1",
             "https://erplora.com/shell/open/7f8e1c2a-4b1d-4c3e-9f00-1a2b3c4d5e6f/",
-            "https://erplora.com/shell/create/",
-            // Sign in, sign up, verify the e-mail, reset the password, second factor, sign out.
-            "https://erplora.com/account/login/?next=/shell/",
-            "https://erplora.com/register/",
+            // The launcher: where the SaaS signs in (`SPA_LOGIN`) and signs up (`?tab=signup`); its
+            // old address with the slash only leads there.
+            "https://erplora.com/launch",
+            "https://erplora.com/launch?next=/shell/",
+            "https://erplora.com/launch?tab=signup&next=/shell/",
+            "https://erplora.com/launch/",
+            // The old sign-in, which leads to the launcher, and where a refused sign-in or jump
+            // lands.
+            "https://erplora.com/login",
+            "https://erplora.com/login/error?code=authentication_error",
+            // Verify the e-mail, reset the password, the second factor and its settings, «Confirm
+            // it's you».
+            "https://erplora.com/verify-email",
+            "https://erplora.com/verify-email?next=/shell/",
+            "https://erplora.com/password/reset",
+            "https://erplora.com/password/reset/key/1-abc123",
+            "https://erplora.com/2fa/authenticate",
+            "https://erplora.com/2fa",
+            "https://erplora.com/reauthenticate?method=totp&flows=mfa_reauthenticate&next=/shell/",
+            // allauth's old addresses of the sign-in and the sign-up, which lead to the launcher.
             "https://erplora.com/accounts/login/?next=/shell/",
             "https://erplora.com/accounts/signup/",
-            "https://erplora.com/accounts/logout/",
-            "https://erplora.com/accounts/confirm-email/",
-            "https://erplora.com/accounts/confirm-email/MQ:1vX:abc/",
-            "https://erplora.com/accounts/resend-verification/",
-            "https://erplora.com/accounts/password/reset/",
-            "https://erplora.com/accounts/password/reset/key/1-abc123/",
-            "https://erplora.com/accounts/2fa/authenticate/",
-            "https://erplora.com/accounts/reauthenticate/",
-            // Google sign-in and the hand-offs into a hub.
-            "https://erplora.com/auth/google/login/?next=/shell/",
+            // «Continue with Google» (a form posted to allauth, which sends the window to Google)
+            // and Google's way back.
+            "https://erplora.com/_allauth/browser/v1/auth/provider/redirect",
             "https://erplora.com/auth/google/callback/?code=x&state=y",
-            "https://erplora.com/auth/hub-bridge/?hub=panaderia",
-            "https://erplora.com/auth/handoff/one-time-code/",
-            // After sign-in: the router, whose destination is judged again when it redirects.
-            "https://erplora.com/post-login/",
-            // The walk into a hub, the first free hub, waking a sleeping one, joining one.
-            "https://erplora.com/start/",
-            "https://erplora.com/enter/7f8e1c2a-4b1d-4c3e-9f00-1a2b3c4d5e6f/",
-            "https://erplora.com/businesses/",
+            // Joining a business: every invitation waiting, or one first.
+            "https://erplora.com/invitation",
             "https://erplora.com/invitation/",
-            "https://erplora.com/hub/starting/panaderia/",
+            "https://erplora.com/invitations/7f8e1c2a-4b1d-4c3e-9f00-1a2b3c4d5e6f",
             // Google Play requires the privacy policy to be reachable from inside the app, and the
             // cookie banner of these pages links to its settings. Neither sells — and every link
             // they carry to a page that does is judged by this same list.
@@ -147,20 +165,84 @@ fn the_play_copy_follows_sign_in_sign_up_and_the_way_into_a_hub() {
 }
 
 #[test]
-fn the_account_page_opens_only_as_the_account_surface() {
-    // hub#1900 / saas#2084: `?surface=account` paints the person's account WITHOUT the panel that
-    // sells. Play requires an in-app way to delete the account, and it lives there.
+fn the_entry_pages_the_saas_no_longer_serves_are_not_followed() {
+    // The old product's entry pages that saas-next does not serve: with no route they fall into the
+    // single-page app's catch-all, or into Django's 404 under the prefixes the app does not own
+    // (`/accounts/`, `/auth/`). A page that is not there needs no door — and the next page the SaaS
+    // puts at one of those addresses is judged on its own when it exists.
+    assert_all(
+        NavigationVerdict::Refuse,
+        &[
+            "https://erplora.com/register/",
+            "https://erplora.com/post-login/",
+            "https://erplora.com/start/",
+            "https://erplora.com/enter/7f8e1c2a-4b1d-4c3e-9f00-1a2b3c4d5e6f/",
+            "https://erplora.com/hub/starting/panaderia/",
+            "https://erplora.com/accounts/logout/",
+            "https://erplora.com/accounts/confirm-email/MQ:1vX:abc/",
+            "https://erplora.com/accounts/password/reset/",
+            "https://erplora.com/accounts/2fa/authenticate/",
+            "https://erplora.com/accounts/reauthenticate/",
+            "https://erplora.com/auth/google/login/?next=/shell/",
+            "https://erplora.com/auth/hub-bridge/?hub=panaderia",
+            "https://erplora.com/auth/handoff/one-time-code/",
+            // allauth's other endpoints are its API, never a page of the window.
+            "https://erplora.com/_allauth/browser/v1/config",
+        ],
+        "an entry page the SaaS no longer serves",
+    );
+}
+
+#[test]
+fn the_businesses_are_followed_where_the_saas_serves_them_today() {
+    // saas#123 moved the panel under `/dashboard/`: Businesses — pick, open or create one, nothing
+    // sold — lives at `/dashboard/businesses`, and its old address at the root answers 301 there,
+    // so the old one is followed too (bookmarks, the Hub's links, the mails already sent) and its
+    // redirect is not refused halfway.
     assert_all(
         NavigationVerdict::Allow,
         &[
+            "https://erplora.com/dashboard/businesses",
+            "https://erplora.com/dashboard/businesses/",
+            "https://erplora.com/dashboard/businesses?create=1",
+            "https://erplora.com/dashboard/businesses/7f8e1c2a-4b1d-4c3e-9f00-1a2b3c4d5e6f/summary",
+            "https://erplora.com/dashboard/businesses/7f8e1c2a-4b1d-4c3e-9f00-1a2b3c4d5e6f/members",
+            "https://erplora.com/businesses/7f8e1c2a-4b1d-4c3e-9f00-1a2b3c4d5e6f/summary",
+        ],
+        "Businesses, at its address under the panel and at its old one",
+    );
+    assert_all(
+        NavigationVerdict::Refuse,
+        &[
+            // On a segment boundary, as every prefix of the list.
+            "https://erplora.com/dashboard/businesses-pricing/",
+            // Only Businesses: not the panel it is a page of.
+            "https://erplora.com/dashboard/",
+        ],
+        "a page of the panel that is not Businesses",
+    );
+}
+
+#[test]
+fn the_account_page_opens_only_as_the_account_surface() {
+    // hub#1900 / saas#2084: `?surface=account` paints the person's account WITHOUT the panel that
+    // sells. Play requires an in-app way to delete the account, and it lives there. Since saas#123
+    // Account lives at `/dashboard/account/…`; its old addresses — `/dashboard/profile/…` of the old
+    // panel and `/account/…`, where it lived before the move — answer 301 there keeping the query,
+    // so each is followed WITH the mark too, and only with it.
+    assert_all(
+        NavigationVerdict::Allow,
+        &[
+            "https://erplora.com/dashboard/account?surface=account",
+            "https://erplora.com/dashboard/account/profile?surface=account",
+            "https://erplora.com/dashboard/account/security?surface=account",
+            "https://erplora.com/dashboard/account/preferences?surface=account",
+            // Django's `request.GET.get` reads the LAST value of a repeated key.
+            "https://erplora.com/dashboard/account/profile?surface=panel&surface=account",
+            // The old addresses, on their way there.
             "https://erplora.com/dashboard/profile/?surface=account",
             "https://erplora.com/dashboard/profile/sessions/?surface=account",
-            "https://erplora.com/dashboard/profile/change-password/?surface=account",
-            "https://erplora.com/dashboard/profile/delete/?surface=account",
-            // Django's `request.GET.get` reads the LAST value of a repeated key.
-            "https://erplora.com/dashboard/profile/?surface=panel&surface=account",
-            // Where deleting the account ends: signed out, no mark, no way out (saas#2084).
-            "https://erplora.com/dashboard/profile/deleted/",
+            "https://erplora.com/account/profile?surface=account",
         ],
         "the account surface",
     );
@@ -168,20 +250,54 @@ fn the_account_page_opens_only_as_the_account_surface() {
         NavigationVerdict::Refuse,
         &[
             // The same page INSIDE the panel, which has Billing a tap away.
+            "https://erplora.com/dashboard/account",
+            "https://erplora.com/dashboard/account/profile",
+            "https://erplora.com/dashboard/account/profile?surface=panel",
+            "https://erplora.com/dashboard/account/profile?surface=Account",
+            // …and the last value is the one the SaaS reads.
+            "https://erplora.com/dashboard/account/profile?surface=account&surface=panel",
+            // The old addresses without the mark land in the panel too.
             "https://erplora.com/dashboard/profile/",
             "https://erplora.com/dashboard/profile/sessions/",
-            "https://erplora.com/dashboard/profile/?surface=panel",
-            "https://erplora.com/dashboard/profile/?surface=Account",
-            // …and the last value is the one the SaaS reads.
             "https://erplora.com/dashboard/profile/?surface=account&surface=panel",
+            "https://erplora.com/account/profile",
+            // `/account/` is no longer the sign-in (that is the app's start, `/shell/`): its old
+            // sign-in address is a page of the panel now, followed only as the account surface.
+            "https://erplora.com/account/login/?next=/shell/",
             // The mark opens the account pages, not the rest of the panel.
             "https://erplora.com/dashboard/billing/?surface=account",
+            "https://erplora.com/dashboard/billing/invoices?surface=account",
+            "https://erplora.com/dashboard/store/plans?surface=account",
             "https://erplora.com/dashboard/?surface=account",
-            // The account-deleted page is ONE page, not every `deleted/` of the panel.
-            "https://erplora.com/dashboard/hubs/deleted/",
-            "https://erplora.com/dashboard/profile/deleted/more/",
+            // On a segment boundary.
+            "https://erplora.com/dashboard/accounts/?surface=account",
+            "https://erplora.com/accountx/?surface=account",
         ],
         "the account page painted inside the panel",
+    );
+}
+
+#[test]
+fn the_account_is_deleted_from_inside_the_play_copy_and_ends_at_the_app_s_start() {
+    // hub#2451: Google Play requires deleting the account from inside the app. «Delete your
+    // account» is a card of Account → Profile, shown on every surface; once deleted, the page leaves
+    // for the SaaS home page with a full load (`AFTER_DELETION = '/'` of the SaaS), which takes the
+    // window to the app's own start. The old panel's «account deleted» page is not served any more:
+    // it is a page like any other of the panel.
+    assert_eq!(
+        in_play("https://erplora.com/dashboard/account/profile?surface=account"),
+        NavigationVerdict::Allow,
+        "the page that deletes the account"
+    );
+    assert_eq!(
+        in_play("https://erplora.com/"),
+        NavigationVerdict::Home,
+        "where deleting the account ends"
+    );
+    assert_eq!(
+        in_play("https://erplora.com/dashboard/profile/deleted/"),
+        NavigationVerdict::Refuse,
+        "the old panel's «account deleted» page"
     );
 }
 
@@ -197,6 +313,11 @@ fn a_prefix_only_counts_on_a_segment_boundary() {
             "https://erplora.com/accountsx/",
             "https://erplora.com/legalese/",
             "https://erplora.com/authors/",
+            "https://erplora.com/launcher/",
+            "https://erplora.com/login-pricing/",
+            "https://erplora.com/passwords/",
+            "https://erplora.com/invitationsx/",
+            "https://erplora.com/_allauth/browser/v1/auth/provider/redirect-pricing",
             // Django routes are case-sensitive: this is not the app's start, whatever it serves.
             "https://erplora.com/SHELL/",
         ],
@@ -386,6 +507,8 @@ fn the_other_copies_follow_every_link_as_before() {
             "https://erplora.com/",
             "https://erplora.com/pricing/",
             "https://erplora.com/dashboard/billing/",
+            "https://erplora.com/dashboard/store/plans",
+            "https://erplora.com/dashboard/account/profile",
             "https://www.erplora.com/marketplace/",
         ] {
             assert_eq!(

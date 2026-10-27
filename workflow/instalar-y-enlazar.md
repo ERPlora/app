@@ -231,13 +231,13 @@ Implicados: HUB_SHELL-F13, HUB_SHELL-F14, REC_ALTA-F16
 QA: qa-hub-android Fase 4
 
 ### HUB_APP-F12 En la copia de Google Play, solo páginas del SaaS que no cobran
-Estado: parcial — los cambios de página por dentro del panel del SaaS (htmx) y lo que se abre en el navegador del sistema no pasan por la lista (ERPlora/hub#1918, abierta)
+Estado: parcial — los cambios de página por dentro del panel del SaaS (sin recargar la página) y lo que se abre en el navegador del sistema no pasan por la lista (ERPlora/hub#1918, abierta)
 Actor: sistema
 Pantalla: Aviso «Esta página no está disponible en la aplicación.»
 Pasos:
 1. Solo la copia de Google Play. Antes de seguir cualquier página de erplora.com (el apex, `www` y
-   `pre`), la aplicación comprueba una lista corta: entrar, registrarse, el alta de correo y contraseña,
-   la entrada a un negocio, la cuenta y lo legal.
+   `pre`), la aplicación comprueba una lista corta: entrar, registrarse, verificar el correo, recuperar la
+   contraseña, el segundo factor, elegir negocio, las invitaciones, la cuenta sola y lo legal.
 2. Una página que no está en la lista (precios, el panel con facturación, el mercado público) **no se
    carga**: la ventana se queda donde estaba y sale el aviso.
 3. La portada del SaaS (`/`) lleva al inicio de la propia aplicación en vez de enseñarse.
