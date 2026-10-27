@@ -52,27 +52,35 @@ const ACCOUNT_SURFACE: (&str, &str) = ("surface", "account");
 /// Deleting the account ends on the SaaS home page, which is the app's start (`Home`).
 const ACCOUNT_PAGES: &[&str] = &["/dashboard/account/", "/dashboard/profile/", "/account/"];
 
-/// The pages of the SaaS the Play copy follows, as path prefixes. None of them sells, and a link
-/// they carry to one that does is judged again when tapped.
+/// The pages of the SaaS the Play copy follows, as path prefixes: the ones it serves today, an old
+/// address only while the SaaS still redirects it. None of them sells, and a link they carry to one
+/// that does is judged again when tapped.
 const PLAY_SAAS_PAGES: &[&str] = &[
-    // The app's own start: pick, open or create a hub.
+    // The app's own start (the launcher under the address the app boots on) and its «Open».
     "/shell/",
-    // The old product's sign-up address (the alias of its sign-in screen).
-    "/register/",
-    // allauth: verify the e-mail, reset the password, second factor, reauthenticate, sign out.
-    "/accounts/",
-    // Google sign-in and the one-time hand-offs into a hub.
-    "/auth/",
-    // The router after sign-in; the page it redirects to is judged on its own.
-    "/post-login/",
-    // The first free hub, waking a sleeping one, the walk into a hub, choosing one (Businesses of
-    // the panel, and its old address, saas#123), joining one, and the page shown while it boots.
-    "/start/",
-    "/enter/",
+    // The launcher: where the SaaS signs in and signs up (`SPA_LOGIN`); `/launch/` leads there.
+    "/launch/",
+    // The old sign-in, which leads to the launcher, and where a refused sign-in or jump lands.
+    "/login/",
+    // Verify the e-mail, reset the password, the second factor and its settings, «Confirm it's you».
+    "/verify-email/",
+    "/password/",
+    "/2fa/",
+    "/reauthenticate/",
+    // allauth's old addresses of the sign-in and the sign-up, which lead to the launcher; the rest
+    // of its old pages are gone (404).
+    "/accounts/login/",
+    "/accounts/signup/",
+    // «Continue with Google»: the form posted to allauth, which sends the window to Google, and
+    // Google's way back.
+    "/_allauth/browser/v1/auth/provider/redirect/",
+    "/auth/google/callback/",
+    // Choosing a business (Businesses of the panel, and its old address, saas#123), and joining
+    // one: every invitation waiting, or one first.
     "/dashboard/businesses/",
     "/businesses/",
     "/invitation/",
-    "/hub/starting/",
+    "/invitations/",
     // Google Play requires the privacy policy to be reachable from inside the app; the cookie
     // banner of these pages links to its settings.
     "/legal/",

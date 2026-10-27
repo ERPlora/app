@@ -111,40 +111,48 @@ fn the_play_copy_sends_the_saas_home_page_to_the_app_s_own_start() {
 
 #[test]
 fn the_play_copy_follows_sign_in_sign_up_and_the_way_into_a_hub() {
+    // The SaaS's entry pages as it serves them today (a single-page app since saas-next): the
+    // launcher is the sign-in and sign-up, and the steps around it live at the root. None of them
+    // shows a price: the launcher's «Create business» card starts on Free without a card, and
+    // paying an unpaid invoice is offered on the web only.
     assert_all(
         NavigationVerdict::Allow,
         &[
-            // The app's own start: pick, open or create a hub.
+            // The app's own start: the launcher under the address the app boots on, and «Open».
             "https://erplora.com/shell/",
             "https://erplora.com/shell",
             "https://erplora.com/shell/?choose=1",
             "https://erplora.com/shell/open/7f8e1c2a-4b1d-4c3e-9f00-1a2b3c4d5e6f/",
-            "https://erplora.com/shell/create/",
-            // Sign in, sign up, verify the e-mail, reset the password, second factor, sign out.
-            "https://erplora.com/register/",
+            // The launcher: where the SaaS signs in (`SPA_LOGIN`) and signs up (`?tab=signup`); its
+            // old address with the slash only leads there.
+            "https://erplora.com/launch",
+            "https://erplora.com/launch?next=/shell/",
+            "https://erplora.com/launch?tab=signup&next=/shell/",
+            "https://erplora.com/launch/",
+            // The old sign-in, which leads to the launcher, and where a refused sign-in or jump
+            // lands.
+            "https://erplora.com/login",
+            "https://erplora.com/login/error?code=authentication_error",
+            // Verify the e-mail, reset the password, the second factor and its settings, «Confirm
+            // it's you».
+            "https://erplora.com/verify-email",
+            "https://erplora.com/verify-email?next=/shell/",
+            "https://erplora.com/password/reset",
+            "https://erplora.com/password/reset/key/1-abc123",
+            "https://erplora.com/2fa/authenticate",
+            "https://erplora.com/2fa",
+            "https://erplora.com/reauthenticate?method=totp&flows=mfa_reauthenticate&next=/shell/",
+            // allauth's old addresses of the sign-in and the sign-up, which lead to the launcher.
             "https://erplora.com/accounts/login/?next=/shell/",
             "https://erplora.com/accounts/signup/",
-            "https://erplora.com/accounts/logout/",
-            "https://erplora.com/accounts/confirm-email/",
-            "https://erplora.com/accounts/confirm-email/MQ:1vX:abc/",
-            "https://erplora.com/accounts/resend-verification/",
-            "https://erplora.com/accounts/password/reset/",
-            "https://erplora.com/accounts/password/reset/key/1-abc123/",
-            "https://erplora.com/accounts/2fa/authenticate/",
-            "https://erplora.com/accounts/reauthenticate/",
-            // Google sign-in and the hand-offs into a hub.
-            "https://erplora.com/auth/google/login/?next=/shell/",
+            // «Continue with Google» (a form posted to allauth, which sends the window to Google)
+            // and Google's way back.
+            "https://erplora.com/_allauth/browser/v1/auth/provider/redirect",
             "https://erplora.com/auth/google/callback/?code=x&state=y",
-            "https://erplora.com/auth/hub-bridge/?hub=panaderia",
-            "https://erplora.com/auth/handoff/one-time-code/",
-            // After sign-in: the router, whose destination is judged again when it redirects.
-            "https://erplora.com/post-login/",
-            // The walk into a hub, the first free hub, waking a sleeping one, joining one.
-            "https://erplora.com/start/",
-            "https://erplora.com/enter/7f8e1c2a-4b1d-4c3e-9f00-1a2b3c4d5e6f/",
-            "https://erplora.com/businesses/",
+            // Joining a business: every invitation waiting, or one first.
+            "https://erplora.com/invitation",
             "https://erplora.com/invitation/",
-            "https://erplora.com/hub/starting/panaderia/",
+            "https://erplora.com/invitations/7f8e1c2a-4b1d-4c3e-9f00-1a2b3c4d5e6f",
             // Google Play requires the privacy policy to be reachable from inside the app, and the
             // cookie banner of these pages links to its settings. Neither sells — and every link
             // they carry to a page that does is judged by this same list.
@@ -153,6 +161,35 @@ fn the_play_copy_follows_sign_in_sign_up_and_the_way_into_a_hub() {
             "https://erplora.com/cookies/",
         ],
         "sign-in, sign-up and the way into a hub",
+    );
+}
+
+#[test]
+fn the_entry_pages_the_saas_no_longer_serves_are_not_followed() {
+    // The old product's entry pages that saas-next does not serve: with no route they fall into the
+    // single-page app's catch-all, or into Django's 404 under the prefixes the app does not own
+    // (`/accounts/`, `/auth/`). A page that is not there needs no door — and the next page the SaaS
+    // puts at one of those addresses is judged on its own when it exists.
+    assert_all(
+        NavigationVerdict::Refuse,
+        &[
+            "https://erplora.com/register/",
+            "https://erplora.com/post-login/",
+            "https://erplora.com/start/",
+            "https://erplora.com/enter/7f8e1c2a-4b1d-4c3e-9f00-1a2b3c4d5e6f/",
+            "https://erplora.com/hub/starting/panaderia/",
+            "https://erplora.com/accounts/logout/",
+            "https://erplora.com/accounts/confirm-email/MQ:1vX:abc/",
+            "https://erplora.com/accounts/password/reset/",
+            "https://erplora.com/accounts/2fa/authenticate/",
+            "https://erplora.com/accounts/reauthenticate/",
+            "https://erplora.com/auth/google/login/?next=/shell/",
+            "https://erplora.com/auth/hub-bridge/?hub=panaderia",
+            "https://erplora.com/auth/handoff/one-time-code/",
+            // allauth's other endpoints are its API, never a page of the window.
+            "https://erplora.com/_allauth/browser/v1/config",
+        ],
+        "an entry page the SaaS no longer serves",
     );
 }
 
@@ -276,6 +313,11 @@ fn a_prefix_only_counts_on_a_segment_boundary() {
             "https://erplora.com/accountsx/",
             "https://erplora.com/legalese/",
             "https://erplora.com/authors/",
+            "https://erplora.com/launcher/",
+            "https://erplora.com/login-pricing/",
+            "https://erplora.com/passwords/",
+            "https://erplora.com/invitationsx/",
+            "https://erplora.com/_allauth/browser/v1/auth/provider/redirect-pricing",
             // Django routes are case-sensitive: this is not the app's start, whatever it serves.
             "https://erplora.com/SHELL/",
         ],
