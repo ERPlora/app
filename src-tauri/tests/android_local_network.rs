@@ -72,6 +72,9 @@ const REQUIRED: &[&str] = &[
     // dialog, the page gets PERMISSION_DENIED, and a personal-device clock-in is rejected forever.
     "android.permission.ACCESS_FINE_LOCATION",
     "android.permission.ACCESS_COARSE_LOCATION",
+    // Dictating to the assistant (BASE-F94, hub#247): see [`DICTATION`].
+    RECORD_AUDIO,
+    MODIFY_AUDIO_SETTINGS,
 ];
 
 /// The hardware feature the NFC permission drags in behind it (hub#988).
@@ -95,7 +98,10 @@ const LOCATION_FEATURE: &str = "android.hardware.location";
 /// Every hardware feature that one of the permissions in [`REQUIRED`] implies and the till can
 /// live without. Each one must be declared `required="false"` or Play hides the app from every
 /// device lacking it.
-const OPTIONAL_FEATURES: &[&str] = &[NFC_FEATURE, LOCATION_FEATURE];
+const OPTIONAL_FEATURES: &[&str] = &[NFC_FEATURE, LOCATION_FEATURE, MICROPHONE_FEATURE];
+
+const RECORD_AUDIO: &str = "android.permission.RECORD_AUDIO";
+const MODIFY_AUDIO_SETTINGS: &str = "android.permission.MODIFY_AUDIO_SETTINGS";
 
 /// What a page of the business needs to dictate to the assistant (the Hub's BASE-F94, hub#247):
 /// exactly the pair wry's `RustWebChromeClient.onPermissionRequest` (wry 0.55.1) asks Android for
@@ -103,13 +109,8 @@ const OPTIONAL_FEATURES: &[&str] = &[NFC_FEATURE, LOCATION_FEATURE];
 /// capture only if BOTH come back granted. `RECORD_AUDIO` is a runtime permission and
 /// `MODIFY_AUDIO_SETTINGS` an install-time one, but an undeclared permission is answered DENIED
 /// with no dialog either way: the page gets `NotAllowedError` and the microphone never starts.
-///
-/// Kept apart from [`REQUIRED`] only because the release job does not read these back off the
-/// APK yet (`.github/workflows/tauri-release.yml`, outside this change).
-const DICTATION: &[&str] = &[
-    "android.permission.RECORD_AUDIO",
-    "android.permission.MODIFY_AUDIO_SETTINGS",
-];
+/// Both are in [`REQUIRED`], so the release job reads them back off the APK too.
+const DICTATION: &[&str] = &[RECORD_AUDIO, MODIFY_AUDIO_SETTINGS];
 
 /// The hardware feature `RECORD_AUDIO` drags in behind it: same trap as [`NFC_FEATURE`].
 ///
@@ -329,7 +330,7 @@ fn an_implied_feature_does_not_hide_the_app_from_devices_without_it() {
                  optional. Google Play adds that IMPLICIT requirement and hides the app from every \
                  device without it — the cheap counter tablets this till is for. Put back: \
                  <uses-feature android:name=\"{feature}\" android:required=\"false\" /> \
-                 (hub#988, hub#2552)"
+                 (hub#988, hub#2552, hub#247)"
             );
         }
     }
@@ -415,21 +416,5 @@ fn the_dictation_permissions_are_declared_in_both_manifests() {
                  Declared right now: {declared:?}"
             );
         }
-    }
-}
-
-/// `RECORD_AUDIO` must not narrow who can install the app. Both copies, because the merger keeps
-/// the strictest of the two (see [`an_implied_feature_does_not_hide_the_app_from_devices_without_it`]).
-#[test]
-fn the_microphone_does_not_hide_the_app_from_devices_without_one() {
-    let plugin = fs::read_to_string(plugin_manifest_path()).expect("the plugin manifest");
-    for (label, manifest) in [("gen/android", APP_MANIFEST), ("plugin", plugin.as_str())] {
-        assert!(
-            feature_is_optional(manifest, MICROPHONE_FEATURE),
-            "{label} manifest declares RECORD_AUDIO without saying {MICROPHONE_FEATURE} is \
-             optional. Google Play adds that IMPLICIT requirement and hides the app from every \
-             device without a microphone. Put back: <uses-feature \
-             android:name=\"{MICROPHONE_FEATURE}\" android:required=\"false\" />"
-        );
     }
 }

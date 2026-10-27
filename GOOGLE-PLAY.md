@@ -181,4 +181,6 @@ escalonado (`status: inProgress` + `userFraction`), que hoy no está cableado.
   - **Micrófono**: al pulsar el micrófono del asistente. No lo pide la app sino el WebView (wry,
     `RustWebChromeClient.onPermissionRequest`), sin frase previa: el toque es el contexto. Si se
     niega, el hub dice que el micrófono está denegado y el dictado no empieza; tras dos «no» Android
-    deja de preguntar y solo se reactiva en los ajustes del sistema.
+    deja de preguntar y solo se reactiva en los ajustes del sistema. El micrófono y la ubicación solo
+    se conceden a páginas de ERPlora (`WebPermissionGate.kt`): una página ajena cargada en la ventana
+    recibe un «no» aunque el permiso de Android esté concedido.

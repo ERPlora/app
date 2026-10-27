@@ -34,8 +34,9 @@ Si falla: sin el permiso de red local el barrido y el envío a la red son tiempo
 Después de dos «no» Android deja de mostrar el diálogo para siempre: la salida es HUB_APP-F08. Una página que
 no es el negocio enlazado (otro negocio, la web pública, el entorno de pruebas) no puede preguntar ni pedir
 ningún permiso: recibe `not_the_linked_hub` y Android no enseña nada (HUB_APP-F10, ERPlora/hub#2642). El
-micrófono y la ubicación son la excepción: los pide el navegador integrado para la aplicación entera, sin
-mirar qué página los usa, así que, una vez concedidos, cualquier página que cargue la ventana los recibe.
+micrófono y la ubicación los pide el navegador integrado y solo para las páginas de ERPlora (cualquier hub,
+erplora.com y, en desarrollo, este mismo equipo): una página de otro sitio cargada en la ventana recibe un
+«no» sin que Android pregunte, aunque la persona ya los haya concedido para el hub.
 Implicados: HUB_PERIPHERALS-F01, HUB_SHELL-F68, HUB_SHELL-F139, PRINTING-F02, REC_ALTA-F17, BASE-F94
 QA: qa-hub-android Fase 2, qa-hub-android Fase 3
 
