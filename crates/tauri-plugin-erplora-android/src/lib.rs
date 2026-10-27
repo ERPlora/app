@@ -833,6 +833,48 @@ mod tests {
         assert!(body.contains("invoke.reject("), "keepListening swallows a refusal the page must hear");
     }
 
+    /// hub#247, hub#2552 — wry hands the microphone and the position to WHATEVER page asks. The
+    /// origin check is `WebPermissionGate.kt` (and its JUnit tests), and it only bites if the plugin
+    /// puts it in front of wry's client: from `load` (which Tauri calls from wry's
+    /// `on_webview_created`, after `setWebChromeClient`), through `post`, so it finds the client
+    /// whatever that order becomes.
+    const WEB_PERMISSION_GATE_KT: &str =
+        include_str!("../android/src/main/java/com/erplora/android/WebPermissionGate.kt");
+
+    /// The Rust half of the app, which decides «one of ours» for the navigation and the hub link.
+    const SHELL_LIB_RS: &str = include_str!("../../../src-tauri/src/lib.rs");
+
+    #[test]
+    fn the_webview_permissions_are_guarded_by_origin_from_load() {
+        let load = PLUGIN_KT
+            .split("override fun load(webView: WebView)")
+            .nth(1)
+            .and_then(|rest| rest.split("\n    }").next())
+            .expect("no Kotlin load(webView)");
+        assert!(
+            load.contains("webView.post { WebPermissionGate.install(webView) }"),
+            "the plugin never puts the origin check in front of wry's WebChromeClient: once granted, \
+             any page the window loads gets the microphone and the position (hub#247, hub#2552)"
+        );
+        // One domain on both halves: a hub the Rust side trusts must keep its microphone.
+        assert!(SHELL_LIB_RS.contains("const HUB_DOMAIN_SUFFIX: &str = \".erplora.com\";"));
+        assert!(WEB_PERMISSION_GATE_KT.contains("const val DOMAIN = \"erplora.com\""));
+        // And the install only reads wry's client where the WebView can hand it back:
+        // `WebViewCompat.getWebChromeClient` THROWS on API 24-25 with the factory WebView, and from
+        // `post` that is a crash at start (`clientFor` and its JUnit test decide; this is the wiring).
+        let install = WEB_PERMISSION_GATE_KT
+            .split("fun install(webView: WebView)")
+            .nth(1)
+            .and_then(|rest| rest.split("\n    }").next())
+            .expect("no Kotlin install(webView)");
+        assert!(
+            install.contains("val canRead = WebViewFeature.isFeatureSupported(WebViewFeature.GET_WEB_CHROME_CLIENT)")
+                && install.contains("clientFor(canRead)"),
+            "install reads the WebChromeClient without asking whether this WebView can hand it back: \
+             on Android 7 with its factory WebView that throws inside `post` and kills the app at start"
+        );
+    }
+
     #[test]
     fn the_listening_request_crosses_to_kotlin_under_the_keys_kotlin_reads() {
         let on = serde_json::to_value(KeepListeningArgs {

@@ -72,6 +72,9 @@ const REQUIRED: &[&str] = &[
     // dialog, the page gets PERMISSION_DENIED, and a personal-device clock-in is rejected forever.
     "android.permission.ACCESS_FINE_LOCATION",
     "android.permission.ACCESS_COARSE_LOCATION",
+    // Dictating to the assistant (BASE-F94, hub#247): see [`DICTATION`].
+    RECORD_AUDIO,
+    MODIFY_AUDIO_SETTINGS,
 ];
 
 /// The hardware feature the NFC permission drags in behind it (hub#988).
@@ -95,7 +98,28 @@ const LOCATION_FEATURE: &str = "android.hardware.location";
 /// Every hardware feature that one of the permissions in [`REQUIRED`] implies and the till can
 /// live without. Each one must be declared `required="false"` or Play hides the app from every
 /// device lacking it.
-const OPTIONAL_FEATURES: &[&str] = &[NFC_FEATURE, LOCATION_FEATURE];
+const OPTIONAL_FEATURES: &[&str] = &[NFC_FEATURE, LOCATION_FEATURE, MICROPHONE_FEATURE];
+
+const RECORD_AUDIO: &str = "android.permission.RECORD_AUDIO";
+const MODIFY_AUDIO_SETTINGS: &str = "android.permission.MODIFY_AUDIO_SETTINGS";
+
+/// What a page of the business needs to dictate to the assistant (the Hub's BASE-F94, hub#247):
+/// exactly the pair wry's `RustWebChromeClient.onPermissionRequest` (wry 0.55.1) asks Android for
+/// when `getUserMedia({ audio: true })` arrives as `RESOURCE_AUDIO_CAPTURE`, and it grants the
+/// capture only if BOTH come back granted. `RECORD_AUDIO` is a runtime permission and
+/// `MODIFY_AUDIO_SETTINGS` an install-time one, but an undeclared permission is answered DENIED
+/// with no dialog either way: the page gets `NotAllowedError` and the microphone never starts.
+/// Both are in [`REQUIRED`], so the release job reads them back off the APK too.
+const DICTATION: &[&str] = &[RECORD_AUDIO, MODIFY_AUDIO_SETTINGS];
+
+/// The hardware feature `RECORD_AUDIO` drags in behind it: same trap as [`NFC_FEATURE`].
+///
+/// Read back with aapt2 off an APK at minSdk 24 / targetSdk 36: the permission alone makes
+/// `uses-implied-feature: name='android.hardware.microphone' reason='requested
+/// android.permission.RECORD_AUDIO permission'`, a hard requirement, and Play would hide the app
+/// from every device without a microphone (Android TV boxes, counter terminals). Dictation is a
+/// convenience; the till sells without it.
+const MICROPHONE_FEATURE: &str = "android.hardware.microphone";
 
 /// The manifest of the generated Android project — the one a lost file makes `android init` rewrite.
 const APP_MANIFEST: &str = include_str!("../gen/android/app/src/main/AndroidManifest.xml");
@@ -306,7 +330,7 @@ fn an_implied_feature_does_not_hide_the_app_from_devices_without_it() {
                  optional. Google Play adds that IMPLICIT requirement and hides the app from every \
                  device without it — the cheap counter tablets this till is for. Put back: \
                  <uses-feature android:name=\"{feature}\" android:required=\"false\" /> \
-                 (hub#988, hub#2552)"
+                 (hub#988, hub#2552, hub#247)"
             );
         }
     }
@@ -370,6 +394,26 @@ fn the_location_permissions_are_declared_in_both_manifests_hub2552() {
             assert!(
                 declared.iter().any(|p| p == permission),
                 "{label} manifest does not declare {permission} (hub#2552)"
+            );
+        }
+    }
+}
+
+/// The microphone pair, in both manifests: what the assistant's dictation needs inside the app
+/// (BASE-F94, hub#247). Without it the WebView answers `getUserMedia` with `NotAllowedError` and
+/// no dialog, on every device, forever.
+#[test]
+fn the_dictation_permissions_are_declared_in_both_manifests() {
+    let plugin = fs::read_to_string(plugin_manifest_path()).expect("the plugin manifest");
+    for (label, manifest) in [("gen/android", APP_MANIFEST), ("plugin", plugin.as_str())] {
+        let declared = declared_permissions(manifest);
+        for permission in DICTATION {
+            assert!(
+                declared.iter().any(|p| p == permission),
+                "{label} manifest does not declare {permission}: wry asks Android for it when a \
+                 page calls getUserMedia, and an undeclared permission is DENIED with no dialog — \
+                 the assistant's microphone never starts (BASE-F94, hub#247).\n\
+                 Declared right now: {declared:?}"
             );
         }
     }

@@ -67,7 +67,8 @@ que citan los comentarios del código; **no se han vuelto a contrastar con el me
 - Para NFC: una tableta o móvil Android con lector y el NFC encendido; en un ordenador, un lector USB
   que escribe como teclado (no es de esta aplicación).
 - En **Android 17**, el permiso de red local; en **macOS 15**, el de red local; en Android 13 o
-  posterior, el de notificaciones; en Android 12 o posterior, el de Bluetooth (HUB_APP-F07, F09).
+  posterior, el de notificaciones; en Android 12 o posterior, el de Bluetooth; para dictar al asistente,
+  el del micrófono, que Android pide al pulsarlo (HUB_APP-F07, F09).
 
 ## Pantallas
 

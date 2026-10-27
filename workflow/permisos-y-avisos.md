@@ -12,25 +12,32 @@ Pasos:
 1. Solo en Android. La persona hace algo que necesita un permiso: buscar impresoras, imprimir, añadir
    una impresora por IP (red local y Bluetooth), o dar de alta el puesto de impresión, abrir la primera
    comanda o cita, o **iniciar sesión** en un hub con cocina, citas o contador en la campana (notificaciones,
-   `main.ts:489-498`).
+   `main.ts:489-498`), o **pulsar el micrófono del asistente** para dictar (micrófono, BASE-F94).
 2. El hub enseña **antes** una frase suya: «Vamos a buscar tu impresora» / «Deja que te avisemos», con
    «Ahora no» y el botón de permitir.
 3. Si acepta, Android enseña su diálogo, **uno solo** aunque la operación necesite varios permisos
    (red local y Bluetooth viajan juntos, solo en Android 17); si dice «ahora no» a la frase, no se vuelve a pedir sola.
-   En Android 12 a 16 no hay frase para Bluetooth.
+   En Android 12 a 16 no hay frase para Bluetooth. El micrófono tampoco lleva frase: el toque en el
+   micrófono es el contexto, y el diálogo de Android sale en ese momento (lo pide el navegador integrado,
+   no la aplicación).
 4. La aplicación solo pide lo que la operación va a usar (el cajón y el tique piden red local o
    Bluetooth según el identificador de la impresora; los avisos, notificaciones).
 Entra: la operación y la lista de permisos que Android conoce en esta versión: notificaciones desde la 13
-(API 33), Bluetooth desde la 12 (API 31), red local desde la 17 (API 37). En versiones anteriores no se
-pide lo que no existe (en algunos fabricantes colgaría el diálogo).
+(API 33), Bluetooth desde la 12 (API 31), red local desde la 17 (API 37), micrófono en todas. En versiones
+anteriores no se pide lo que no existe (en algunos fabricantes colgaría el diálogo).
 Sale: el estado real de cada permiso; un «no» **se contesta, no se rechaza**: sin impresora el TPV tiene
-que seguir vendiendo. El NFC y el servicio en primer plano son permisos de instalación: no hay diálogo.
+que seguir vendiendo; un «no» al micrófono deja el dictado sin empezar y el hub dice que el micrófono está
+denegado. El NFC y el servicio en primer plano son permisos de instalación: no hay diálogo. Un dispositivo
+sin micrófono puede instalar la aplicación: no se exige.
 Si falla: sin el permiso de red local el barrido y el envío a la red son tiempos de espera, no errores
 (Android los bloquea por debajo de la API): sin protección parecería «no hay impresoras» (HUB_APP-F13).
 Después de dos «no» Android deja de mostrar el diálogo para siempre: la salida es HUB_APP-F08. Una página que
 no es el negocio enlazado (otro negocio, la web pública, el entorno de pruebas) no puede preguntar ni pedir
-ningún permiso: recibe `not_the_linked_hub` y Android no enseña nada (HUB_APP-F10, ERPlora/hub#2642).
-Implicados: HUB_PERIPHERALS-F01, HUB_SHELL-F68, HUB_SHELL-F139, PRINTING-F02, REC_ALTA-F17
+ningún permiso: recibe `not_the_linked_hub` y Android no enseña nada (HUB_APP-F10, ERPlora/hub#2642). El
+micrófono y la ubicación los pide el navegador integrado y solo para las páginas de ERPlora (cualquier hub,
+erplora.com y, en desarrollo, este mismo equipo): una página de otro sitio cargada en la ventana recibe un
+«no» sin que Android pregunte, aunque la persona ya los haya concedido para el hub.
+Implicados: HUB_PERIPHERALS-F01, HUB_SHELL-F68, HUB_SHELL-F139, PRINTING-F02, REC_ALTA-F17, BASE-F94
 QA: qa-hub-android Fase 2, qa-hub-android Fase 3
 
 ### HUB_APP-F08 Volver a activar un permiso negado
