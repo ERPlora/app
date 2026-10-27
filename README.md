@@ -102,8 +102,10 @@ lleva el id de su run. Desde ahí:
 
 `release-gate` (`scripts/release-gate.sh`) pone la release en rojo si un canal no publicó, salvo que
 esté declarado en la Variable `RELEASE_CHANNELS_PENDING` (hoy `store,play`: S3 está enchufado desde el
-2026-10-14 y ya es obligatorio; la Store y Play, todavía no); entonces pasa en verde con un aviso. Al
-enchufar un canal se quita de la lista.
+2026-10-14 y ya es obligatorio; la Store y Play, todavía no); entonces pasa en verde con un aviso. Un
+canal declarado ni siquiera corre: su job se salta aunque sus Variables estén puestas (app#7), así que
+un canal pendiente no puede poner la release en rojo con un fallo. Al enchufar un canal se ponen
+primero sus Variables y secrets y después se quita de la lista; quitarlo es lo que lo enciende.
 
 **S3 (AWS, OIDC, sin claves estáticas).** `upload-s3` asume el rol `AWS_DOWNLOADS_ROLE_ARN` y escribe
 en `DOWNLOADS_BUCKET` las claves de siempre: `downloads/app/v<versión>/…` y `downloads/app/latest/…`,

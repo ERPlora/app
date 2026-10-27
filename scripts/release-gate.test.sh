@@ -17,6 +17,8 @@
 #   · a mandatory channel someone tried to excuse       → red (the list cannot cover it)
 #   · a typo in the excuse list                         → red (a guard that does not
 #                                                         validate its payload fails open)
+#   · a declared channel skipped with its Variable set  → green, said out loud (app#7: the
+#                                                         workflow skips a declared channel's job)
 # ─────────────────────────────────────────────────────────────────────────────
 set -uo pipefail
 
@@ -138,6 +140,41 @@ expect_red  "a publish job that FAILED is red even if the channel is pending"
 
 run_gate "" "$(channels cancelled success success true true)" "$(builds success success)"
 expect_red  "a cancelled publish job → RED"
+
+# ── A declared channel's job is skipped by its own `if:` (app#7) ─────────────
+# Since app#7 the workflow skips the job of a channel listed in RELEASE_CHANNELS_PENDING even when
+# its Variable IS set (on 27/10 Play ran while declared pending, failed, and kept 1.1.31 red). The
+# gate then sees `skipped` + Variable set + declared: that is «declared pending», green and said
+# out loud — never «skipped with nothing gating it out». The rows are the workflow's own, S3
+# included (optional: its two Variables gate it).
+workflow_channels() { # $1 store, $2 play, $3 s3 — job results, every Variable set
+    cat <<EOF
+store|Microsoft Store|$1|MICROSOFT_STORE_PRODUCT_ID|true|hub#392
+play|Google Play|$2|PLAY_PACKAGE_NAME|true|hub#308
+s3|S3 downloads (latest.json)|$3|AWS_DOWNLOADS_ROLE_ARN/DOWNLOADS_BUCKET|true|hub#400
+EOF
+}
+
+run_gate "play" "$(workflow_channels success skipped success)" "$(builds success success)"
+expect_green "Google Play skipped while declared pending, PLAY_PACKAGE_NAME set → green"
+expect_says  "…said out loud as declared pending" "declared pending"
+expect_says  "…as a warning, not in silence" "::warning::"
+
+# `upload-s3` skipped by its `if:` has no `outputs.result`: the row falls back to the job's `skipped`.
+run_gate "store,play,s3" "$(workflow_channels skipped skipped skipped)" "$(builds success success)"
+expect_green "every channel declared pending and skipped, every Variable set → green"
+
+# The other half of the rule: a channel that is NOT declared and fails still blocks the release.
+run_gate "" "$(workflow_channels success failure success)" "$(builds success success)"
+expect_red  "Google Play NOT declared pending and failed → RED"
+expect_says "…naming the failure" "failure"
+
+run_gate "" "$(workflow_channels success skipped success)" "$(builds success success)"
+expect_red  "Google Play skipped, Variable set, NOT declared → RED (nothing excuses that skip)"
+
+# Without the fallback an S3 job skipped by its `if:` would report an empty result: never excused.
+run_gate "s3" "$(workflow_channels success success '')" "$(builds success success)"
+expect_red  "an empty channel result is never excused, even declared pending → RED"
 
 # ── The build is the root cause when it is the build ─────────────────────────
 # A failed build skips every publish downstream. The gate must blame the build,
