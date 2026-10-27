@@ -14,6 +14,7 @@ import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import java.net.URI
 import java.util.Locale
 
@@ -66,19 +67,35 @@ object WebPermissionGate {
     }
 
     /**
+     * The client to install, or `null`: [current] is only read when [canRead], because
+     * `WebViewCompat.getWebChromeClient` THROWS `UnsupportedOperationException` on a WebView without
+     * `GET_WEB_CHROME_CLIENT` (API 24-25 with the factory WebView; the platform getter is API 26),
+     * and from `post` that would kill the app at start. Such a device keeps wry's client.
+     */
+    @JvmStatic
+    fun clientFor(canRead: Boolean, current: () -> WebChromeClient?): WebChromeClient? =
+        if (canRead) guard(current()) else null
+
+    /**
      * Puts the guard in front of the client wry set on [webView].
      *
-     * Called through `post` from the plugin's `load`: wry hands Tauri the WebView (`setWebView`)
-     * BEFORE it calls `setWebChromeClient`, in the same turn of the main looper, so the client is
-     * only there on the next one — still before the page's first callback, which Chromium queues
-     * behind it. `WebViewCompat` reads the current client on every API level (the platform getter
-     * is API 26, the app starts at 24).
+     * Called through `post` from the plugin's `load`. Tauri calls `load` from wry's
+     * `on_webview_created` hook (tauri 2.11.5, wry 0.55.1 `main_pipe.rs`), which runs AFTER wry's
+     * `setWebChromeClient` in the same turn of the main looper; `post` keeps the install on the next
+     * turn so it finds the client whatever that order becomes — still before the page's first
+     * callback, which Chromium queues behind it. Where the WebView cannot hand back its client
+     * (see [clientFor]) nothing is installed and the device keeps wry's, instead of a crash at start.
      */
     @JvmStatic
     fun install(webView: WebView) {
-        val guarded = guard(WebViewCompat.getWebChromeClient(webView))
+        val canRead = WebViewFeature.isFeatureSupported(WebViewFeature.GET_WEB_CHROME_CLIENT)
+        val guarded = clientFor(canRead) { WebViewCompat.getWebChromeClient(webView) }
         if (guarded == null) {
-            Log.w(TAG, "no WebChromeClient to guard, or already guarded")
+            Log.w(
+                TAG,
+                if (canRead) "no WebChromeClient to guard, or already guarded"
+                else "this WebView cannot hand back its WebChromeClient (API 24-25, factory WebView): the microphone and the position stay wry's, for every page",
+            )
             return
         }
         webView.webChromeClient = guarded

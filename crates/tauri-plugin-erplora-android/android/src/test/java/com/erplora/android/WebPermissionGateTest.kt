@@ -19,6 +19,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
+import kotlin.test.fail
 
 /**
  * Which pages may use the device's microphone and position (hub#247, hub#2552).
@@ -68,6 +69,8 @@ class WebPermissionGateTest {
             "https://evilerplora.com",
             "https://erplora.com.evil.net",
             "https://panaderia.a.erplora.com.evil.net",
+            "https://evil.com/?x=erplora.com",
+            "https://evil.com/panaderia.a.erplora.com",
             "https://.erplora.com",
             "https://a..erplora.com",
             "https://-a.erplora.com",
@@ -216,6 +219,18 @@ class WebPermissionGateTest {
 
         assertNull(WebPermissionGate.guard(installed), "wrapping the guard again would only stack it")
         assertNull(WebPermissionGate.guard(null), "nothing set yet: nothing to wrap, and nothing grants")
+    }
+
+    @Test
+    fun `where the WebView cannot hand back its client, nothing is read and nothing is installed`() {
+        // `WebViewCompat.getWebChromeClient` THROWS on a WebView without `GET_WEB_CHROME_CLIENT` (API
+        // 24-25 with the factory WebView: the platform getter is API 26); inside `post` that would kill
+        // the app at start. Such a device keeps wry's client, so the till keeps selling.
+        assertNull(
+            WebPermissionGate.clientFor(canRead = false) { fail("the client must not be read: reading it throws") },
+            "nothing to install where the client cannot be read",
+        )
+        assertTrue(WebPermissionGate.clientFor(canRead = true) { RecordingClient() } is OriginGuardedChromeClient)
     }
 
     // ── Fakes ───────────────────────────────────────────────────────────────────────────────────

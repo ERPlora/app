@@ -70,7 +70,9 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
      * hub#2307 — the same WebView gets its `PageKeeper`, which the listening commands switch on/off.
      *
      * hub#247, hub#2552 — only our own pages get the microphone and the position: the origin check
-     * goes in front of wry's client on the next turn of the looper, once wry has set it.
+     * goes in front of wry's client on the next turn of the looper. Tauri calls this `load` from wry's
+     * `on_webview_created`, after wry's `setWebChromeClient`; the `post` keeps it that way whatever
+     * the order becomes.
      */
     override fun load(webView: WebView) {
         super.load(webView)
