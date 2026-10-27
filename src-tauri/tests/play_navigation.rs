@@ -224,6 +224,54 @@ fn the_businesses_are_followed_where_the_saas_serves_them_today() {
 }
 
 #[test]
+fn open_walks_from_businesses_into_the_hub() {
+    // «Open» on Businesses (`hubs.business.open`) sends the window to the hub's start of the jump,
+    // `/auth/login?next=` on the hub, which binds the jump to this browser with a `state` and
+    // bounces to the SaaS's `/hub-login/`. That door mints the one-time code and answers a form that
+    // POSTs it to the hub's `/auth/callback`; the hub opens its first page. Every link of the chain,
+    // in the order the window walks it: one refused link and «Open» stays on the jump.
+    assert_all(
+        NavigationVerdict::Allow,
+        &[
+            "https://erplora.com/dashboard/businesses/",
+            "https://erplora.com/shell/open/7f8e1c2a-4b1d-4c3e-9f00-1a2b3c4d5e6f/",
+            "https://panaderia.a.erplora.com/auth/login?next=/&shell=1",
+            // The door: a member's jump, the Hub sending it back after a refused code, and `pre`.
+            "https://erplora.com/hub-login/?hub=panaderia&next=/&state=x",
+            "https://erplora.com/hub-login/?hub=panaderia&next=/&error=invalid_code&state=x",
+            "https://pre.erplora.com/hub-login/?hub=panaderia&next=/&state=x",
+            "https://panaderia.a.erplora.com/auth/callback",
+            "https://panaderia.a.erplora.com/",
+        ],
+        "the jump from «Open» into a hub",
+    );
+    // Where the door sends a jump it does not finish: the launcher without a session (it comes back
+    // to the door once signed in), «Confirm it's you» for the second factor, and the page that says
+    // why a jump stopped. None of them sells.
+    assert_all(
+        NavigationVerdict::Allow,
+        &[
+            "https://erplora.com/launch?next=/hub-login/%3Fhub%3Dpanaderia%26next%3D/%26state%3Dx",
+            "https://erplora.com/reauthenticate?method=totp&flows=mfa_reauthenticate&next=/hub-login/%3Fhub%3Dpanaderia%26state%3Dx",
+            "https://erplora.com/login/error?code=invalid_hub",
+            "https://erplora.com/login/error?code=not_a_member&hub=panaderia",
+            "https://erplora.com/login/error?code=too_many",
+        ],
+        "where the door sends a jump it does not finish",
+    );
+    // The staff's «Open in the Hub admin» ends in the SaaS admin when it stops: never a page of the
+    // Play copy, which has no way into the admin.
+    assert_all(
+        NavigationVerdict::Refuse,
+        &[
+            "https://erplora.com/admin/accounts/hubmembership/",
+            "https://erplora.com/admin/accounts/hubs/",
+        ],
+        "the SaaS admin, where the staff's jump stops",
+    );
+}
+
+#[test]
 fn the_account_page_opens_only_as_the_account_surface() {
     // hub#1900 / saas#2084: `?surface=account` paints the person's account WITHOUT the panel that
     // sells. Play requires an in-app way to delete the account, and it lives there. Since saas#123
@@ -317,6 +365,8 @@ fn a_prefix_only_counts_on_a_segment_boundary() {
             "https://erplora.com/login-pricing/",
             "https://erplora.com/passwords/",
             "https://erplora.com/invitationsx/",
+            "https://erplora.com/hub-loginx/",
+            "https://erplora.com/hub-login-evil/?hub=panaderia",
             "https://erplora.com/_allauth/browser/v1/auth/provider/redirect-pricing",
             // Django routes are case-sensitive: this is not the app's start, whatever it serves.
             "https://erplora.com/SHELL/",
@@ -510,6 +560,7 @@ fn the_other_copies_follow_every_link_as_before() {
             "https://erplora.com/dashboard/store/plans",
             "https://erplora.com/dashboard/account/profile",
             "https://www.erplora.com/marketplace/",
+            "https://erplora.com/hub-login/?hub=panaderia&next=/&state=x",
         ] {
             assert_eq!(
                 verdict_in(distribution, raw),

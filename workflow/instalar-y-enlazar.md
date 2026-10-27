@@ -237,7 +237,8 @@ Pantalla: Aviso «Esta página no está disponible en la aplicación.»
 Pasos:
 1. Solo la copia de Google Play. Antes de seguir cualquier página de erplora.com (el apex, `www` y
    `pre`), la aplicación comprueba una lista corta: entrar, registrarse, verificar el correo, recuperar la
-   contraseña, el segundo factor, elegir negocio, las invitaciones, la cuenta sola y lo legal.
+   contraseña, el segundo factor, elegir negocio y el salto que entra en él tras «Abrir», las
+   invitaciones, la cuenta sola y lo legal.
 2. Una página que no está en la lista (precios, el panel con facturación, el mercado público) **no se
    carga**: la ventana se queda donde estaba y sale el aviso.
 3. La portada del SaaS (`/`) lleva al inicio de la propia aplicación en vez de enseñarse.

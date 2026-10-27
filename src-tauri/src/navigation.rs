@@ -81,6 +81,10 @@ const PLAY_SAAS_PAGES: &[&str] = &[
     "/businesses/",
     "/invitation/",
     "/invitations/",
+    // The jump into a hub: «Open» starts at the hub's `/auth/login`, which bounces here; this door
+    // posts a one-time code to the hub's callback, or sends the jump to the launcher, «Confirm it's
+    // you» or the page that says why it stopped.
+    "/hub-login/",
     // Google Play requires the privacy policy to be reachable from inside the app; the cookie
     // banner of these pages links to its settings.
     "/legal/",
