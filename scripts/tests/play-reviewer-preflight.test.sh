@@ -43,9 +43,15 @@
 #   · trusting «the hub exists»   → a hub with zero modules is the shell Google saw: the modules
 #                                   the account sees inside are what separates «a hub» from «an app».
 #   · trusting «status 200»       → the verdict is the body, not the HTTP code.
-#   · creating the account        → saas-next's unified sign-in (ADR-0154) signs UP an unknown
-#                                   email posted to the login. While the SaaS says signup is open,
-#                                   the control never posts the credentials.
+#   · creating the account        → in allauth.headless the sign-up is its own door
+#                                   (`POST …/auth/signup`); the sign-in (`POST …/auth/login`) never
+#                                   creates an account (saas-next `accounts/doors.py`). The control
+#                                   posts only to the sign-in, whatever `is_open_for_signup` says
+#                                   (app#7), and the fake SaaS logs any sign-up it would receive.
+#   · hiding the mailed code      → saas-next asks every password sign-in for the code it mails
+#                                   (401, pending `login_by_code`, or `verify_email` for an address
+#                                   not yet proven). Google's reviewer cannot read that mailbox, so
+#                                   it is its own red, `code_required`, naming what the SaaS lacks.
 #   · printing the password       → it is never printed, not even on the failure paths.
 #
 # Every case is hermetic: fake servers on 127.0.0.1, no network, no real credentials. The real run
@@ -231,6 +237,11 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         url = urlsplit(self.path)
         raw = self.rfile.read(int(self.headers.get("content-length", 0) or 0))
+        if url.path == "/_allauth/browser/v1/auth/signup":
+            # The control must never knock on this door: it is the one that creates accounts.
+            with open(login_log + ".signups", "a") as fh:
+                fh.write(self.headers.get("User-Agent", "") + "\n")
+            return self._send(400, {"status": 400, "errors": [{"code": "not_expected_here"}]})
         if url.path == "/_allauth/browser/v1/auth/login":
             with open(login_log, "a") as fh:
                 fh.write(self.headers.get("User-Agent", "") + "\n")
@@ -239,8 +250,6 @@ class H(BaseHTTPRequestHandler):
             cookie = self.cookies().get("csrftoken")
             if not cookie or cookie != self.headers.get("X-CSRFToken") or self.headers.get("Origin") != self.origin():
                 return self._send(403, "<h1>Forbidden (CSRF)</h1>", content_type="text/html")
-            if "login" in scenario:
-                return self._send(scenario["login"]["code"], scenario["login"]["body"])
             try:
                 sent = json.loads(raw or b"{}")
             except ValueError:
@@ -249,6 +258,9 @@ class H(BaseHTTPRequestHandler):
                 return self._send(400, {"status": 400, "errors": [{
                     "message": "The email address and/or password you specified are not correct.",
                     "code": "email_password_mismatch", "param": "password"}]})
+            # A pending step (second factor, mailed code) only ever follows the RIGHT password.
+            if "login" in scenario:
+                return self._send(scenario["login"]["code"], scenario["login"]["body"])
             if scenario.get("login_unauthenticated"):
                 return self._send(200, {"status": 200, "data": {}, "meta": {"is_authenticated": False}})
             return self._send(
@@ -288,7 +300,7 @@ STUB
 start_stub() { # $1 = scenario json
     [ -n "$stub_pid" ] && kill "$stub_pid" 2>/dev/null
     stub_pid=""
-    rm -f "$tmp/port" "$tmp/logins"
+    rm -f "$tmp/port" "$tmp/logins" "$tmp/logins.signups"
     printf '%s' "$1" > "$tmp/scenario.json"
     python3 "$tmp/stub.py" "$tmp/scenario.json" "$tmp/port" "$tmp/logins" "$FAKE_EMAIL" "$FAKE_PASSWORD" &
     stub_pid=$!
@@ -471,18 +483,50 @@ start_stub "$(healthy '"hubs_status": 500,')"
 write_env "$tmp/env.nolist" "$FAKE_SLUG"
 expect_fail "🔴 the SaaS answers 500 to the list of businesses → RED" "$tmp/env.nolist" "hubs_unreadable"
 
-# 2n. 🔴 NEVER CREATE THE ACCOUNT. saas-next's unified sign-in (ADR-0154) signs UP an email it does
-# not know when it is posted to the login. While the SaaS says signup is open, the control stops
-# BEFORE sending the credentials: a missing review account must be a red, never a new account.
+# 2n. Signup open is NOT a reason to stop (app#7). The sign-in never creates an account — the
+# sign-up is allauth.headless's other door — so the control signs in as the reviewer does, and it
+# proves the account instead of refusing to look (`signup_open` sent nobody's credentials, so it
+# could never tell a working account from a missing one: run 40557564120, 27/10).
 start_stub "$(healthy '"signup_open": true,')"
 write_env "$tmp/env.signup" "$FAKE_SLUG"
-expect_fail "🔴 the SaaS has signup open → RED before posting the credentials" "$tmp/env.signup" "signup_open"
-if [ -s "$tmp/logins" ]; then
-    bad "…and the credentials were never sent" \
-        "the control POSTed the login with signup open: an unknown email would have CREATED an account"
+run_preflight "$tmp/env.signup"
+if [ "$rc" -eq 0 ]; then
+    ok "signup open at the SaaS → still signs in and goes on → GREEN"
 else
-    ok "…and the credentials were never sent (no login POST reached the SaaS)"
+    bad "signup open at the SaaS → still signs in and goes on → GREEN" \
+        "the control stopped (exit $rc): $(printf '%s' "$out" | tr '\n' ' ' | cut -c1-240)"
 fi
+no_password_in_output "signup open"
+if [ -s "$tmp/logins" ]; then
+    ok "…the credentials were sent to the sign-in"
+else
+    bad "…the credentials were sent to the sign-in" "no login POST reached the SaaS"
+fi
+if [ -s "$tmp/logins.signups" ]; then
+    bad "…and nothing was posted to the sign-up" "the control knocked on \`auth/signup\`, the door that creates accounts"
+else
+    ok "…and nothing was posted to the sign-up (the door that creates accounts)"
+fi
+
+# 2n'. The account exists, but erplora.com asks for the code it mails at every password sign-in:
+# 401 with the pending flow `login_by_code` (saas-next `accounts/tests/test_sign_in_code.py`).
+# Google's reviewer cannot read that mailbox: its own red, naming what the SaaS lacks.
+start_stub "$(healthy '"login": {"code": 401, "body": {"status": 401, "data": {"flows": [{"id": "login"}, {"id": "login_by_code", "is_pending": true}]}, "meta": {"is_authenticated": false}}},')"
+write_env "$tmp/env.code" "$FAKE_SLUG"
+expect_fail "🔴 the SaaS asks the account for the mailed sign-in code → RED \`code_required\`" "$tmp/env.code" "code_required"
+expect_said "…naming the pending step" "login_by_code"
+expect_said "…and where the exemption of a review account lives" "saas#132"
+
+# An address not yet proven gets the same mailed code, as `verify_email`.
+start_stub "$(healthy '"login": {"code": 401, "body": {"status": 401, "data": {"flows": [{"id": "verify_email", "is_pending": true}]}, "meta": {"is_authenticated": false}}},')"
+write_env "$tmp/env.verify" "$FAKE_SLUG"
+expect_fail "🔴 the SaaS asks the account to verify its email by code → RED \`code_required\`" "$tmp/env.verify" "code_required"
+expect_said "…naming the pending step" "verify_email"
+
+# A 401 with no pending flow is not the code: it stays `login_rejected`.
+start_stub "$(healthy '"login": {"code": 401, "body": {"status": 401, "data": {"flows": [{"id": "login"}]}, "meta": {"is_authenticated": false}}},')"
+write_env "$tmp/env.401" "$FAKE_SLUG"
+expect_fail "🔴 a 401 with no pending flow → RED \`login_rejected\` (not the code)" "$tmp/env.401" "login_rejected"
 
 # 2o. The SaaS refuses the jump into the hub (the account is no member of it any more).
 start_stub "$(healthy '"hub_login_error": "not_a_member",')"

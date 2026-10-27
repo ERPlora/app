@@ -24,7 +24,9 @@ Exits 0 only when ALL of it holds, and 1 naming the first thing that does not:
 
   missing_credentials  the `.env` does not carry the reviewer account   → never a silent skip
   saas_unreachable     the SaaS did not answer
-  signup_open          the SaaS signs up unknown emails at its login: the credentials are NOT sent
+  code_required        the account signs in, but the SaaS asks it for the code it mails
+                       (`login_by_code`, `verify_email`): Google's reviewer cannot read that
+                       mailbox → mark it as a review account in the SaaS (ERPlora/saas#132)
   login_rejected       the account no longer signs in
   hubs_unreadable      the SaaS would not list the account's businesses
   no_hubs              the account has no business at all               → the 09/09 signup screen
@@ -37,7 +39,9 @@ Exits 0 only when ALL of it holds, and 1 naming the first thing that does not:
 
 What it writes on the platform: the SaaS session of the login, and, on success, one single-use code
 and the hub's session — exactly what the reviewer's own «Open» writes (the hub keeps its copy of the
-user on first entry). It never creates an account nor a hub: that is what `signup_open` is for.
+user on first entry). It never creates an account nor a hub: it posts only to the sign-in, which in
+allauth.headless never signs anyone up — the sign-up is its own door, `POST …/auth/signup`, that this
+control never calls (saas-next `accounts/doors.py`), whatever `is_open_for_signup` says (app#7).
 
 The slug is never written here: it comes from `PLAY_REVIEWER_HUB`. A hardcoded one would keep
 passing after the `.env` is pointed elsewhere (2026-09-09). The password is read and sent, never
@@ -78,6 +82,10 @@ HUB_LOGIN_PATH = "/hub-login/"
 READYZ_PATH = "/readyz"
 JUMP_PATH = "/auth/login"
 ME_PATH = "/api/me"
+
+# The sign-in steps that wait for the code saas-next mails (`accounts/tests/test_sign_in_code.py`):
+# every password sign-in (`login_by_code`), and an address not yet proven (`verify_email`).
+MAILED_CODE_FLOWS = ("login_by_code", "verify_email")
 
 
 def fail(code: str, message: str) -> None:
@@ -239,6 +247,24 @@ def query_value(url: str, name: str) -> str | None:
     return parse_qs(urlsplit(url).query).get(name, [None])[0]
 
 
+def _identifier(value: object) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[a-z0-9_]{1,64}", value) is not None
+
+
+def pending_flows(payload: object) -> list[str]:
+    """The ids of the steps allauth.headless says the sign-in still waits for (`data.flows[]` with
+    `is_pending`), identifiers only."""
+    data = payload.get("data") if isinstance(payload, dict) else None
+    flows = data.get("flows") if isinstance(data, dict) else None
+    if not isinstance(flows, list):
+        return []
+    return [
+        f.get("id")
+        for f in flows
+        if isinstance(f, dict) and f.get("is_pending") and _identifier(f.get("id"))
+    ]
+
+
 def allauth_reasons(payload: object) -> str:
     """allauth's error codes and pending steps (`email_password_mismatch`, `mfa_authenticate`…).
     Only identifiers: its messages are never echoed, whatever they may carry."""
@@ -250,15 +276,7 @@ def allauth_reasons(payload: object) -> str:
         if isinstance(errors, list)
         else []
     )
-    data = payload.get("data")
-    flows = data.get("flows") if isinstance(data, dict) else None
-    if isinstance(flows, list):
-        codes += [
-            f.get("id") for f in flows if isinstance(f, dict) and f.get("is_pending")
-        ]
-    codes = [
-        c for c in codes if isinstance(c, str) and re.fullmatch(r"[a-z0-9_]{1,64}", c)
-    ]
+    codes = [c for c in codes if _identifier(c)] + pending_flows(payload)
     return f" ({', '.join(codes)})" if codes else ""
 
 
@@ -277,16 +295,9 @@ def sign_in(saas: Browser, email: str, password: str) -> None:
             f"{SAAS_URL}{CONFIG_PATH} answers HTTP {config.status} without allauth's configuration: "
             "the SaaS's sign-in is not there.",
         )
-    # saas-next's unified sign-in (ADR-0154) signs UP an email it does not know when it is posted
-    # to the login: a review account that went missing would be CREATED by this control. While the
-    # SaaS says signup is open, the credentials stay here.
-    if account.get("is_open_for_signup") is not False:
-        fail(
-            "signup_open",
-            f"{SAAS_URL} has signup open (`is_open_for_signup`), so posting an unknown email to its "
-            "login may CREATE an account. The credentials were NOT sent. Check by hand that the "
-            "review account exists, then make this check able to prove it without signing up.",
-        )
+    # `is_open_for_signup` is not read: the sign-in below never signs anyone up (the sign-up is
+    # `auth/signup`, never called here), so an open sign-up is no reason to leave the account
+    # unproven (app#7).
     csrf = saas.cookie("csrftoken")
     if not csrf:
         fail(
@@ -305,6 +316,16 @@ def sign_in(saas: Browser, email: str, password: str) -> None:
             f"{SAAS_URL} stopped answering at the login: {answer.body}",
         )
     payload = answer.json()
+    # The password is accepted and the SaaS mails a code to finish: the reviewer stops right there.
+    mailed_code = [f for f in pending_flows(payload) if f in MAILED_CODE_FLOWS]
+    if answer.status == 401 and mailed_code:
+        fail(
+            "code_required",
+            f"the review account exists and its password is accepted, but {SAAS_URL} asks it for "
+            f"the code it mails ({', '.join(mailed_code)}). Google's reviewer cannot read that "
+            "mailbox, so the review would stop at the sign-in. The account has to be exempt from "
+            "the mailed code as a review account in the SaaS (ERPlora/saas#132).",
+        )
     meta = payload.get("meta") if isinstance(payload, dict) else None
     if (
         answer.status != 200
