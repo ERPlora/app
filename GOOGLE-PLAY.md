@@ -19,7 +19,7 @@ Sigue vigente la decisión de canal (2026-07-16): Android de cara al cliente se 
 landing no ofrece APK: el endpoint de descarga del SaaS hace **redirect 302** a Play
 (saas#707).
 
-## Estado real (2026-08-19, verificado en la consola)
+## Estado real (consola: 2026-08-19; canal de CI y cuenta del revisor: 2026-10-28)
 
 | Pieza | Estado |
 | --- | --- |
@@ -27,20 +27,27 @@ landing no ofrece APK: el endpoint de descarga del SaaS hace **redirect 302** a 
 | Ficha `com.erplora.app` | Creada; app id `4974793613374910910` |
 | Primera subida manual | Hecha (registra la upload key). En la consola hay `1001003 (1.1.3)` en *Closed testing - Alpha* |
 | Formularios | **Los 10 completos** y en «Ready to send for review»: content rating, target audience 18+, privacy policy, ads, data safety, health apps, government apps, financial features, advertising ID, sign in details |
-| Cuenta para el revisor | Declarada («ERPlora reviewer account», usuario + contraseña + instrucciones) |
+| Cuenta para el revisor | Declarada («ERPlora reviewer account», usuario + contraseña + instrucciones). Desde el 2026-10-28 lleva en el SaaS la marca «Cuenta de revisión de tienda» (`User.is_store_review_account`, ACCOUNTS-F49, ERPlora/saas#137) y su dirección está verificada por el admin de erplora.com |
 | Envío a revisión | ⚠️ **Nunca se había hecho.** `Submission activity` estaba vacío y los 14 cambios llevaban desde el 14/08 guardados sin enviar. La app seguía en `Draft` como `com.erplora.app (unreviewed)` |
-| `PLAY_PACKAGE_NAME` / `PLAY_SERVICE_ACCOUNT_JSON` | ❌ No existen (tampoco en `ERPlora/app`) → `publish-play` sale **skipped** en cada release |
-| `RELEASE_CHANNELS_PENDING` | `store,play,s3` → el gate deja pasar la release en VERDE (avisando) aunque no publique en esos canales |
+| Guardia del revisor (paso 0) | ✅ `OK` contra producción el 2026-10-28: la cuenta entra, su negocio `restaurante-demo-play` está `active` y abre en `https://restaurante-demo-play.erplora.com` con 26 módulos |
+| `PLAY_PACKAGE_NAME` / `PLAY_SERVICE_ACCOUNT_JSON` | ✅ Existen en `ERPlora/app` (2026-10-28): `PLAY_PACKAGE_NAME=com.erplora.app` volvió ese día y el secret ya estaba, igual que `PLAY_REVIEWER_EMAIL`, `PLAY_REVIEWER_HUB` y `PLAY_REVIEWER_PASSWORD` → `publish-play` corre en cada release |
+| `RELEASE_CHANNELS_PENDING` | ✅ Borrada el 2026-10-28: ningún canal pendiente. La Store, Play y S3 publican en cada release y un fallo de cualquiera la pone en rojo |
 
-> **2026-10-27 — Play apagado hasta las pruebas finales.** La release 1.1.31 (run `40557564120`)
+> **2026-10-27 — Play apagado; 2026-10-28 — reactivado.** La release 1.1.31 (run `40557564120`)
 > cayó en `publish-play`: la guardia del paso 0 salió `signup_open` y el negocio del revisor
-> `restaurante-demo-play` sigue sin estar activo. Entonces `RELEASE_CHANNELS_PENDING` solo excusaba
+> `restaurante-demo-play` no estaba activo. Entonces `RELEASE_CHANNELS_PENDING` solo excusaba
 > un job **saltado**, no uno fallido, así que se borró la Variable `PLAY_PACKAGE_NAME` de
-> `ERPlora/app`: el job se salta y el gate pasa avisando. Desde app#7 un canal pendiente ya no corre
-> (paso 3) y la guardia ya no tiene `signup_open` (paso 0). Para reactivarlo: la cuenta del revisor
-> marcada como cuenta de revisión en el SaaS (ERPlora/saas#132), su negocio activo, el paso 0 en
-> verde, volver a poner `PLAY_PACKAGE_NAME=com.erplora.app` (paso 3) y quitar `play` de
-> `RELEASE_CHANNELS_PENDING` (paso 4).
+> `ERPlora/app`: el job se saltó y el gate pasó avisando. Desde app#7 un canal pendiente ya no corre
+> (paso 3) y la guardia ya no tiene `signup_open` (paso 0).
+>
+> El 2026-10-28 se reactivó. ERPlora/saas#137 (de ERPlora/saas#132) trajo la marca «Cuenta de
+> revisión de tienda» (ACCOUNTS-F49); el admin de erplora.com se la puso a la cuenta del revisor y
+> marcó su dirección como verificada, porque se creó el 15/10 sin verificar y el código de
+> confirmación no llegaba (el SES de producción sigue en sandbox: README de ERPlora/aws, «SES fuera
+> del sandbox»). La guardia salió `OK` contra producción con el negocio `active`, se volvió a poner
+> `PLAY_PACKAGE_NAME=com.erplora.app` (paso 3) y se borró `RELEASE_CHANNELS_PENDING` (paso 4). Desde
+> entonces, cada versión nueva en `src-tauri/tauri.conf.json` que llega a `main` publica también en
+> Play.
 
 **Orden que queda**, y no se salta ninguno:
 
@@ -73,7 +80,9 @@ landing no ofrece APK: el endpoint de descarga del SaaS hace **redirect 302** a 
 1. Enviar a revisión el lote de la Alpha cerrada (botón «Submit N changes for review»).
 2. Aprobada: crear release de **Producción** y enviarla también. Hasta que Producción esté LIVE,
    `play.google.com/store/apps/details?id=com.erplora.app` responde **404**.
-3. Service account (invitada en Play Console con «Release to testing tracks») → secret
+3. **Hecho el 2026-10-28** (`PLAY_PACKAGE_NAME` volvió ese día; el secret y las tres del revisor ya
+   estaban). Se deja el procedimiento por si hubiera que rehacerlo.
+   Service account (invitada en Play Console con «Release to testing tracks») → secret
    `PLAY_SERVICE_ACCOUNT_JSON` + Variable `PLAY_PACKAGE_NAME` **en el repo `ERPlora/app`**
    (`gh secret set -R ERPlora/app PLAY_SERVICE_ACCOUNT_JSON < service-account.json`,
    `gh variable set -R ERPlora/app PLAY_PACKAGE_NAME --body com.erplora.app`): las Variables de la
@@ -84,7 +93,8 @@ landing no ofrece APK: el endpoint de descarga del SaaS hace **redirect 302** a 
    Play. Con el canal encendido, el job corre la guardia del paso 0 antes de subir: sin las tres
    sale en rojo `missing_credentials` (hub#1888); sin `PLAY_SERVICE_ACCOUNT_JSON`, en rojo
    nombrándolo.
-4. Quitar **`play`** de `RELEASE_CHANNELS_PENDING` cuando el paso 0 salga en verde con la cuenta del
+4. **Hecho el 2026-10-28**: `play` era el último canal pendiente, así que se borró la Variable entera.
+   Quitar **`play`** de `RELEASE_CHANNELS_PENDING` cuando el paso 0 salga en verde con la cuenta del
    revisor (marcada como cuenta de revisión en el SaaS, ERPlora/saas#132, y con su negocio activo).
    Es lo que enciende el canal: desde la release siguiente `publish-play` corre, y un fallo suyo pone
    la release en rojo, como cualquier canal vivo. Una release que ya salió sin Play no se repite: se
@@ -148,7 +158,7 @@ revisión la versión que lo lleva: sin ello Google la rechaza o la para. Lo hac
 | --- | --- |
 | Build del AAB | este repo, [`tauri-release.yml`](.github/workflows/tauri-release.yml) job `build-android` |
 | Subida a S3 (AWS, OIDC) | ídem, job `upload-s3` |
-| Publicación en Play | ídem, job **`publish-play`** — gateado por la Variable `PLAY_PACKAGE_NAME` (vacía = saltado) y saltado también mientras `play` esté en `RELEASE_CHANNELS_PENDING` (app#7) |
+| Publicación en Play | ídem, job **`publish-play`** — gateado por la Variable `PLAY_PACKAGE_NAME` (vacía = saltado) y saltado también mientras `play` esté en `RELEASE_CHANNELS_PENDING` (app#7); corre en cada release desde el 2026-10-28 |
 | Redirect 302 a Play | SaaS `apps/public/downloads.py::store_url_for` + setting `GOOGLE_PLAY_APP_ID` |
 
 ## Lo que YA está hecho
@@ -162,6 +172,8 @@ No se repite en «Orden que queda» porque no queda: se deja escrito para que na
    screenshots + feature graphic 1024×500 + icono 512×512. Los 10, completos.
 4. **Job `publish-play`** cableado en este repo, con el AAB firmado y verificado (`jarsigner`) y
    `changesNotSentForReview: false` (hub#984) para que la release envíe a revisión de verdad.
+5. **Canal de CI encendido** (2026-10-28): pasos 3 y 4 de «Orden que queda», que se quedan escritos
+   como procedimiento por si hubiera que rehacerlos.
 
 ⚠️ **La promoción `internal` → `production` sigue siendo MANUAL, y automatizarla no es solo
 cuestión de confianza.** `publish-play` sube con `status: completed`, o sea **rollout al 100% de
