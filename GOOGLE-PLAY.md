@@ -58,13 +58,16 @@ landing no ofrece APK: el endpoint de descarga del SaaS hace **redirect 302** a 
    si la cuenta no entra, si no tiene negocio, si `PLAY_REVIEWER_HUB` nombra un hub que no es suyo o
    que el SaaS no deja abrir, si el hub no responde `status: ok`, si no le abre sesión o si dentro
    no ve ningún módulo. Todos son el mismo rechazo: el revisor no ve la app. **Sale en rojo si
-   faltan las credenciales**, nunca en verde por no poder comprobarlo, y en rojo `signup_open`
-   **sin mandar las credenciales** si el SaaS tiene el alta abierta: el login unificado (ADR-0154)
-   da de alta un correo desconocido, y la guardia nunca crea la cuenta del revisor. `/readyz` de
-   hub-next es del servicio, no de un hub: qué hub existe y se puede abrir lo dice el SaaS. Si
-   falla, se arregla el hub o la variable y se vuelve a correr: **no se envía con esto en rojo.**
-   Con el canal de CI encendido (paso 3) la corre además el job `publish-play` antes de subir cada
-   release (hub#1888).
+   faltan las credenciales**, nunca en verde por no poder comprobarlo, y en rojo `code_required` si
+   la cuenta entra con su contraseña pero erplora.com le pide el código que manda por correo
+   (`login_by_code`, o `verify_email` si el correo aún no está verificado): el revisor de Google no
+   puede leer ese buzón, así que la cuenta tiene que estar marcada como cuenta de revisión en el
+   SaaS (ERPlora/saas#132). La guardia solo llama al login (`…/auth/login`), que nunca da de alta a
+   nadie —el alta es otra puerta, `…/auth/signup`, que no toca—, tenga el SaaS el alta abierta o no
+   (app#7). `/readyz` de hub-next es del servicio, no de un hub: qué hub existe y se puede abrir lo
+   dice el SaaS. Si falla, se arregla el hub o la variable y se vuelve a correr: **no se envía con
+   esto en rojo.** Con el canal de CI encendido (pasos 3 y 4) la corre además el job `publish-play`
+   antes de subir cada release (hub#1888).
 
 1. Enviar a revisión el lote de la Alpha cerrada (botón «Submit N changes for review»).
 2. Aprobada: crear release de **Producción** y enviarla también. Hasta que Producción esté LIVE,
@@ -73,12 +76,18 @@ landing no ofrece APK: el endpoint de descarga del SaaS hace **redirect 302** a 
    `PLAY_SERVICE_ACCOUNT_JSON` + Variable `PLAY_PACKAGE_NAME` **en el repo `ERPlora/app`**
    (`gh secret set -R ERPlora/app PLAY_SERVICE_ACCOUNT_JSON < service-account.json`,
    `gh variable set -R ERPlora/app PLAY_PACKAGE_NAME --body com.erplora.app`): las Variables de la
-   organización con visibilidad privada NO llegan a un repo público. En el MISMO repo y **antes** de
-   poner `PLAY_PACKAGE_NAME`: Variables `PLAY_REVIEWER_EMAIL` y `PLAY_REVIEWER_HUB` + secret
-   `PLAY_REVIEWER_PASSWORD` (los valores del `.env`). El job corre la guardia del paso 0 antes de
-   subir, y sin ellas cada release sale en rojo `missing_credentials` (hub#1888); sin
-   `PLAY_SERVICE_ACCOUNT_JSON`, en rojo nombrándolo.
-4. Quitar **`play`** de `RELEASE_CHANNELS_PENDING` — hacerlo antes deja las releases en rojo.
+   organización con visibilidad privada NO llegan a un repo público. En el MISMO repo: Variables
+   `PLAY_REVIEWER_EMAIL` y `PLAY_REVIEWER_HUB` + secret `PLAY_REVIEWER_PASSWORD` (los valores del
+   `.env`). Mientras `play` siga en `RELEASE_CHANNELS_PENDING`, `publish-play` **no corre** aunque
+   todo esto esté puesto (app#7): el orden entre ellas da igual y ninguna release se pone roja por
+   Play. Con el canal encendido, el job corre la guardia del paso 0 antes de subir: sin las tres
+   sale en rojo `missing_credentials` (hub#1888); sin `PLAY_SERVICE_ACCOUNT_JSON`, en rojo
+   nombrándolo.
+4. Quitar **`play`** de `RELEASE_CHANNELS_PENDING` cuando el paso 0 salga en verde con la cuenta del
+   revisor (marcada como cuenta de revisión en el SaaS, ERPlora/saas#132, y con su negocio activo).
+   Es lo que enciende el canal: desde la release siguiente `publish-play` corre, y un fallo suyo pone
+   la release en rojo, como cualquier canal vivo. Una release que ya salió sin Play no se repite: se
+   publica con la siguiente versión, o, si la run sigue a medias, `gh run rerun <run> --failed`.
 5. Mergear el cambio del SaaS que retira el APK de Android (`store_url_for`), **solo cuando el
    paso 2 esté LIVE**: antes mandaría al usuario a un 404 de Google.
 
@@ -138,7 +147,7 @@ revisión la versión que lo lleva: sin ello Google la rechaza o la para. Lo hac
 | --- | --- |
 | Build del AAB | este repo, [`tauri-release.yml`](.github/workflows/tauri-release.yml) job `build-android` |
 | Subida a S3 (AWS, OIDC) | ídem, job `upload-s3` |
-| Publicación en Play | ídem, job **`publish-play`** — gateado por la Variable `PLAY_PACKAGE_NAME` (vacía = saltado) |
+| Publicación en Play | ídem, job **`publish-play`** — gateado por la Variable `PLAY_PACKAGE_NAME` (vacía = saltado) y saltado también mientras `play` esté en `RELEASE_CHANNELS_PENDING` (app#7) |
 | Redirect 302 a Play | SaaS `apps/public/downloads.py::store_url_for` + setting `GOOGLE_PLAY_APP_ID` |
 
 ## Lo que YA está hecho

@@ -17,6 +17,8 @@
 #     release `v<version>`: the mark that publication started, so a later run cannot publish the
 #     same version again; S3 refuses to overwrite a version another run uploaded;
 #   · the tag `v<version>` is the draft published LAST, after the release gate;
+#   · a channel declared in `RELEASE_CHANNELS_PENDING` (`store`, `play`, `s3`) neither runs nor
+#     blocks: its job is skipped by its own `if:` and the gate reads it `skipped` (app#7);
 #   · third-party actions are pinned by commit SHA, never by a movable tag.
 #
 # Parsed as YAML (PyYAML), so a case names what is missing. `--workflow <path>` lets the guard be
@@ -79,6 +81,14 @@ INSTALLERS = (
 )
 BUILD = "needs.version.outputs.build == 'true'"
 RELEASE = "needs.version.outputs.release == 'true'"
+# The publishing job of each channel, and the id the release gate knows it by.
+CHANNEL_OF = {"publish-store": "store", "publish-play": "play", "upload-s3": "s3"}
+
+
+def skips_while_pending(expression, channel):
+    """`!contains(vars.RELEASE_CHANNELS_PENDING, '<channel>')` in an expression, spaces aside."""
+    pattern = r"!\s*contains\(\s*vars\.RELEASE_CHANNELS_PENDING\s*,\s*'" + re.escape(channel) + r"'\s*\)"
+    return re.search(pattern, str(expression or "")) is not None
 
 
 def job(job_id):
@@ -243,6 +253,12 @@ if verify is not None:
     body = run_of(steps("collect")[verify])
     check("…and exits non-zero when one is missing", "exit 1" in body, body)
     check("…and also the MSIX when the Store is on", "erplora-app.msix" in body and "MICROSOFT_STORE_PRODUCT_ID" in str(steps("collect")[verify]), body)
+    store_on = str((steps("collect")[verify].get("env") or {}).get("STORE_ON", ""))
+    check(
+        "…but not while `store` is declared pending: its job does not run, so no MSIX is owed (app#7)",
+        skips_while_pending(store_on, "store"),
+        f"STORE_ON is {store_on!r}",
+    )
 draft = index_of("collect", lambda s: "gh release create" in run_of(s))
 check("`collect` opens the release as a DRAFT", draft is not None)
 if draft is not None:
@@ -261,6 +277,24 @@ for job_id in ("publish-store", "publish-play", "upload-s3"):
     for wanted in ("version", "collect"):
         check(f"`{job_id}` needs `{wanted}` (no channel before every installer is there)", wanted in needs(job_id), f"needs are {needs(job_id)}")
     check(f"`{job_id}` only runs on a release", RELEASE in cond(job(job_id)), f"if is {cond(job(job_id))!r}")
+
+# A channel declared pending neither runs nor blocks (app#7). The gate excuses a `skipped` channel
+# that is declared, never a `failure`: on 27/10 (run 40557564120) Play was declared pending, its
+# Variable was set, the job RAN, failed, and the release 1.1.31 stayed red until the Variable was
+# deleted. So the declaration skips the job itself, with the very id the gate validates.
+for job_id, channel in CHANNEL_OF.items():
+    c = cond(job(job_id))
+    check(
+        f"`{job_id}` is skipped while `{channel}` is declared pending "
+        f"(`!contains(vars.RELEASE_CHANNELS_PENDING, '{channel}')` in its `if:`)",
+        skips_while_pending(c, channel),
+        f"if is {c!r}",
+    )
+    check(
+        f"`{job_id}`'s `if:` is a plain conjunction (an `||` would run it past its guards)",
+        "||" not in c,
+        f"if is {c!r}",
+    )
 
 # A bundle that did not come out is red where it is built, not after Play and the Store published.
 stage = index_of("build", lambda s: str(s.get("name", "")) == "Stage artifacts")
@@ -451,6 +485,18 @@ check(
     "AWS_DOWNLOADS_ROLE_ARN" in s3_line and "DOWNLOADS_BUCKET" in s3_line,
     s3_line,
 )
+check(
+    "…and falls back to the job's result: a job skipped by its `if:` (declared pending) has no outputs",
+    "|| needs.upload-s3.result" in s3_line,
+    s3_line,
+)
+for job_id, channel in CHANNEL_OF.items():
+    line = next((l for l in gate_env.splitlines() if l.strip().startswith(f"{channel}|")), "")
+    check(
+        f"the gate knows `{channel}` — the id `{job_id}` is skipped for — by `needs.{job_id}.result`",
+        f"needs.{job_id}.result" in line,
+        line or f"no `{channel}|` line in the gate's CHANNELS",
+    )
 check("the gate also reports the tests", "needs.test.result" in gate_env, gate_env)
 check("the gate also reports `collect`", "needs.collect.result" in gate_env, gate_env)
 

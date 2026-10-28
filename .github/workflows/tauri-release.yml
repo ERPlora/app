@@ -49,6 +49,13 @@
 # `upload-s3` warns and skips, the installers still reach the GitHub Release, and the channel must
 # be declared pending (`s3` in `RELEASE_CHANNELS_PENDING`) for the gate to pass.
 #
+# PENDING CHANNELS (app#7). A channel listed in the Variable `RELEASE_CHANNELS_PENDING` (`store`,
+# `play`, `s3`) does not run at all: its job's `if:` skips it even when its own Variables are set,
+# and the release gate reads it `skipped` + declared → green with a warning. The gate excuses a
+# skip, never a failure: before this, Play ran while declared pending, failed, and held release
+# 1.1.31 red (27/10). To turn a channel on: its Variables and secrets first, then take it out of
+# the list — in that order, and nothing runs until the second step.
+#
 # Windows signing (ADR-0136): the MAIN Windows channel is Microsoft Store — an unsigned MSIX the
 # Store re-signs after certification (no Authenticode cert, no SmartScreen, Store-managed updates).
 # See `publish-store` + MICROSOFT-STORE.md. The NSIS/MSI are the secondary, UNSIGNED channel.
@@ -556,11 +563,12 @@ jobs:
 
       - name: Every installer is there
         env:
-          STORE_ON: ${{ vars.MICROSOFT_STORE_PRODUCT_ID != '' }}
+          STORE_ON: ${{ vars.MICROSOFT_STORE_PRODUCT_ID != '' && !contains(vars.RELEASE_CHANNELS_PENDING, 'store') }}
         run: |
           set -uo pipefail
           expected="erplora-app-setup.exe erplora-app.msi erplora-app.AppImage erplora-app.deb erplora-app.dmg erplora-app.apk erplora-app.aab"
-          # `publish-store` publishes the MSIX: with the Store on, it is expected as well.
+          # `publish-store` publishes the MSIX: with the Store on (and not declared pending, which
+          # skips that job), it is expected as well.
           if [ "$STORE_ON" = "true" ]; then expected="$expected erplora-app.msix"; fi
           missing=0
           for f in $expected; do
@@ -597,14 +605,16 @@ jobs:
   # Publishes the MSIX with the msstore CLI (FREE products only, which is our case). Prerequisites
   # (manual, once): the app published and LIVE in Partner Center + an Entra app with the Manager
   # role. Gated by the Variable MICROSOFT_STORE_PRODUCT_ID (empty = job skipped; the release gate
-  # then fails unless `store` is declared in RELEASE_CHANNELS_PENDING). Every release goes through
+  # then fails unless `store` is declared in RELEASE_CHANNELS_PENDING) and by that declaration: with
+  # `store` in RELEASE_CHANNELS_PENDING the job is skipped even with the Variable set, so a pending
+  # Store can neither publish nor fail the release (app#7). Every release goes through
   # Microsoft's certification (hours to 3 days) and the Store delivers the update by itself.
   # Like every publisher, it waits for `collect`: a channel never publishes before every installer
   # of the release is there and the draft release marks the publication as started.
   publish-store:
     name: Publish to Microsoft Store
     needs: [version, collect]
-    if: needs.version.outputs.release == 'true' && vars.MICROSOFT_STORE_PRODUCT_ID != ''
+    if: needs.version.outputs.release == 'true' && vars.MICROSOFT_STORE_PRODUCT_ID != '' && !contains(vars.RELEASE_CHANNELS_PENDING, 'store')
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -665,7 +675,9 @@ jobs:
   #
   # ⚠️ The FIRST upload of an app is MANUAL (Google's rule: it registers the upload key). Gated by
   # the Variable `PLAY_PACKAGE_NAME` (empty = job skipped; the release gate then fails unless
-  # `play` is declared in RELEASE_CHANNELS_PENDING).
+  # `play` is declared in RELEASE_CHANNELS_PENDING) and by that declaration: with `play` in
+  # RELEASE_CHANNELS_PENDING the job is skipped even with `PLAY_PACKAGE_NAME` set (app#7 — on 27/10
+  # it ran while declared pending, its preflight failed, and release 1.1.31 stayed red).
   #
   # `PLAY_TRACK` picks the track and defaults to `internal` on purpose: this step uploads with
   # `status: completed`, a 100% rollout at once. `PLAY_TRACK=production` would send every release,
@@ -681,7 +693,7 @@ jobs:
   publish-play:
     name: Publish to Google Play
     needs: [version, collect]
-    if: needs.version.outputs.release == 'true' && vars.PLAY_PACKAGE_NAME != ''
+    if: needs.version.outputs.release == 'true' && vars.PLAY_PACKAGE_NAME != '' && !contains(vars.RELEASE_CHANNELS_PENDING, 'play')
     # `jarsigner` (JDK) is what this job takes from the image without installing it.
     runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
     timeout-minutes: 20
@@ -740,11 +752,13 @@ jobs:
   # No static keys: GitHub's OIDC token is exchanged for the role `AWS_DOWNLOADS_ROLE_ARN`
   # (aws-next, PLAN-AWS ronda 18), which can write `downloads/app/*` of `DOWNLOADS_BUCKET`. Until
   # both Variables exist the upload is skipped OUT LOUD (warning + summary) and reported to the gate
-  # as `skipped`, so it shows as «declared pending» or red — never as «published».
+  # as `skipped`, so it shows as «declared pending» or red — never as «published». With `s3` in
+  # RELEASE_CHANNELS_PENDING the whole job is skipped (app#7): it has no `outputs.result` then, and
+  # the gate falls back to the job's own `skipped`.
   upload-s3:
     name: Upload to S3 (installers + latest.json)
     needs: [version, collect]
-    if: needs.version.outputs.release == 'true'
+    if: needs.version.outputs.release == 'true' && !contains(vars.RELEASE_CHANNELS_PENDING, 's3')
     runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
     # A hung `aws s3 cp` must not hold the run for hours: fail fast and re-run this job alone
     # (`gh run rerun --failed`, the artifacts persist).
@@ -843,8 +857,11 @@ jobs:
   #   · channel with no gating Variable           → mandatory, cannot be declared pending
   #
   # Declaring a channel = Variable `RELEASE_CHANNELS_PENDING` (comma list: `store`, `play`, `s3`).
-  # S3 is gated by its two Variables and reported by what the upload REALLY did
-  # (`outputs.result`), so a skipped upload never reads as published.
+  # A declared channel's job does not even run (its own `if:`, app#7), so it reaches this gate as
+  # `skipped` + declared, whatever its Variables say, and a pending channel can never turn the
+  # release red with a failure. S3 is gated by its two Variables and reported by what the upload
+  # REALLY did (`outputs.result`, or the job's `skipped` when its `if:` skipped it), so a skipped
+  # upload never reads as published.
   #
   # The decision lives in `scripts/release-gate.sh` (tested by `scripts/release-gate.test.sh`); the
   # wiring — `always()`, the complete `needs`, every result reaching the script — is guarded by

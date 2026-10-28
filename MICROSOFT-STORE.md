@@ -33,8 +33,9 @@ bridge headless NO tiene ficha de Store — ver la última sección.
   en el leg Windows del build de cada release (push a `main` con una versión nueva en
   `src-tauri/tauri.conf.json`): pack MSIX → artifact `app-msix` → job `publish-store`
   (`msstore publish`). El MSIX se empaqueta si existe `MSIX_IDENTITY_NAME`; `publish-store` corre si
-  existe `MICROSOFT_STORE_PRODUCT_ID` (si no, el release gate sale en rojo salvo que `store` esté en
-  `RELEASE_CHANNELS_PENDING`) y sale en **rojo nombrando el secret** que falte.
+  existe `MICROSOFT_STORE_PRODUCT_ID` y `store` **no** está en `RELEASE_CHANNELS_PENDING` (si falta la
+  Variable, el release gate sale en rojo salvo que `store` esté en esa lista; si está en la lista, el
+  job se salta aunque la Variable exista, app#7) y sale en **rojo nombrando el secret** que falte.
 
 En la ruta MSIX **no aplica** `webviewInstallMode` (el instalador NSIS no se ejecuta);
 Win10/11 actualizados traen WebView2 Evergreen. El updater de Tauri no está configurado en la
@@ -90,10 +91,12 @@ a verla live en `apps.microsoft.com`.
 4. Poner la Variable `MICROSOFT_STORE_PRODUCT_ID`. Desde entonces, cada release (versión nueva en
    `main`) publica la actualización sola (build → MSIX → `msstore publish` → certificación → la
    Store la entrega).
-5. Quitar `store` de la Variable `RELEASE_CHANNELS_PENDING` (hub#895). Mientras esté ahí, el
-   job `release-gate` deja pasar la release en verde avisando de que la Store no publicó; en cuanto
-   se quita, una release que no publique en la Store sale **roja**. Dejarla puesta con el canal ya
-   vivo solo produce un warning de «lista sin limpiar», nunca un rojo.
+5. Quitar `store` de la Variable `RELEASE_CHANNELS_PENDING` (hub#895). Es lo que enciende el canal:
+   mientras esté ahí, `publish-store` **no corre** aunque `MICROSOFT_STORE_PRODUCT_ID` esté puesta
+   (app#7), y el job `release-gate` deja pasar la release en verde avisando de que la Store no
+   publicó; en cuanto se quita, `publish-store` corre en cada release y una que no publique en la
+   Store sale **roja**. Olvidarla en la lista no es inocuo: la Store deja de recibir versiones (el
+   gate lo avisa en cada release, sin ponerla roja).
 
 > ⚠️ **Nunca una submission en borrador (visto el 2026-10-27 con la release 1.1.31).** Una
 > submission creada a mano en Partner Center y dejada «In draft» bloquea `msstore publish`: la
