@@ -70,15 +70,21 @@ decide:
 - **no existe** y la versión es mayor que el último tag `vX.Y.Z` → tests (`test-shell.yml`, llamado)
   → builds (escritorio ×3 y Android; cada plataforma sale en rojo si le falta uno de sus bundles) →
   `collect` (están los seis instaladores y el AAB, y abre la **GitHub Release en borrador**
-  `v<versión>` con los instaladores) → Microsoft Store, Google Play y S3 → `release-gate` → publica
-  el borrador, que es lo que crea el tag `v<versión>`;
+  `v<versión>` con los instaladores) → Microsoft Store, Google Play (hoy apagado: `PLAY_PACKAGE_NAME`
+  borrada y `play` pendiente; ver `GOOGLE-PLAY.md`) y S3 → `release-gate` → publica el borrador, que
+  es lo que crea el tag `v<versión>`;
 - **existe un borrador `v<versión>` abierto por otra run** → **rojo**: esa publicación ya empezó
   (ver «Si una release se queda a medias»);
 - **no existe** y no es mayor (o no es `X.Y.Z`, o minor/patch ≥ 1000) → **rojo** con el motivo: la
   Store y Play solo aceptan versiones crecientes y el `versionCode` es `major·10⁶ + minor·10³ + patch`.
 
-Para publicar: subir `version` en `src-tauri/tauri.conf.json` (hoy 1.1.30, la última publicada desde
-el monorepo; la siguiente es 1.1.31 o mayor) y hacer push a `main`.
+Para publicar: subir `version` en `src-tauri/tauri.conf.json` (hoy 1.1.31, publicada el 2026-10-27; la
+siguiente es 1.1.32 o mayor) y hacer push a `main`. **La versión se sube a mano**, nada la incrementa
+solo, y ese push es lo único que hace falta: un push a `main` sin cambio de versión no publica nada.
+
+Condición de la Store: en Partner Center no debe haber ningún envío en curso. El que abre la CI es
+suyo y se cierra solo al certificarse; uno abierto a mano (un borrador) hace fallar `publish-store`,
+como el 2026-10-27 (`MICROSOFT-STORE.md`, Fase 3).
 
 Una release a la vez para todas las ramas: el grupo de concurrencia es `tauri-release`, sin la ref, y
 un push nunca cancela una release en curso. GitHub guarda **una** run pendiente por grupo: si llega
@@ -101,8 +107,8 @@ lleva el id de su run. Desde ahí:
    lo escribió otra run (`scripts/ci/s3-version-guard.sh`, comprueba el metadato `run-id`).
 
 `release-gate` (`scripts/release-gate.sh`) pone la release en rojo si un canal no publicó, salvo que
-esté declarado en la Variable `RELEASE_CHANNELS_PENDING` (hoy `store,play`: S3 está enchufado desde el
-2026-10-14 y ya es obligatorio; la Store y Play, todavía no); entonces pasa en verde con un aviso. Un
+esté declarado en la Variable `RELEASE_CHANNELS_PENDING` (hoy solo `play`: S3, enchufado desde el
+2026-10-14, y la Store ya son obligatorios); entonces pasa en verde con un aviso. Un
 canal declarado ni siquiera corre: su job se salta aunque sus Variables estén puestas (app#7), así que
 un canal pendiente no puede poner la release en rojo con un fallo. Al enchufar un canal se ponen
 primero sus Variables y secrets y después se quita de la lista; quitarlo es lo que lo enciende.
@@ -128,7 +134,7 @@ aws-next creó el bucket y el rol el 2026-10-14 (PLAN-AWS, ronda 18; `stacks/pro
 ```bash
 gh variable set -R ERPlora/app AWS_DOWNLOADS_ROLE_ARN --body arn:aws:iam::363427305647:role/erplora-prod-app-release
 gh variable set -R ERPlora/app DOWNLOADS_BUCKET --body erplora-prod-downloads
-gh variable set -R ERPlora/app RELEASE_CHANNELS_PENDING --body store,play   # `s3` ya no está pendiente
+gh variable set -R ERPlora/app RELEASE_CHANNELS_PENDING --body play   # `s3` y `store` ya no están pendientes
 ```
 
 Sin las dos Variables, el job avisa («S3 upload skipped: AWS_DOWNLOADS_ROLE_ARN/DOWNLOADS_BUCKET not set»)

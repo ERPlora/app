@@ -98,6 +98,16 @@ a verla live en `apps.microsoft.com`.
    Store sale **roja**. Olvidarla en la lista no es inocuo: la Store deja de recibir versiones (el
    gate lo avisa en cada release, sin ponerla roja).
 
+> ⚠️ **Nunca una submission en borrador (visto el 2026-10-27 con la release 1.1.31).** Una
+> submission creada a mano en Partner Center y dejada «In draft» bloquea `msstore publish`: la
+> Ingestion API responde «Ingestion API can only update, delete, and commit submissions that are
+> created through the API. Please delete the current in-progress submission and create one using
+> the API» y el job «Publish to Microsoft Store» sale rojo (la 1.1.31 la frenó una Submission 2
+> creada a mano el 19/08 con un MSIX viejo). Tras la Fase 2 manual no se deja **ninguna**
+> submission en borrador. Si pasa: Partner Center → la app → **Application overview** →
+> **Delete submission** sobre el borrador, y relanzar solo lo que falló con
+> `gh run rerun <run> --failed -R ERPlora/app`.
+
 ### Fase 4 — botón en erplora.com (repo `saas`)
 
 Con la ficha live: generar la insignia en <https://apps.microsoft.com/badge> con
