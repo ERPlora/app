@@ -70,8 +70,8 @@ decide:
 - **no existe** y la versión es mayor que el último tag `vX.Y.Z` → tests (`test-shell.yml`, llamado)
   → builds (escritorio ×3 y Android; cada plataforma sale en rojo si le falta uno de sus bundles) →
   `collect` (están los seis instaladores y el AAB, y abre la **GitHub Release en borrador**
-  `v<versión>` con los instaladores) → Microsoft Store, Google Play (hoy apagado: `PLAY_PACKAGE_NAME`
-  borrada y `play` pendiente; ver `GOOGLE-PLAY.md`) y S3 → `release-gate` → publica el borrador, que
+  `v<versión>` con los instaladores) → Microsoft Store, Google Play (encendido de nuevo desde el
+  2026-10-28; ver `GOOGLE-PLAY.md`) y S3 → `release-gate` → publica el borrador, que
   es lo que crea el tag `v<versión>`;
 - **existe un borrador `v<versión>` abierto por otra run** → **rojo**: esa publicación ya empezó
   (ver «Si una release se queda a medias»);
@@ -107,9 +107,9 @@ lleva el id de su run. Desde ahí:
    lo escribió otra run (`scripts/ci/s3-version-guard.sh`, comprueba el metadato `run-id`).
 
 `release-gate` (`scripts/release-gate.sh`) pone la release en rojo si un canal no publicó, salvo que
-esté declarado en la Variable `RELEASE_CHANNELS_PENDING` (hoy solo `play`: S3, enchufado desde el
-2026-10-14, y la Store ya son obligatorios); entonces pasa en verde con un aviso. Un
-canal declarado ni siquiera corre: su job se salta aunque sus Variables estén puestas (app#7), así que
+esté declarado en la Variable `RELEASE_CHANNELS_PENDING` (desde el 2026-10-28 la Variable no
+existe: la Store, S3 —enchufado el 2026-10-14— y Play son obligatorios); entonces pasa en verde
+con un aviso. Un canal declarado ni siquiera corre: su job se salta aunque sus Variables estén puestas (app#7), así que
 un canal pendiente no puede poner la release en rojo con un fallo. Al enchufar un canal se ponen
 primero sus Variables y secrets y después se quita de la lista; quitarlo es lo que lo enciende.
 
@@ -134,15 +134,15 @@ aws-next creó el bucket y el rol el 2026-10-14 (PLAN-AWS, ronda 18; `stacks/pro
 ```bash
 gh variable set -R ERPlora/app AWS_DOWNLOADS_ROLE_ARN --body arn:aws:iam::363427305647:role/erplora-prod-app-release
 gh variable set -R ERPlora/app DOWNLOADS_BUCKET --body erplora-prod-downloads
-gh variable set -R ERPlora/app RELEASE_CHANNELS_PENDING --body play   # `s3` y `store` ya no están pendientes
+# RELEASE_CHANNELS_PENDING no se vuelve a crear: desde el 2026-10-28 ningún canal está pendiente
 ```
 
 Sin las dos Variables, el job avisa («S3 upload skipped: AWS_DOWNLOADS_ROLE_ARN/DOWNLOADS_BUCKET not set»)
 y los instaladores solo van a la GitHub Release. Con `s3` fuera de `RELEASE_CHANNELS_PENDING`,
 `release-gate` lo pone en rojo.
 
-**Secrets que hay que cargar** (no se pueden leer del repo antiguo; ninguno existe aún en
-`ERPlora/app`). Cada comando pide el valor por la entrada estándar:
+**Secrets que hay que cargar** (no se pueden leer del repo antiguo; a 2026-10-28 están todos en
+`ERPlora/app` y esto sirve para rehacerlos). Cada comando pide el valor por la entrada estándar:
 
 ```bash
 # Android (obligatorios para CUALQUIER release: sin ellos build-android sale en rojo nombrándolos)
