@@ -34,12 +34,13 @@ landing no ofrece APK: el endpoint de descarga del SaaS hace **redirect 302** a 
 
 > **2026-10-27 — Play apagado hasta las pruebas finales.** La release 1.1.31 (run `40557564120`)
 > cayó en `publish-play`: la guardia del paso 0 salió `signup_open` y el negocio del revisor
-> `restaurante-demo-play` sigue sin estar activo. Estar en `RELEASE_CHANNELS_PENDING` solo excusa
+> `restaurante-demo-play` sigue sin estar activo. Entonces `RELEASE_CHANNELS_PENDING` solo excusaba
 > un job **saltado**, no uno fallido, así que se borró la Variable `PLAY_PACKAGE_NAME` de
-> `ERPlora/app`: el job se salta y el gate pasa avisando. Para reactivarlo: exención del código por
-> correo para la cuenta del revisor en el SaaS, una guardia que pruebe la cuenta sin darla de alta,
-> el negocio del revisor activo y, después, volver a poner `PLAY_PACKAGE_NAME=com.erplora.app`
-> (paso 3) y quitar `play` de `RELEASE_CHANNELS_PENDING` (paso 4).
+> `ERPlora/app`: el job se salta y el gate pasa avisando. Desde app#7 un canal pendiente ya no corre
+> (paso 3) y la guardia ya no tiene `signup_open` (paso 0). Para reactivarlo: la cuenta del revisor
+> marcada como cuenta de revisión en el SaaS (ERPlora/saas#132), su negocio activo, el paso 0 en
+> verde, volver a poner `PLAY_PACKAGE_NAME=com.erplora.app` (paso 3) y quitar `play` de
+> `RELEASE_CHANNELS_PENDING` (paso 4).
 
 **Orden que queda**, y no se salta ninguno:
 
