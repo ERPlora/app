@@ -608,6 +608,81 @@ else
     ok "every multi-type \`except\` is parenthesized (Python < 3.14 parses it)"
 fi
 
+# ── 5b. …and on the python3 a Mac ships (Apple's 3.9) ────────────────────────
+# `GOOGLE-PLAY.md` step 0 is `python3 scripts/ci/play-reviewer-preflight.py` on a person's Mac, whose
+# python3 is 3.9. There `def cookie(self, name: str) -> str | None:` is evaluated when the class is
+# defined, and the control died with a TypeError before checking anything (app#12); the runner's
+# 3.12 never sees it. So the 3.9 floor is checked by parsing, whatever python3 runs this test:
+#   · the grammar is 3.9's (no `match`, no `except*`…);
+#   · an `X | Y` annotation needs `from __future__ import annotations` (never evaluated then);
+#   · an `X | Y` type union outside an annotation (`isinstance(v, str | None)`) is 3.10-only.
+floor_problems=$(python3 - "$script" <<'PY'
+import ast
+import sys
+
+FLOOR = (3, 9)
+TYPE_NAMES = {"bool", "bytes", "dict", "float", "frozenset", "int", "list", "set", "str", "tuple", "type"}
+
+with open(sys.argv[1], encoding="utf-8") as fh:
+    source = fh.read()
+try:
+    tree = ast.parse(source, feature_version=FLOOR)
+except SyntaxError as exc:
+    print(f"line {exc.lineno}: not Python {FLOOR[0]}.{FLOOR[1]} grammar: {exc.msg}")
+    sys.exit(0)
+
+deferred = any(
+    isinstance(node, ast.ImportFrom)
+    and node.module == "__future__"
+    and any(alias.name == "annotations" for alias in node.names)
+    for node in tree.body
+)
+
+
+def annotations_of(node):
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        args = node.args
+        every = args.posonlyargs + args.args + args.kwonlyargs + [args.vararg, args.kwarg]
+        return [a.annotation for a in every if a is not None and a.annotation is not None] + (
+            [node.returns] if node.returns is not None else []
+        )
+    if isinstance(node, ast.AnnAssign):
+        return [node.annotation]
+    return []
+
+
+def is_type_operand(node):
+    return (isinstance(node, ast.Constant) and node.value is None) or (
+        isinstance(node, ast.Name) and node.id in TYPE_NAMES
+    ) or (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id in TYPE_NAMES)
+
+
+in_annotation = set()
+for node in ast.walk(tree):
+    for annotation in annotations_of(node):
+        for inner in ast.walk(annotation):
+            in_annotation.add(id(inner))
+            if not deferred and isinstance(inner, ast.BinOp) and isinstance(inner.op, ast.BitOr):
+                print(f"line {inner.lineno}: `X | Y` annotation evaluated at definition without `from __future__ import annotations`")
+
+for node in ast.walk(tree):
+    if (
+        id(node) not in in_annotation
+        and isinstance(node, ast.BinOp)
+        and isinstance(node.op, ast.BitOr)
+        and (is_type_operand(node.left) or is_type_operand(node.right))
+    ):
+        print(f"line {node.lineno}: `X | Y` type union outside an annotation is Python 3.10+")
+PY
+)
+floor_rc=$?
+if [ "$floor_rc" -eq 0 ] && [ -z "$floor_problems" ]; then
+    ok "the control starts on Python 3.9 (the python3 a Mac ships), not only on the runner's 3.12"
+else
+    bad "the control starts on Python 3.9 (the python3 a Mac ships), not only on the runner's 3.12" \
+        "$(printf '%s' "$floor_problems" | tr '\n' ' ' | cut -c1-400) (exit $floor_rc)"
+fi
+
 # ── 6. The `.env` is read the way dotenv reads it ────────────────────────────
 # The real root `.env` annotates its lines: `PLAY_REVIEWER_HUB=<slug>   # [var]`. Read raw, the
 # comment became part of the value: run locally, the control looked for the hub `<slug>   # [var]`

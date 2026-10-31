@@ -71,6 +71,9 @@ landing no ofrece APK: el endpoint de descarga del SaaS hace **redirect 302** a 
    python3 scripts/ci/play-reviewer-preflight.py
    ```
 
+   Vale el `python3` del sistema: arranca con Python 3.9 o posterior (el que trae macOS), no solo
+   con el 3.12 de la CI; su test lo fija (app#12).
+
    Entra con `PLAY_REVIEWER_EMAIL`/`PLAY_REVIEWER_PASSWORD` del `.env` de la raíz —las mismas
    credenciales que recorre Google— y hace el mismo camino que el revisor en la plataforma nueva
    (desde el 2026-10-14: saas-next en `erplora.com`, hub-next en `https://<slug>.erplora.com`):
