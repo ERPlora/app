@@ -151,3 +151,28 @@ Una página que no es el negocio enlazado no puede encender ni apagar la escucha
 (HUB_APP-F10, ERPlora/hub#2642).
 Implicados: HUB-F60, HUB_SHELL-F69, HUB_SHELL-F139
 QA: qa-hub-android Pendiente (pantalla apagada y segundo plano)
+
+### HUB_APP-F32 Lo que se escribe en la ventana no va al autocompletado del sistema (Android)
+Estado: hecho
+Actor: sistema
+Pantalla: Ventana de ERPlora
+Pasos:
+1. La persona rellena una ficha del negocio en la tablet (una reserva con el correo y las notas del
+   cliente, un cliente, un empleado) y la guarda.
+2. La ficha se cierra y la pantalla vuelve a la lista sin más: Android **no** ofrece guardar nada
+   («¿Guardar contraseña en el Gestor de contraseñas de Google?») ni sugiere datos guardados al tocar un
+   campo.
+3. Igual en la página de entrada de erplora.com (HUB_APP-F02): el correo y la contraseña se escriben a
+   mano y el gestor de contraseñas de la tablet ni los rellena ni los guarda. La tablet la comparte el
+   equipo: una contraseña guardada en su cuenta de Google la podría rellenar cualquiera.
+Entra: nada.
+Sale: nada. La ventana no tiene gestor de autocompletado (`MainActivity.getSystemService` →
+`AutofillOptOut`): el WebView lo pide a la actividad al crearse, Chromium lo da por apagado y no avisa a
+Android de ningún campo ni de ningún envío, así que ningún dato de un cliente llega al servicio de
+autocompletado que tenga la tablet (el de Google u otro).
+Si falla: no se puede encender por página. El WebView coge el gestor una sola vez, así que tampoco lo usa
+la entrada de erplora.com. La página tampoco lo puede impedir por su cuenta: `autocomplete="off"` es solo
+una pista, y el servicio de Google la ignoró (ERPlora/app#15). Una aplicación anterior a la 1.1.33 sí entrega
+las fichas: hay que actualizarla. En ordenador no aplica.
+Implicados: HUB_APP-F02, RESERVATION-F06
+QA: qa-hub-android Pendiente (tablet con el Gestor de contraseñas de Google: guardar una reserva con correo y notas, y que no salga el diálogo)

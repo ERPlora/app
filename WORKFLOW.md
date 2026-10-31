@@ -241,6 +241,7 @@ El detalle de cada flujo vive en `workflow/<área>.md`; este índice solo lo enu
 | HUB_APP-F29 | Abrir un enlace fuera de la aplicación | hecho | [workflow/salidas-y-actualizacion.md](workflow/salidas-y-actualizacion.md) |
 | HUB_APP-F30 | Guardar una descarga | parcial | [workflow/salidas-y-actualizacion.md](workflow/salidas-y-actualizacion.md) |
 | HUB_APP-F31 | Saber que hay una versión nueva y actualizar | parcial | [workflow/salidas-y-actualizacion.md](workflow/salidas-y-actualizacion.md) |
+| HUB_APP-F32 | Lo que se escribe en la ventana no va al autocompletado del sistema (Android) | hecho | [workflow/permisos-y-avisos.md](workflow/permisos-y-avisos.md) |
 
 ## Cobertura contra la referencia
 
@@ -274,6 +275,7 @@ El detalle de cada flujo vive en `workflow/<área>.md`; este índice solo lo enu
 | Atrás de Android | hecho | F28 |
 | Enlace externo, guardar descarga | hecho / parcial | F29, F30 |
 | Actualización | parcial: sin actualización en el sitio | F31 |
+| Fichas del negocio fuera del autocompletado del sistema (Android) | hecho | F32 |
 | Báscula | no existe (hub#1217) | — |
 | Push (FCM) con la aplicación cerrada | no existe, por decisión (hub#2307) | F26 |
 | iOS | sin construir | — |
@@ -285,6 +287,7 @@ El detalle de cada flujo vive en `workflow/<área>.md`; este índice solo lo enu
   clave, MAC si se conoce, dirección, puerto, nombre, función, tipo, vistas por primera y última vez,
   en línea). Ninguno se sube al hub por sí solo.
 - **De Android**: el último toque de aviso recordado (`com.erplora.notice_taps`) y los permisos del sistema.
+  Nada de lo que se escribe en la ventana llega al autocompletado de Android (HUB_APP-F32).
 - **Del navegador integrado**, guardado en disco por origen: la sesión del hub (`erplora.hub_session`), el
   usuario con nombre y correo (`erplora.session`), los tokens de acceso y refresco de erplora.com
   (`erplora.access`, `erplora.refresh`), la memoria de «ya te pregunté» de los permisos
