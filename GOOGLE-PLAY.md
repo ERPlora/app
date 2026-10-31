@@ -48,6 +48,20 @@ landing no ofrece APK: el endpoint de descarga del SaaS hace **redirect 302** a 
 > `PLAY_PACKAGE_NAME=com.erplora.app` (paso 3) y se borró `RELEASE_CHANNELS_PENDING` (paso 4). Desde
 > entonces, cada versión nueva en `src-tauri/tauri.conf.json` que llega a `main` publica también en
 > Play.
+>
+> **2026-10-31 — encender el canal no publicó nada (app#11).** La reactivación del 28/10 no subió la
+> versión: el tag `v1.1.31` ya existía, así que cada push posterior se paró en «Version gate» y Play se
+> quedó con la **1.1.28** (ficha pública: «Updated on Sep 19, 2026»), que no conoce el acceso por
+> `/launch` del SaaS nuevo: al pulsar «Sign in» sale «This page is not available in the app.» y nadie
+> que instale la app desde Play entra, tampoco el revisor de Google. El arreglo (app#5 y app#6) ya iba
+> en la 1.1.31; lo que faltaba era una versión nueva. La **1.1.32** lo publica: `publish-play` la sube
+> al track `internal` (no hay Variable `PLAY_TRACK`) y la envía a revisión. **A la ficha pública solo
+> llega cuando se promociona a Producción en Play Console**, a mano (la service account solo tiene
+> «Release to testing tracks»; ver la advertencia de «Lo que YA está hecho»). Es la primera versión
+> que llega a Play con el micrófono (`RECORD_AUDIO`, app#4): *App content › Data safety* tiene que
+> declarar el audio (ver «Formularios de Play que dependen de un permiso») antes de que Google la
+> revise. Se comprueba instalando desde Play y entrando con la cuenta del revisor hasta abrir su
+> negocio `restaurante-demo-play`.
 
 **Orden que queda**, y no se salta ninguno:
 
@@ -99,6 +113,9 @@ landing no ofrece APK: el endpoint de descarga del SaaS hace **redirect 302** a 
    Es lo que enciende el canal: desde la release siguiente `publish-play` corre, y un fallo suyo pone
    la release en rojo, como cualquier canal vivo. Una release que ya salió sin Play no se repite: se
    publica con la siguiente versión, o, si la run sigue a medias, `gh run rerun <run> --failed`.
+   **Encender el canal no publica nada por sí solo**: si la última versión ya tiene tag, el mismo
+   cambio que lo enciende sube `version` en `src-tauri/tauri.conf.json`. El 2026-10-28 no se hizo y
+   Play siguió con la 1.1.28, que no deja entrar con el acceso nuevo (app#11).
 5. Mergear el cambio del SaaS que retira el APK de Android (`store_url_for`), **solo cuando el
    paso 2 esté LIVE**: antes mandaría al usuario a un 404 de Google.
 
