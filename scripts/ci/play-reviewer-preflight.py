@@ -49,7 +49,10 @@ printed — not even on the failure paths.
 
 Usage:  python3 scripts/ci/play-reviewer-preflight.py
 Contract test: `scripts/tests/play-reviewer-preflight.test.sh` (hermetic, fake SaaS and fake hub).
+Runs on Python 3.9+, the python3 a Mac ships (app#12), not only on the runner's 3.12.
 """
+
+from __future__ import annotations
 
 import http.cookiejar
 import json
