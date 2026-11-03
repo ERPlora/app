@@ -47,20 +47,22 @@ Actor: administrador, responsable
 Pantalla: ninguna
 Pasos:
 1. Un botón que cobra o lleva a la cuenta (comprar un módulo, planes, portal de facturación, la descarga
-   de la actualización) pide abrir una dirección. En la copia de Play los controles de comprar o cambiar de plan
-   no se pintan (`upgrade-plan-link.ts:74-76`); la salida al navegador desde Play no la vigila la aplicación
-   (hub#1918).
+   de la actualización) o el que coteja un registro de VeriFactu en la AEAT pide abrir una dirección. En la
+   copia de Play los controles de comprar o cambiar de plan no se pintan (`upgrade-plan-link.ts:74-76`); la
+   salida al navegador desde Play no la vigila la aplicación (hub#1918).
 2. La aplicación comprueba la dirección y la entrega al **navegador del sistema** (no a una pestaña
    propia): la caja se queda como estaba mientras se paga.
 3. La persona vuelve a la aplicación, que sigue donde estaba.
 Entra: una dirección https de erplora.com o de un negocio, la de pago `checkout.stripe.com` (solo ese host),
-o http a un bucle local de desarrollo.
+la del cotejo del QR de la AEAT (`/wlpl/TIKE-CONT/ValidarQR`, solo esa ruta, en
+`www2.agenciatributaria.gob.es` o en la sede de pruebas `prewww2.aeat.es`, sin puerto), o http a un bucle
+local de desarrollo. Abrir el cotejo no envía nada a la AEAT.
 Sale: el navegador abierto; nada guardado.
 Si falla: una dirección que no es de las anteriores, con usuario o contraseña, o de otro esquema
 (`file:`, `javascript:`) se rechaza (`external_url_refused`); sin navegador instalado, o que dice que no
 (`external_url_unavailable`). La página convierte ambos en un aviso: un botón que no hace nada es el
 defecto que esto evita. Desde un navegador normal es una pestaña nueva.
-Implicados: HUB_SHELL-F16, HUB_SHELL-F48, HUB_SHELL-F129
+Implicados: HUB_SHELL-F16, HUB_SHELL-F48, HUB_SHELL-F129, VERIFACTU-F18
 QA: qa-hub-android Fase 4
 
 ### HUB_APP-F30 Guardar una descarga

@@ -247,6 +247,25 @@ const ERPLORA_DOMAIN: &str = "erplora.com";
 /// dashboard or a look-alike is not a checkout the till starts.
 const STRIPE_CHECKOUT_HOST: &str = "checkout.stripe.com";
 
+/// The two sites of the AEAT's QR check: the real one and its test one (`QR_HOSTS` of
+/// `apps/verifactu/chain.py` in the Hub). The Hub links a record to the site it was born on.
+const AEAT_QR_HOSTS: [&str; 2] = ["www2.agenciatributaria.gob.es", "prewww2.aeat.es"];
+
+/// The page that checks a VeriFactu QR on [`AEAT_QR_HOSTS`] (`QR_PATH` in the same Hub file).
+const AEAT_QR_PATH: &str = "/wlpl/TIKE-CONT/ValidarQR";
+
+/// Is this the AEAT's QR check (app#20)? Host AND path, unlike [`STRIPE_CHECKOUT_HOST`]: the AEAT
+/// serves far more than the check under those two domains, and this door only has to lead to it.
+///
+/// No port either: `port()` is `None` when the address spells the 443 that https implies, so anything
+/// else is another service of that machine. Judged on the parsed URL, where the dots are resolved and
+/// percent-escapes stay as written, so `…/ValidarQR/../Otra` and `…/ValidarQR%2F..%2FOtra` both miss.
+fn is_aeat_qr_check(url: &tauri::Url) -> bool {
+    url.host_str().is_some_and(|host| AEAT_QR_HOSTS.contains(&host))
+        && url.port().is_none()
+        && url.path() == AEAT_QR_PATH
+}
+
 /// Is this host a hub of ours — `<label>[.<label>…].erplora.com`?
 ///
 /// The apex has no leading dot to strip, which is exactly why it is excluded: `erplora.com` also
@@ -395,8 +414,14 @@ pub fn external_browser_url(raw: &str) -> Option<String> {
     let host = url.host_str()?;
     let allowed = match url.scheme() {
         // Everything we serve: the SaaS at the apex plus every hub, auras by wildcard.
-        // Plus Stripe's hosted checkout, where the assistant's upgrade is paid (hub#1914).
-        "https" => host == ERPLORA_DOMAIN || host == STRIPE_CHECKOUT_HOST || is_hub_domain(host),
+        // Plus Stripe's hosted checkout, where the assistant's upgrade is paid (hub#1914), and the
+        // AEAT's public check of a VeriFactu QR (app#20): only a link, nothing is sent to the AEAT.
+        "https" => {
+            host == ERPLORA_DOMAIN
+                || host == STRIPE_CHECKOUT_HOST
+                || is_hub_domain(host)
+                || is_aeat_qr_check(&url)
+        }
         // Development against a local SaaS (`VITE_CLOUD_API_URL=http://127.0.0.1:8001`). Nothing
         // outside this machine can serve loopback, so nobody else can steer it.
         "http" => is_loopback_host(host),
