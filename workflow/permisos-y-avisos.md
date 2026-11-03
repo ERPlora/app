@@ -162,12 +162,15 @@ Pasos:
 2. La ficha se cierra y la pantalla vuelve a la lista sin más: Android **no** ofrece guardar nada
    («¿Guardar contraseña en el Gestor de contraseñas de Google?») ni sugiere datos guardados al tocar un
    campo.
-3. Igual en la página de entrada de erplora.com (HUB_APP-F02): el correo y la contraseña se escriben a
-   mano y el gestor de contraseñas de la tablet ni los rellena ni los guarda. La tablet la comparte el
-   equipo: una contraseña guardada en su cuenta de Google la podría rellenar cualquiera.
+3. Igual en la página de entrada de erplora.com (HUB_APP-F02): el correo y la contraseña se escriben o
+   se pegan a mano cada vez que se pide la cuenta, no solo la primera: el primer arranque, tras cerrar la
+   sesión y cuando ya caducó la de erplora.com (dura dos semanas). El gestor de contraseñas del dispositivo
+   (el de Google u otro) no rellena ni guarda nada, tampoco el código de entrada. Con PIN, el turno de una
+   tablet compartida no pasa por aquí. En esa tablet es lo que se quiere: una contraseña guardada en su
+   cuenta de Google la podría rellenar cualquiera; en un teléfono personal se pierde esa comodidad.
 Entra: nada.
 Sale: nada. La ventana no tiene gestor de autocompletado (`MainActivity.getSystemService` →
-`AutofillOptOut`): el WebView lo pide a la actividad al crearse, Chromium lo da por apagado y no avisa a
+`AutofillOptOut`): el WebView lo pide a la actividad una sola vez, Chromium lo da por apagado y no avisa a
 Android de ningún campo ni de ningún envío, así que ningún dato de un cliente llega al servicio de
 autocompletado que tenga la tablet (el de Google u otro).
 Si falla: no se puede encender por página. El WebView coge el gestor una sola vez, así que tampoco lo usa
