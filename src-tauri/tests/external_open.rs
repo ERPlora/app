@@ -109,6 +109,10 @@ fn the_aeat_sites_are_admitted_for_the_qr_check_path_only() {
             "/wlpl/TIKE-CONT/ValidarQR%2F..%2FOtra",
             // The check's path only in the query.
             "/redirect?to=/wlpl/TIKE-CONT/ValidarQR",
+            // Doubled separators: the parser keeps them, and a server may or may not fold them.
+            "//wlpl/TIKE-CONT/ValidarQR?nif=B12345674",
+            "/wlpl//TIKE-CONT/ValidarQR?nif=B12345674",
+            "/wlpl/TIKE-CONT//ValidarQR?nif=B12345674",
         ] {
             let raw = format!("https://{host}{path}");
             assert_eq!(external_browser_url(&raw), None, "{raw} must be refused");
