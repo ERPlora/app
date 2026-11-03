@@ -15,7 +15,9 @@ Pasos:
    Bluetooth ya emparejadas (solo Android), las colas USB del sistema (solo ordenador) y las que la
    persona escribió a mano (HUB_APP-F14), sin repetir ninguna.
 4. Cada una queda en el registro de esta aplicación para poder darle función.
-Entra: la red del dispositivo; en Android, la lista de emparejados de Android.
+Entra: la red del dispositivo; en Android, la lista de emparejados de Android. El barrido del 9100 recorre
+cada red privada IPv4 en la que está el dispositivo (Wi-Fi o cable, por sus propias direcciones) y la de su
+salida a internet si la hay, cada una una vez: un local sin internet también se barre (app#17).
 Sale: la lista de impresoras (red `network:<ip>:<puerto>`, Bluetooth `bluetooth:<mac>`, USB `usb:<cola>`).
 Las Bluetooth salen siempre sin clasificar: se ofrecen las emparejadas cuyo nombre o clase parecen
 impresora. Un fallo de Bluetooth o de CUPS **no estropea** la mitad de red, pero tampoco se dice: la lista sale sin ellas.
