@@ -12,7 +12,7 @@ use std::process::Command;
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
-use crate::discovery::local_subnet_prefix;
+use crate::discovery::{local_subnet_prefixes, sweep_targets};
 use crate::protocol::Device;
 use crate::{Result, ESCPOS_NETWORK_PORT};
 
@@ -647,20 +647,16 @@ impl Watchdog {
 
         tracing::info!("recovery scan: buscando {} dispositivo(s) offline", mac_lookup.len());
 
-        let subnet = match local_subnet_prefix() {
-            Some(s) => s,
-            None => {
-                tracing::warn!("recovery scan: no se pudo determinar la subred local");
-                return;
-            }
-        };
+        let prefixes = local_subnet_prefixes();
+        if prefixes.is_empty() {
+            tracing::warn!("recovery scan: no IPv4 network to sweep");
+            return;
+        }
 
-        for i in 1u8..=254 {
+        for ip in sweep_targets(&prefixes) {
             if mac_lookup.is_empty() {
-                break; // Todos los offline recuperados.
+                break; // Every offline device recovered.
             }
-
-            let ip = format!("{subnet}.{i}");
 
             // Comprobación TCP rápida en el puerto 9100.
             if !tcp_check(&ip, ESCPOS_NETWORK_PORT, self.config.connect_timeout_ms).await {

@@ -7,7 +7,7 @@
 //! deduplicado, y enriquecido con MAC/ARP para registrar en `registry::DeviceRegistry`.
 
 use std::collections::HashSet;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -395,17 +395,18 @@ async fn scan_network(registry: &DeviceRegistry) -> Result<Vec<PrinterInfo>> {
     Ok(printers)
 }
 
-/// Escaneo de subred: prueba TCP `connect` al puerto 9100 en `{prefix}.1..=254`.
-/// Porta `_discover_network_scan` + `_get_local_subnet`.
+/// Subnet sweep: a TCP `connect` to `port` on `{prefix}.1..=254` of every network the device is on
+/// ([`local_subnet_prefixes`]). Ports `_discover_network_scan` + `_get_local_subnet`.
 pub async fn discover_subnet_scan(port: u16) -> Result<Vec<PrinterInfo>> {
-    let subnet_prefix = match local_subnet_prefix() {
-        Some(p) => p,
-        None => return Ok(Vec::new()),
-    };
+    let prefixes = local_subnet_prefixes();
+    if prefixes.is_empty() {
+        tracing::warn!("no IPv4 network to sweep for printers on :{port}");
+        return Ok(Vec::new());
+    }
 
-    tracing::info!("escaneando subred {subnet_prefix}.0/24 buscando impresoras en :{port}");
+    tracing::info!("sweeping {prefixes:?} (/24) for printers on :{port}");
 
-    let ips: Vec<String> = (1u8..=254).map(|i| format!("{subnet_prefix}.{i}")).collect();
+    let ips = sweep_targets(&prefixes);
     let found = sweep_addresses(ips, move |ip| async move {
         let addr = format!("{ip}:{port}");
         matches!(
@@ -597,16 +598,60 @@ fn service_to_printer(info: &mdns_sd::ServiceInfo, service_type: &str) -> Option
     })
 }
 
-/// Detecta el prefijo /24 de la subred local (p.ej. `192.168.1`). Porta `_get_local_subnet`:
-/// abre un socket UDP "conectado" a 8.8.8.8:80 y lee la IP local de salida (sin enviar nada).
+/// The /24 networks to sweep, as prefixes (`192.168.1`). Ported from `_get_local_subnet`, which
+/// asked only the default route (a UDP socket «connected» to 8.8.8.8, nothing sent): a shop network
+/// without internet has no default route, so nothing was swept (app#17). Now the device's own
+/// addresses are read too, and nobody outside is asked.
 ///
-/// `pub(crate)` porque el watchdog de `registry` barre exactamente la misma subred: tenía su
-/// propia copia de esta función, y dos copias de una regla es una que se queda atrás.
-pub(crate) fn local_subnet_prefix() -> Option<String> {
+/// `pub(crate)` because the `registry` watchdog sweeps exactly the same networks: it had its own
+/// copy of this rule, and two copies of one rule is one that falls behind.
+pub(crate) fn local_subnet_prefixes() -> Vec<String> {
+    let interfaces: Vec<IpAddr> = match if_addrs::get_if_addrs() {
+        Ok(list) => list.iter().map(if_addrs::Interface::ip).collect(),
+        Err(e) => {
+            tracing::warn!(
+                "cannot list the network interfaces, sweeping the default route only: {e}"
+            );
+            Vec::new()
+        }
+    };
+    subnet_prefixes(default_route_ip(), &interfaces)
+}
+
+/// Every host address (`.1..=254`) of each /24 prefix, in order.
+pub(crate) fn sweep_targets(prefixes: &[String]) -> Vec<String> {
+    prefixes
+        .iter()
+        .flat_map(|prefix| (1u8..=254).map(move |i| format!("{prefix}.{i}")))
+        .collect()
+}
+
+/// The local address the default route leaves by, if there is one. `connect` on UDP only asks the
+/// routing table; without a route out it fails with ENETUNREACH.
+fn default_route_ip() -> Option<IpAddr> {
     let sock = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     sock.connect("8.8.8.8:80").ok()?;
     let local: SocketAddr = sock.local_addr().ok()?;
-    subnet_prefix_of(&local.ip().to_string())
+    Some(local.ip())
+}
+
+/// Which /24 networks a device with these addresses sweeps, each once, in this order: the one the
+/// default route leaves by (whatever its address, as the sweep always did), then the one of every
+/// PRIVATE IPv4 address it holds (RFC 1918: Wi-Fi, cable). Loopback, link-local, public or carrier
+/// addresses and IPv6 are not a shop network: sweeping a public /24 knocks on strangers' doors.
+pub(crate) fn subnet_prefixes(route: Option<IpAddr>, interfaces: &[IpAddr]) -> Vec<String> {
+    let private = interfaces
+        .iter()
+        .filter(|ip| matches!(ip, IpAddr::V4(v4) if v4.is_private()));
+    let mut prefixes: Vec<String> = Vec::new();
+    for ip in route.iter().chain(private) {
+        if let Some(prefix) = subnet_prefix_of(&ip.to_string()) {
+            if !prefixes.contains(&prefix) {
+                prefixes.push(prefix);
+            }
+        }
+    }
+    prefixes
 }
 
 /// Los tres primeros octetos de una IPv4 (`192.168.1.42` → `192.168.1`). Cualquier otra cosa
@@ -821,8 +866,8 @@ mod tests {
     }
 
     /// **The /24 prefix is derived from the local IP, and that derivation is what gets tested.**
-    /// The socket half (`local_subnet_prefix`) asks the OS which interface would reach the
-    /// internet — untestable in CI, and the reason this rule used to live twice in the crate
+    /// The socket half (`local_subnet_prefixes`) asks the OS for its addresses and its route out
+    /// — untestable in CI, and the reason this rule used to live twice in the crate
     /// (here and in `registry`, copy-pasted). Splitting the pure half out gives the single
     /// implementation the sweep and the watchdog now share something to pin.
     #[test]
@@ -841,6 +886,87 @@ mod tests {
         // Too few octets — `"10.0.2"` would otherwise be taken for a prefix as-is.
         assert_eq!(subnet_prefix_of("10.0.2"), None);
         assert_eq!(subnet_prefix_of(""), None);
+    }
+
+    // ── A shop network without internet is still swept (app#17) ─────────────────────────────
+    //
+    // The network to sweep used to come ONLY from the default route (a UDP socket «connected» to
+    // 8.8.8.8). A shop Wi-Fi that is just the till and the printer, or a router with no uplink, has
+    // no default route: the lookup failed with ENETUNREACH, nothing was swept, and the ticket
+    // printer on 9100 never showed up although it printed when typed in by hand. The device's own
+    // addresses say which networks it is on, without asking anybody outside.
+
+    fn ip(s: &str) -> std::net::IpAddr {
+        s.parse().expect("test address")
+    }
+
+    #[test]
+    fn without_a_default_route_the_network_of_the_wifi_is_swept() {
+        assert_eq!(
+            subnet_prefixes(None, &[ip("127.0.0.1"), ip("192.168.1.42")]),
+            vec!["192.168.1".to_string()],
+        );
+    }
+
+    #[test]
+    fn every_private_network_the_device_is_on_is_swept_once() {
+        // Cable and Wi-Fi on two networks, the cable one also holding a second address in the
+        // same /24, and the default route leaving by the Wi-Fi.
+        assert_eq!(
+            subnet_prefixes(
+                Some(ip("192.168.1.42")),
+                &[
+                    ip("10.0.0.7"),
+                    ip("10.0.0.8"),
+                    ip("192.168.1.42"),
+                    ip("172.16.5.9")
+                ],
+            ),
+            vec![
+                "192.168.1".to_string(),
+                "10.0.0".to_string(),
+                "172.16.5".to_string()
+            ],
+        );
+    }
+
+    #[test]
+    fn addresses_that_are_not_a_shop_network_are_not_swept() {
+        // Loopback, link-local (no DHCP answered), a public or carrier address, IPv6: none is the
+        // shop's LAN, and sweeping a public /24 would knock on 254 strangers' doors.
+        assert_eq!(
+            subnet_prefixes(
+                None,
+                &[
+                    ip("127.0.0.1"),
+                    ip("169.254.10.20"),
+                    ip("100.72.3.4"),
+                    ip("8.8.4.4"),
+                    ip("fe80::1")
+                ],
+            ),
+            Vec::<String>::new(),
+        );
+    }
+
+    #[test]
+    fn the_sweep_knocks_on_every_host_of_each_network() {
+        let targets = sweep_targets(&["192.168.1".to_string(), "10.0.0".to_string()]);
+        assert_eq!(targets.len(), 2 * 254);
+        assert_eq!(targets[0], "192.168.1.1");
+        assert_eq!(targets[253], "192.168.1.254");
+        assert_eq!(targets[254], "10.0.0.1");
+        assert_eq!(targets[507], "10.0.0.254");
+    }
+
+    #[test]
+    fn the_network_of_the_default_route_is_swept_whatever_its_address() {
+        // What the sweep always did: a LAN on a public range keeps being found when it has the
+        // route out.
+        assert_eq!(
+            subnet_prefixes(Some(ip("81.45.12.30")), &[ip("81.45.12.30")]),
+            vec!["81.45.12".to_string()],
+        );
     }
 
     // ── "No permission" is not "no printers" (hub#338) ────────────────────────────────────────
