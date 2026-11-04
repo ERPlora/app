@@ -16,6 +16,7 @@ tokio = { version = "1", features = ["rt", "net", "time", "sync", "macros", "io-
 tracing = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 mdns-sd = "0.11"
+if-addrs = "0.13"    # the device's own addresses: which networks to sweep, without a route out (app#17)
 oem_cp = "2"          # codificación cp437 para escpos::text
 
 # Inherits `[workspace.lints]` from the root manifest (hub#1242). Without these two lines the
