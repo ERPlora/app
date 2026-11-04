@@ -315,7 +315,8 @@ El detalle de cada flujo vive en `workflow/<área>.md`; este índice solo lo enu
   La aplicación enlaza por su cuenta el negocio recordado al arrancar; el destino de un enlace `erplora://hub/…`
   a otro negocio, solo cuando la persona contesta «Abrir» en el diálogo del sistema (ERPlora/hub#2644).
 - **Solo se recuerda o se abre por enlace** `<etiqueta>.erplora.com` (incluidos `www` y `pre`) o el bucle local
-  con cualquier puerto; al navegador del sistema también van el apex y `checkout.stripe.com`.
+  con cualquier puerto; al navegador del sistema también van el apex, `checkout.stripe.com` y, solo por su
+  ruta exacta, el cotejo del QR en las dos sedes de la AEAT (HUB_APP-F29).
 - **El enlace profundo se resuelve, no se abre**: la dirección se reconstruye desde el nombre.
 - **Una orden que no pudo hacerse se devuelve, no se traga** (abrir enlace, guardar, imprimir A4, NFC,
   Bluetooth, USB). También la impresora de red: espera a que el papel llegue a la impresora y, si no
