@@ -61,6 +61,12 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
     private var pageKeeper: PageKeeper? = null
 
     /**
+     * Round 2026-11-04a — the system's voice for the assistant's «Read aloud» (the Android WebView
+     * has no `speechSynthesis`). Its engine is made on the first `tts_*` request, never before.
+     */
+    private val systemVoice = SystemVoice { events -> AndroidSpeechEngine(activity.applicationContext, events) }
+
+    /**
      * hub#2360 — a new page is loading: the tap that STARTED the app waits for it. The notification
      * plugin reports that tap as `actionPerformed` from its own `load`, before the page listens, and
      * Tauri drops an event nobody is listening to: the tap opened the app on its first screen
@@ -226,6 +232,47 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
     override fun onDestroy(activity: AppCompatActivity) {
         pageKeeper?.setListening(false)
         NoticeListeningService.stop(activity)
+        // Round 2026-11-04a: what was being read answers, and the engine's service is unbound.
+        systemVoice.shutdown()
+    }
+
+    /**
+     * `tts_available` (round 2026-11-04a) — whether the system voice reads `language` (`es-ES`):
+     * `{ available }`. The page reads with it when it does, else with the browser's voice if any.
+     */
+    @Command
+    fun ttsAvailable(invoke: Invoke) {
+        val language = invoke.getArgs().getString("language", null) ?: ""
+        systemVoice.available(language) { available -> invoke.resolve(JSObject().put("available", available)) }
+    }
+
+    /**
+     * `tts_speak` (round 2026-11-04a) — reads `text` in `language` (`es-ES`), ending what was being
+     * read. Resolves once read or stopped; rejects with [SystemVoice.TTS_UNAVAILABLE] or
+     * [SystemVoice.TTS_FAILED], the codes the page branches on.
+     */
+    @Command
+    fun ttsSpeak(invoke: Invoke) {
+        val args = invoke.getArgs()
+        val text = args.getString("text", null)
+        val language = args.getString("language", null)
+        if (text.isNullOrBlank() || language.isNullOrBlank()) {
+            invoke.reject("tts_speak needs the text and its language")
+            return
+        }
+        systemVoice.speak(
+            text,
+            language,
+            done = { invoke.resolve() },
+            failed = { code -> invoke.reject("the system voice could not read the text ($code)", code) },
+        )
+    }
+
+    /** `tts_stop` (round 2026-11-04a) — silences the system voice; the pending `tts_speak` resolves. */
+    @Command
+    fun ttsStop(invoke: Invoke) {
+        systemVoice.stop()
+        invoke.resolve()
     }
 
     /**

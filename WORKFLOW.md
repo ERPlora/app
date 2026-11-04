@@ -201,6 +201,7 @@ tests `tests/shell_surface.rs`, `app_update_channel.rs` y `notice_tap.rs`.
 | `plugin:erplora-android` `keep_listening` (solo el negocio enlazado, ERPlora/hub#2642) | `notice-listening.ts` | F26 | — |
 | `plugin:erplora-android` `leave_app` (solo el negocio enlazado, ERPlora/hub#2642) | `router/back-closes-overlay.ts` | F28 | — |
 | `plugin:erplora-android` `open_app_settings` (solo el negocio enlazado, ERPlora/hub#2642) | `device-permission.ts` → Sistema | F08 | — |
+| `plugin:erplora-android` `tts_available`, `tts_speak` y `tts_stop` (solo el negocio enlazado; ronda 2026-11-04a) | `@erplora/ui` `nativeVoice.ts` (asistente, «Leer en voz alta») | F32 | Asistente del Hub |
 | `plugin:notification` `register_listener` (solo el negocio enlazado, ERPlora/hub#2658) | `notice-tap.ts` vía `main.ts:339` | F25 | HUB_SHELL-F67 |
 | `plugin:app` `version` (Tauri; solo la contestan las aplicaciones anteriores a ERPlora/hub#2658, en las nuevas ningún juego la concede) | `app-update.ts` | F31 | — |
 
@@ -241,6 +242,7 @@ El detalle de cada flujo vive en `workflow/<área>.md`; este índice solo lo enu
 | HUB_APP-F29 | Abrir un enlace fuera de la aplicación | hecho | [workflow/salidas-y-actualizacion.md](workflow/salidas-y-actualizacion.md) |
 | HUB_APP-F30 | Guardar una descarga | parcial | [workflow/salidas-y-actualizacion.md](workflow/salidas-y-actualizacion.md) |
 | HUB_APP-F31 | Saber que hay una versión nueva y actualizar | parcial | [workflow/salidas-y-actualizacion.md](workflow/salidas-y-actualizacion.md) |
+| HUB_APP-F32 | Leer en voz alta las respuestas del asistente con la voz del sistema (Android) | parcial | [workflow/impresion-y-hardware.md](workflow/impresion-y-hardware.md) |
 
 ## Cobertura contra la referencia
 

@@ -127,6 +127,16 @@
         android:name="android.hardware.microphone"
         android:required="false" />
 
+    <!-- 🔴 Load-bearing (round 2026-11-04a). From Android 11 (API 30) an app only SEES the services
+         it declares it looks for: without this query `TextToSpeech` finds no engine, its init
+         answers ERROR and the assistant's «Read aloud» stays mute in the app — the Android WebView
+         has no `speechSynthesis` to fall back on. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
     <application>
         <!-- `specialUse` because none of the typed foreground services (dataSync, mediaPlayback,
              …) describes «stay reachable for incoming orders»; Google Play asks for the subtype

@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-tts-available"
+description = "Enables the tts_available command without any pre-configured scope."
+commands.allow = ["tts_available"]
+
+[[permission]]
+identifier = "deny-tts-available"
+description = "Denies the tts_available command without any pre-configured scope."
+commands.deny = ["tts_available"]

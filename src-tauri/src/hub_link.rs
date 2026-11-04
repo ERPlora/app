@@ -595,8 +595,16 @@ mod tests {
     // erplora.com — so what is measured is the second gate alone. On a computer the plugin answers
     // without Android (an empty permission map, nothing to leave), which is what "it ran" reads as.
 
-    const ANDROID_COMMANDS: [&str; 5] =
-        ["check_permissions", "request_permissions", "keep_listening", "leave_app", "open_app_settings"];
+    const ANDROID_COMMANDS: [&str; 8] = [
+        "check_permissions",
+        "request_permissions",
+        "keep_listening",
+        "leave_app",
+        "open_app_settings",
+        "tts_available",
+        "tts_speak",
+        "tts_stop",
+    ];
 
     fn till_with_the_android_plugin(page: &str, link: Option<HubLink>) -> Till {
         use tauri::Manager;
@@ -622,10 +630,12 @@ mod tests {
     }
 
     /// What each Android command answers on a computer when it runs, with the arguments the shell
-    /// sends (`keep_listening` needs its `on`).
+    /// sends (`keep_listening` needs its `on`; the system voice, its text and language).
     fn ask_android(till: &Till, command: &str) -> Result<serde_json::Value, serde_json::Value> {
         let body = match command {
             "keep_listening" => serde_json::json!({ "on": false }),
+            "tts_available" => serde_json::json!({ "language": "es-ES" }),
+            "tts_speak" => serde_json::json!({ "text": "Hola", "language": "es-ES" }),
             _ => serde_json::json!({}),
         };
         tauri::test::get_ipc_response(
@@ -646,7 +656,28 @@ mod tests {
     fn ran(command: &str) -> Result<serde_json::Value, serde_json::Value> {
         match command {
             "check_permissions" | "request_permissions" => Ok(serde_json::json!({})),
+            // A computer has no system voice: the page reads with its own `speechSynthesis`.
+            "tts_available" => Ok(serde_json::json!({ "available": false })),
+            "tts_speak" => Err(serde_json::json!("tts_unavailable")),
             _ => Ok(serde_json::Value::Null),
+        }
+    }
+
+    /// Every command the plugin declares is measured behind the gate here: one added to the plugin
+    /// and not to [`ANDROID_COMMANDS`] would never be shown to refuse another business.
+    #[test]
+    fn the_gate_is_measured_on_every_command_of_the_android_plugin() {
+        const PLUGIN_BUILD_RS: &str = include_str!("../../crates/tauri-plugin-erplora-android/build.rs");
+        let declared = PLUGIN_BUILD_RS
+            .split("const COMMANDS: &[&str] = &[")
+            .nth(1)
+            .and_then(|rest| rest.split("];").next())
+            .expect("the plugin's build.rs lists no COMMANDS");
+        let declared: Vec<&str> =
+            declared.split(',').map(|c| c.trim().trim_matches('"')).filter(|c| !c.is_empty()).collect();
+        assert!(!declared.is_empty());
+        for command in declared {
+            assert!(ANDROID_COMMANDS.contains(&command), "{command} is not measured behind the gate");
         }
     }
 

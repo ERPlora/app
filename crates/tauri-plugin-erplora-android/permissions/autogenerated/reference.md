@@ -1,6 +1,6 @@
 ## Default Permission
 
-Consultar y solicitar los permisos de runtime que el TPV necesita en Android, salir de la app con el botón Atrás, abrir la ficha de la app en los ajustes del sistema y seguir a la escucha de avisos con la pantalla apagada.
+Check and request the runtime permissions the till needs on Android, leave the app with the Back button, open the app's page in the system settings, keep listening for notices with the screen off and read the assistant's answers aloud in the system voice.
 
 #### This default permission set includes the following:
 
@@ -9,6 +9,9 @@ Consultar y solicitar los permisos de runtime que el TPV necesita en Android, sa
 - `allow-leave-app`
 - `allow-open-app-settings`
 - `allow-keep-listening`
+- `allow-tts-available`
+- `allow-tts-speak`
+- `allow-tts-stop`
 
 ## Permission Table
 
@@ -145,6 +148,84 @@ Enables the request_permissions command without any pre-configured scope.
 <td>
 
 Denies the request_permissions command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`erplora-android:allow-tts-available`
+
+</td>
+<td>
+
+Enables the tts_available command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`erplora-android:deny-tts-available`
+
+</td>
+<td>
+
+Denies the tts_available command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`erplora-android:allow-tts-speak`
+
+</td>
+<td>
+
+Enables the tts_speak command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`erplora-android:deny-tts-speak`
+
+</td>
+<td>
+
+Denies the tts_speak command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`erplora-android:allow-tts-stop`
+
+</td>
+<td>
+
+Enables the tts_stop command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`erplora-android:deny-tts-stop`
+
+</td>
+<td>
+
+Denies the tts_stop command without any pre-configured scope.
 
 </td>
 </tr>
