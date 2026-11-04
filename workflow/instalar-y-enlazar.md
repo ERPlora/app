@@ -34,7 +34,7 @@ Pantalla: Ventana de ERPlora
 Pasos:
 1. Abre la aplicación recién instalada: no recuerda ningún negocio, así que carga la página de entrada
    de erplora.com (`/shell/`).
-2. Inicia sesión o crea la cuenta. Registrarse no crea el negocio: hace falta un paso más en erplora.com, «¿Cómo se llama tu negocio?» o, desde «Abre tu hub» sin ninguno, «Crear hub gratuito» → «Crea tu hub» con su nombre.
+2. Inicia sesión o crea la cuenta. Registrarse no crea el negocio: hace falta un paso más en erplora.com, «¿Cómo se llama tu negocio?» o, desde «Abre tu hub» sin ninguno, «Crear hub gratuito» → «Crea tu hub» con su nombre. En Android, el correo y la contraseña se escriben a mano: la ventana no usa el autocompletado del sistema (HUB_APP-F32).
 3. Con un solo negocio listo, entra solo; con varios, elige uno en «Abre tu hub» (cada tarjeta enseña
    su rol y, si aún se despliega, «Preparando tu hub… esta página se refresca sola»).
 4. El SaaS lleva la ventana al negocio con la marca `?shell=1` (`/shell/open/<id>/` responde con una

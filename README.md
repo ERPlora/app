@@ -78,11 +78,12 @@ decide:
 - **no existe** y no es mayor (o no es `X.Y.Z`, o minor/patch ≥ 1000) → **rojo** con el motivo: la
   Store y Play solo aceptan versiones crecientes y el `versionCode` es `major·10⁶ + minor·10³ + patch`.
 
-Para publicar: subir `version` en `src-tauri/tauri.conf.json` (hoy 1.1.32, la que lleva a Google Play
-el acceso por `/launch` de app#5 y app#6, porque la 1.1.31 salió con Play apagado: app#11; la siguiente
-es 1.1.33 o mayor) y hacer push a `main`. **La versión se sube a mano**, nada la incrementa solo, y ese
-push es lo único que hace falta: un push a `main` sin cambio de versión no publica nada, tampoco en un
-canal que se acaba de encender (`GOOGLE-PLAY.md`, paso 4).
+Para publicar: subir `version` en `src-tauri/tauri.conf.json` (hoy 1.1.33, la que saca las fichas
+del hub del autocompletado de Android: app#15; la 1.1.32 llevó a Google Play el acceso por `/launch` de
+app#5 y app#6, porque la 1.1.31 salió con Play apagado: app#11; la siguiente es 1.1.34 o mayor) y
+hacer push a `main`. **La versión se sube a mano**, nada la incrementa solo, y ese push es lo único que
+hace falta: un push a `main` sin cambio de versión no publica nada, tampoco en un canal que se acaba de
+encender (`GOOGLE-PLAY.md`, paso 4).
 
 Condición de la Store: en Partner Center no debe haber ningún envío en curso. El que abre la CI es
 suyo y se cierra solo al certificarse; uno abierto a mano (un borrador) hace fallar `publish-store`,

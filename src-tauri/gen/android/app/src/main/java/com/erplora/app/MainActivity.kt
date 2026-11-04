@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import androidx.activity.enableEdgeToEdge
+import com.erplora.android.AutofillOptOut
 import com.erplora.android.NoticeTaps
 import com.erplora.android.SystemBarInsets
 
@@ -27,6 +28,14 @@ class MainActivity : TauriActivity() {
     super.onCreate(savedInstanceState)
     SystemBarInsets.applyTopSystemBarPadding(findViewById<View>(android.R.id.content))
   }
+
+  /**
+   * No autofill for the window (app#15). The WebView takes its `AutofillManager` from this
+   * activity; without one, the hub's forms — customers' e-mails and notes — never reach Android's
+   * autofill service, which offered to save them as a password. See [AutofillOptOut].
+   */
+  override fun getSystemService(name: String): Any? =
+    AutofillOptOut.systemService(name) { super.getSystemService(it) }
 
   /**
    * A tap on a notice while the task is alive (hub#2360). When the system had killed the process,
