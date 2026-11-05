@@ -261,3 +261,32 @@ tarjeta no es un error. En ordenador la orden contesta siempre `nfc_unavailable`
 de instalación: la ficha de Play sigue abierta a tabletas sin chip.
 Implicados: HUB-F134, HUB_SHELL-F05, HUB_SHELL-F87
 QA: ninguno
+
+### HUB_APP-F33 Leer en voz alta las respuestas del asistente con la voz del sistema (Android)
+Estado: parcial — la lectura en la tableta real no está validada todavía (ronda 2026-11-04a)
+Actor: responsable, empleado
+Pantalla: HUB_SHELL: Asistente
+Pasos:
+1. En Android, al abrir el asistente, la página pregunta a la aplicación si la voz del sistema tiene el
+   idioma de la página (`tts_available`, `es-ES` o `en-US`), una vez por idioma. El WebView de Android no
+   tiene `speechSynthesis`: sin esta orden el asistente estaba mudo en la aplicación.
+2. Bajo una respuesta, la persona toca «Leer en voz alta» (o elige «Voz del dispositivo» en la cabecera
+   del asistente cuando el negocio tiene voces del servidor).
+3. La aplicación lee la respuesta con el motor de texto a voz de Android (`TextToSpeech`), con las voces
+   que la persona tiene en los ajustes del sistema (`tts_speak`); un texto más largo de lo que admite el
+   motor se lee en trozos seguidos. El motor se arranca la primera vez que se pide y se apaga al cerrar
+   la actividad.
+4. Volver a tocar el botón, leer otra respuesta, cambiar de idioma o cerrar la sesión para la lectura
+   (`tts_stop`).
+Entra: el texto de la respuesta y su idioma.
+Sale: el audio por el altavoz del aparato; nada se guarda ni sale del aparato.
+Si falla: sin motor o sin voz del idioma (`tts_unavailable`), el botón no aparece (salvo que el negocio
+tenga voces del servidor, que leen ellas). La aplicación contesta de nuevo cada vez que se le pregunta, pero la
+página (`nativeVoice.ts`, ui#76) pregunta una sola vez por idioma mientras esté cargada: un motor instalado o encendido
+después lee tras cerrar y volver a abrir la aplicación. Si el motor falla leyendo (`tts_failed`), la página lo dice bajo
+la respuesta: «No se ha podido leer la respuesta en voz alta. Inténtalo de nuevo.». En ordenador la
+aplicación contesta que no tiene voz del sistema y lee la voz del navegador (en Windows, WebView2 lee con
+las voces de Windows). Desde Android 11 la aplicación solo ve el motor porque el manifiesto declara la
+consulta `android.intent.action.TTS_SERVICE`.
+Implicados: asistente del Hub (`@erplora/ui`, `nativeVoice.ts`)
+QA: ninguno
