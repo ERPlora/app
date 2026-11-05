@@ -201,7 +201,7 @@ tests `tests/shell_surface.rs`, `app_update_channel.rs` y `notice_tap.rs`.
 | `plugin:erplora-android` `keep_listening` (solo el negocio enlazado, ERPlora/hub#2642) | `notice-listening.ts` | F26 | — |
 | `plugin:erplora-android` `leave_app` (solo el negocio enlazado, ERPlora/hub#2642) | `router/back-closes-overlay.ts` | F28 | — |
 | `plugin:erplora-android` `open_app_settings` (solo el negocio enlazado, ERPlora/hub#2642) | `device-permission.ts` → Sistema | F08 | — |
-| `plugin:erplora-android` `tts_available`, `tts_speak` y `tts_stop` (solo el negocio enlazado; ronda 2026-11-04a) | `@erplora/ui` `nativeVoice.ts` (asistente, «Leer en voz alta») | F32 | Asistente del Hub |
+| `plugin:erplora-android` `tts_available`, `tts_speak` y `tts_stop` (solo el negocio enlazado; ronda 2026-11-04a) | `@erplora/ui` `nativeVoice.ts` (asistente, «Leer en voz alta») | F33 | Asistente del Hub |
 | `plugin:notification` `register_listener` (solo el negocio enlazado, ERPlora/hub#2658) | `notice-tap.ts` vía `main.ts:339` | F25 | HUB_SHELL-F67 |
 | `plugin:app` `version` (Tauri; solo la contestan las aplicaciones anteriores a ERPlora/hub#2658, en las nuevas ningún juego la concede) | `app-update.ts` | F31 | — |
 
@@ -242,7 +242,8 @@ El detalle de cada flujo vive en `workflow/<área>.md`; este índice solo lo enu
 | HUB_APP-F29 | Abrir un enlace fuera de la aplicación | hecho | [workflow/salidas-y-actualizacion.md](workflow/salidas-y-actualizacion.md) |
 | HUB_APP-F30 | Guardar una descarga | parcial | [workflow/salidas-y-actualizacion.md](workflow/salidas-y-actualizacion.md) |
 | HUB_APP-F31 | Saber que hay una versión nueva y actualizar | parcial | [workflow/salidas-y-actualizacion.md](workflow/salidas-y-actualizacion.md) |
-| HUB_APP-F32 | Leer en voz alta las respuestas del asistente con la voz del sistema (Android) | parcial | [workflow/impresion-y-hardware.md](workflow/impresion-y-hardware.md) |
+| HUB_APP-F32 | Lo que se escribe en la ventana no va al autocompletado del sistema (Android) | hecho | [workflow/permisos-y-avisos.md](workflow/permisos-y-avisos.md) |
+| HUB_APP-F33 | Leer en voz alta las respuestas del asistente con la voz del sistema (Android) | parcial | [workflow/impresion-y-hardware.md](workflow/impresion-y-hardware.md) |
 
 ## Cobertura contra la referencia
 
@@ -276,6 +277,7 @@ El detalle de cada flujo vive en `workflow/<área>.md`; este índice solo lo enu
 | Atrás de Android | hecho | F28 |
 | Enlace externo, guardar descarga | hecho / parcial | F29, F30 |
 | Actualización | parcial: sin actualización en el sitio | F31 |
+| Fichas del negocio fuera del autocompletado del sistema (Android) | hecho | F32 |
 | Báscula | no existe (hub#1217) | — |
 | Push (FCM) con la aplicación cerrada | no existe, por decisión (hub#2307) | F26 |
 | iOS | sin construir | — |
@@ -287,6 +289,7 @@ El detalle de cada flujo vive en `workflow/<área>.md`; este índice solo lo enu
   clave, MAC si se conoce, dirección, puerto, nombre, función, tipo, vistas por primera y última vez,
   en línea). Ninguno se sube al hub por sí solo.
 - **De Android**: el último toque de aviso recordado (`com.erplora.notice_taps`) y los permisos del sistema.
+  Nada de lo que se escribe en la ventana llega al autocompletado de Android (HUB_APP-F32).
 - **Del navegador integrado**, guardado en disco por origen: la sesión del hub (`erplora.hub_session`), el
   usuario con nombre y correo (`erplora.session`), los tokens de acceso y refresco de erplora.com
   (`erplora.access`, `erplora.refresh`), la memoria de «ya te pregunté» de los permisos
@@ -317,7 +320,8 @@ El detalle de cada flujo vive en `workflow/<área>.md`; este índice solo lo enu
   La aplicación enlaza por su cuenta el negocio recordado al arrancar; el destino de un enlace `erplora://hub/…`
   a otro negocio, solo cuando la persona contesta «Abrir» en el diálogo del sistema (ERPlora/hub#2644).
 - **Solo se recuerda o se abre por enlace** `<etiqueta>.erplora.com` (incluidos `www` y `pre`) o el bucle local
-  con cualquier puerto; al navegador del sistema también van el apex y `checkout.stripe.com`.
+  con cualquier puerto; al navegador del sistema también van el apex, `checkout.stripe.com` y, solo por su
+  ruta exacta, el cotejo del QR en las dos sedes de la AEAT (HUB_APP-F29).
 - **El enlace profundo se resuelve, no se abre**: la dirección se reconstruye desde el nombre.
 - **Una orden que no pudo hacerse se devuelve, no se traga** (abrir enlace, guardar, imprimir A4, NFC,
   Bluetooth, USB). También la impresora de red: espera a que el papel llegue a la impresora y, si no

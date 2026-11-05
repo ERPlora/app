@@ -262,7 +262,7 @@ de instalación: la ficha de Play sigue abierta a tabletas sin chip.
 Implicados: HUB-F134, HUB_SHELL-F05, HUB_SHELL-F87
 QA: ninguno
 
-### HUB_APP-F32 Leer en voz alta las respuestas del asistente con la voz del sistema (Android)
+### HUB_APP-F33 Leer en voz alta las respuestas del asistente con la voz del sistema (Android)
 Estado: parcial — la lectura en la tableta real no está validada todavía (ronda 2026-11-04a)
 Actor: responsable, empleado
 Pantalla: HUB_SHELL: Asistente

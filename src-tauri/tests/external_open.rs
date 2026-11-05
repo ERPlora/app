@@ -71,6 +71,99 @@ fn stripe_is_admitted_by_its_exact_checkout_host_only() {
     }
 }
 
+/// The QR check of a VeriFactu record, as the Hub builds it (`QR_HOSTS` + `QR_PATH` of
+/// `apps/verifactu/chain.py`): the real AEAT site for a production record, its test site for one
+/// born in testing. Nothing is transmitted: it is a public page the customer reaches by scanning the
+/// same QR, and without this the till could only say it could not open it (app#20).
+#[test]
+fn opens_the_aeat_qr_check_on_both_of_its_sites() {
+    for raw in [
+        "https://www2.agenciatributaria.gob.es/wlpl/TIKE-CONT/ValidarQR?nif=B12345674&numserie=T-1&fecha=03-11-2026&importe=12.10",
+        "https://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR?nif=B12345674&numserie=T-1&fecha=03-11-2026&importe=12.10",
+    ] {
+        assert_eq!(external_browser_url(raw).as_deref(), Some(raw));
+    }
+}
+
+/// Unlike `checkout.stripe.com`, these hosts are admitted by host AND path: the AEAT serves far more
+/// than the check under those two domains, and this door only has to lead to the check.
+#[test]
+fn the_aeat_sites_are_admitted_for_the_qr_check_path_only() {
+    for host in ["www2.agenciatributaria.gob.es", "prewww2.aeat.es"] {
+        for path in [
+            "/",
+            "/wlpl/",
+            "/wlpl/TIKE-CONT/",
+            // A neighbour of the check, and one that merely starts with its name.
+            "/wlpl/TIKE-CONT/ValidarQRNoVerifactu?nif=B12345674",
+            "/wlpl/OTRO-CONT/ValidarQR?nif=B12345674",
+            // Under it, or the same text with another spelling: not the exact path.
+            "/wlpl/TIKE-CONT/ValidarQR/",
+            "/wlpl/TIKE-CONT/ValidarQR/otra",
+            "/wlpl/TIKE-CONT/validarqr?nif=B12345674",
+            "/wlpl/TIKE-CONT/Validar%51R?nif=B12345674",
+            // Leaves the check once the parser resolves the dots, in both spellings.
+            "/wlpl/TIKE-CONT/ValidarQR/../Otra",
+            "/wlpl/TIKE-CONT/ValidarQR/%2e%2e/Otra",
+            // Encoded separators the parser keeps, for a server to decode as it likes.
+            "/wlpl/TIKE-CONT/ValidarQR%2F..%2FOtra",
+            // The check's path only in the query.
+            "/redirect?to=/wlpl/TIKE-CONT/ValidarQR",
+            // Doubled separators: the parser keeps them, and a server may or may not fold them.
+            "//wlpl/TIKE-CONT/ValidarQR?nif=B12345674",
+            "/wlpl//TIKE-CONT/ValidarQR?nif=B12345674",
+            "/wlpl/TIKE-CONT//ValidarQR?nif=B12345674",
+        ] {
+            let raw = format!("https://{host}{path}");
+            assert_eq!(external_browser_url(&raw), None, "{raw} must be refused");
+        }
+    }
+}
+
+#[test]
+fn the_aeat_qr_check_is_admitted_on_its_exact_hosts_https_and_default_port_only() {
+    for raw in [
+        // Other hosts of the same domains.
+        "https://agenciatributaria.gob.es/wlpl/TIKE-CONT/ValidarQR?nif=B12345674",
+        "https://sede.agenciatributaria.gob.es/wlpl/TIKE-CONT/ValidarQR?nif=B12345674",
+        "https://aeat.es/wlpl/TIKE-CONT/ValidarQR?nif=B12345674",
+        "https://www2.aeat.es/wlpl/TIKE-CONT/ValidarQR?nif=B12345674",
+        // Look-alikes of both hosts.
+        "https://www2.agenciatributaria.gob.es.evil.example/wlpl/TIKE-CONT/ValidarQR",
+        "https://evilwww2.agenciatributaria.gob.es/wlpl/TIKE-CONT/ValidarQR",
+        "https://prewww2.aeat.es.evil.example/wlpl/TIKE-CONT/ValidarQR",
+        "https://evilprewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR",
+        // Downgradeable trip.
+        "http://www2.agenciatributaria.gob.es/wlpl/TIKE-CONT/ValidarQR?nif=B12345674",
+        "http://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR?nif=B12345674",
+        // Credentials in front of the real host.
+        "https://support%40evil.example@www2.agenciatributaria.gob.es/wlpl/TIKE-CONT/ValidarQR",
+        "https://user:secret@prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR",
+        // The real host behind the attacker's credentials field, the classic the other way round.
+        "https://www2.agenciatributaria.gob.es@evil.example/wlpl/TIKE-CONT/ValidarQR",
+        // A port is another service of that machine, not the check.
+        "https://www2.agenciatributaria.gob.es:8443/wlpl/TIKE-CONT/ValidarQR?nif=B12345674",
+        "https://prewww2.aeat.es:8443/wlpl/TIKE-CONT/ValidarQR?nif=B12345674",
+    ] {
+        assert_eq!(external_browser_url(raw), None, "{raw} must be refused");
+    }
+}
+
+/// The path is checked on what the URL parser produced, and that is also what reaches the browser:
+/// neither a spelling of the host, nor the port https implies, nor dots that resolve back onto the
+/// check are a different address.
+#[test]
+fn the_aeat_qr_check_is_judged_and_opened_as_parsed() {
+    const CHECK: &str = "https://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR?nif=B12345674";
+    for raw in [
+        "HTTPS://PREWWW2.AEAT.ES/wlpl/TIKE-CONT/ValidarQR?nif=B12345674",
+        "https://prewww2.aeat.es:443/wlpl/TIKE-CONT/ValidarQR?nif=B12345674",
+        "https://prewww2.aeat.es/wlpl/TIKE-CONT/otra/../ValidarQR?nif=B12345674",
+    ] {
+        assert_eq!(external_browser_url(raw).as_deref(), Some(CHECK), "{raw}");
+    }
+}
+
 #[test]
 fn opens_the_development_loopback() {
     // `VITE_CLOUD_API_URL=http://127.0.0.1:8001` is how the shell is developed against a local
