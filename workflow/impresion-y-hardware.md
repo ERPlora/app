@@ -281,8 +281,9 @@ Pasos:
 Entra: el texto de la respuesta y su idioma.
 Sale: el audio por el altavoz del aparato; nada se guarda ni sale del aparato.
 Si falla: sin motor o sin voz del idioma (`tts_unavailable`), el botón no aparece (salvo que el negocio
-tenga voces del servidor, que leen ellas), y la página vuelve a preguntar: un motor instalado o encendido
-después lee sin reiniciar la aplicación. Si el motor falla leyendo (`tts_failed`), la página lo dice bajo
+tenga voces del servidor, que leen ellas). La aplicación contesta de nuevo cada vez que se le pregunta, pero la
+página (`nativeVoice.ts`, ui#76) pregunta una sola vez por idioma mientras esté cargada: un motor instalado o encendido
+después lee tras cerrar y volver a abrir la aplicación. Si el motor falla leyendo (`tts_failed`), la página lo dice bajo
 la respuesta: «No se ha podido leer la respuesta en voz alta. Inténtalo de nuevo.». En ordenador la
 aplicación contesta que no tiene voz del sistema y lee la voz del navegador (en Windows, WebView2 lee con
 las voces de Windows). Desde Android 11 la aplicación solo ve el motor porque el manifiesto declara la
