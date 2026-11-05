@@ -50,7 +50,19 @@ class SystemVoiceTest {
 
     private val engines = mutableListOf<FakeEngine>()
     private var maxInput = 4000
-    private val voice = SystemVoice { events -> FakeEngine(events, maxInputLength = maxInput).also { engines += it } }
+
+    /**
+     * With no engine it can bind to, `TextToSpeech` answers ERROR from INSIDE its own constructor
+     * (`initTts` → `dispatchOnInit`, with no executor in the public constructors), so `ready(false)`
+     * reaches the voice before the engine it belongs to has been handed over.
+     */
+    private var failsWhileBeingMade = false
+    private val voice = SystemVoice { events ->
+        FakeEngine(events, maxInputLength = maxInput).also {
+            engines += it
+            if (failsWhileBeingMade) events.ready(false)
+        }
+    }
     private val engine get() = engines.last()
 
     private fun speak(text: String, language: String = "es-ES"): Answers {
@@ -104,6 +116,40 @@ class SystemVoiceTest {
         // An engine installed later (or a service that came back) gets its chance.
         speak("Hola")
         assertEquals(2, engines.size)
+    }
+
+    @Test
+    fun `an engine that fails while being made refuses at once and shuts down`() {
+        failsWhileBeingMade = true
+        val answers = speak("Hola")
+        assertEquals(listOf(SystemVoice.TTS_UNAVAILABLE), answers.failed)
+        assertEquals(0, answers.done.size)
+        assertTrue(engines.single().shut, "the engine that never started is released, not forgotten")
+    }
+
+    @Test
+    fun `every request after an engine failed while being made is answered too`() {
+        // The Rust side blocks on the answer: a request kept waiting for a dead engine never returns.
+        failsWhileBeingMade = true
+        val first = mutableListOf<Boolean>()
+        voice.available("es-ES") { first += it }
+        val second = mutableListOf<Boolean>()
+        voice.available("en-US") { second += it }
+        assertEquals(listOf(false), first)
+        assertEquals(listOf(false), second)
+        assertEquals(2, engines.size, "each request gets a new try: an engine may have been installed since")
+    }
+
+    @Test
+    fun `an engine installed after one failed while being made reads`() {
+        failsWhileBeingMade = true
+        speak("Hola")
+        failsWhileBeingMade = false
+        val answers = speak("Otra")
+        ready()
+        assertEquals(listOf("Otra"), engine.spoken.map { it.first })
+        engine.events.done(engine.spoken.single().third)
+        assertEquals(1, answers.done.size)
     }
 
     // ── The language ────────────────────────────────────────────────────────────────────────

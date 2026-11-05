@@ -128,7 +128,12 @@ class SystemVoice(private val open: (SpeechEvents) -> SpeechEngine) {
         waiting += action
         if (current == null) {
             generation += 1
-            engine = open(Events(generation))
+            val mine = generation
+            val made = open(Events(mine))
+            // With nothing to bind to, `TextToSpeech` answers ERROR from inside its own constructor:
+            // [release] already ran, with no engine to release. Kept, this dead one would leave every
+            // later request waiting for a `ready` that never comes.
+            if (mine == generation) engine = made else made.shutdown()
         }
     }
 
