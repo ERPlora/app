@@ -140,7 +140,9 @@ landing no ofrece APK: el endpoint de descarga del SaaS hace **redirect 302** a 
   `crates/tauri-plugin-erplora-android/android/src/main/`, y el de `src-tauri/gen/android`): son la
   fuente, consúltalos en vez de fiarte de una lista aquí. Los que exigen algo en Play Console, en
   «Formularios de Play que dependen de un permiso». El servicio en primer plano que ADR-0196 §2
-  había retirado volvió con hub#2307.
+  había retirado volvió con hub#2307 y se quitó otra vez en la 1.1.34 (ERPlora/app#23): el Hub no lo
+  encendía y Play no publica una versión con ese permiso sin declararlo con un vídeo. Vuelve con
+  ERPlora/hub#836.
 
 ## Formularios de Play que dependen de un permiso
 
@@ -169,8 +171,12 @@ revisión la versión que lo lleva: sin ello Google la rechaza o la para. Lo hac
   `RECORD_AUDIO` no está en el formulario de permisos sensibles (*Permissions declaration*): no hay
   nada más que declarar. El manifiesto lo acompaña de `android.hardware.microphone` con
   `required="false"`; sin eso Play ocultaría la app a los equipos sin micrófono.
-- **Servicio en primer plano** (`FOREGROUND_SERVICE_SPECIAL_USE`, hub#2307): *App content › Foreground
-  service permissions*, uso `specialUse` con su descripción y un vídeo (hub#2421).
+- **Servicio en primer plano**: hoy **no hay nada que declarar**. La app no lleva ninguno desde la 1.1.34
+  (ERPlora/app#23) y la release se para antes de publicar si uno llega al APK
+  (`scripts/ci/apk-foreground-service-guard.sh`; en el código, `no_manifest_declares_a_foreground_service_app23`).
+  Cuando vuelva con ERPlora/hub#836 (`FOREGROUND_SERVICE_SPECIAL_USE`, tipo `specialUse`): *App content ›
+  Foreground service permissions*, uso `specialUse` con su descripción y un vídeo del servicio funcionando
+  (hub#2421), y en la misma PR se quitan esos dos guardianes.
 
 ## Cableado
 

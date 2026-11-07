@@ -39,8 +39,9 @@ android {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
-    // `AppCompatActivity` in `Plugin.onDestroy(activity)` (hub#2307). The same version the Tauri SDK
-    // already puts in the app, so the APK carries nothing new.
+    // `AppCompatActivity` in `Plugin.onDestroy(activity)`, where the system voice shuts down (round
+    // 2026-11-04a). The same version the Tauri SDK already puts in the app, so the APK carries
+    // nothing new.
     implementation("androidx.appcompat:appcompat:1.6.0")
     // `WebViewCompat.getWebChromeClient` (WebPermissionGate): the platform getter is API 26, the
     // app starts at 24. Same version the app module already ships, so nothing new reaches the APK.

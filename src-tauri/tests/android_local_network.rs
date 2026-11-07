@@ -60,11 +60,8 @@ const REQUIRED: &[&str] = &[
     // permission — no dialog, so it is not in `PermissionPolicy` — but the same "declared or
     // nothing" rule applies: without it `enableReaderMode` throws and a tablet cannot enrol a card.
     "android.permission.NFC",
-    // Staying alive to hear the next notice with the screen off (hub#2307). Both are install-time
-    // `normal` permissions, so there is no dialog either; but without them `startForeground`
-    // throws a SecurityException and Android freezes the page the moment the screen goes dark.
-    "android.permission.FOREGROUND_SERVICE",
-    "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
+    // No FOREGROUND_SERVICE* here on purpose: the app declares none since 1.1.34 (ERPlora/app#23,
+    // `no_manifest_declares_a_foreground_service_app23` below).
     // A module asking where the device is (hub#2552); the first one is `attendance`, which can
     // require the employee to clock in near the venue. RUNTIME permissions: wry's
     // `RustWebChromeClient.onGeolocationPermissionsShowPrompt` asks for them when a page calls
@@ -417,4 +414,98 @@ fn the_dictation_permissions_are_declared_in_both_manifests() {
             );
         }
     }
+}
+
+// ── No foreground service until the Hub turns one on (app#23) ───────────────────────────────────
+
+/// What Google Play refuses to take a build with until it is declared, with a video of the feature
+/// running (app#23): any `FOREGROUND_SERVICE*` permission — the general one and its typed variants
+/// (`_SPECIAL_USE`, `_DATA_SYNC`, …). The 1.1.33 got stuck there with a service the Hub never
+/// started. It comes back with the Hub's half (ERPlora/hub#836), the video and the declaration.
+const FOREGROUND_SERVICE_PERMISSION: &str = "android.permission.FOREGROUND_SERVICE";
+
+/// Everything in a manifest that makes it declare a foreground service: the permissions, a
+/// `<service>` with a type and the `specialUse` subtype Play reviews. Read as live tags, outside
+/// comments, so the prose that explains why there is none does not count as one.
+fn foreground_service_declarations(manifest: &str) -> Vec<String> {
+    let live = without_comments(manifest);
+    let mut found: Vec<String> = declared_permissions(manifest)
+        .into_iter()
+        .filter(|permission| permission.starts_with(FOREGROUND_SERVICE_PERMISSION))
+        .collect();
+    for marker in ["android:foregroundServiceType", "android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"] {
+        if live.contains(marker) {
+            found.push(marker.to_string());
+        }
+    }
+    found
+}
+
+#[test]
+fn the_foreground_service_guard_catches_the_declaration_the_1_1_33_shipped() {
+    // The guard has to see the positive before it may certify the negative: this is the shape the
+    // plugin manifest had in 1.1.33, and a commented-out copy of it, which declares nothing.
+    let shipped = r#"<manifest>
+        <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+        <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+        <application>
+            <service android:name="com.erplora.android.NoticeListeningService"
+                android:exported="false" android:foregroundServiceType="specialUse">
+                <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="x" />
+            </service>
+        </application>
+    </manifest>"#;
+    assert_eq!(
+        foreground_service_declarations(shipped),
+        [
+            "android.permission.FOREGROUND_SERVICE",
+            "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
+            "android:foregroundServiceType",
+            "android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE",
+        ]
+    );
+    let commented = format!("<manifest><!-- {shipped} --></manifest>");
+    assert!(foreground_service_declarations(&commented).is_empty());
+}
+
+// Regression test for ERPlora/app#23
+#[test]
+fn no_manifest_declares_a_foreground_service_app23() {
+    let plugin = fs::read_to_string(plugin_manifest_path()).expect("the plugin manifest");
+    for (label, manifest) in [("gen/android", APP_MANIFEST), ("plugin", plugin.as_str())] {
+        let found = foreground_service_declarations(manifest);
+        assert!(
+            found.is_empty(),
+            "the {label} manifest declares a foreground service again: {found:?}. Google Play \
+             refuses every build with one until it is declared with a video of it running, and \
+             nothing turns it on until the Hub ports its half (ERPlora/hub#836). Put it back only \
+             together with that, the video and the Play declaration (ERPlora/app#23)."
+        );
+    }
+}
+
+// Regression test for ERPlora/app#23
+#[test]
+fn the_release_build_refuses_an_apk_that_declares_a_foreground_service_app23() {
+    // The source manifests are not the whole story: the merger folds in every library the app
+    // links, and the one manifest Play reads is the MERGED one, inside the built APK. The release
+    // job reads it back with the guard, after the build and before anything is published.
+    let build_android = RELEASE_WORKFLOW
+        .split("\n  build-android:")
+        .nth(1)
+        .and_then(|rest| rest.split("\n  collect:").next())
+        .expect("the release workflow has no build-android job before collect");
+    let after_build = build_android
+        .split("run: cargo tauri android build --apk --aab")
+        .nth(1)
+        .expect("the build-android job no longer builds the APK and the AAB");
+    assert!(
+        after_build.contains("./scripts/ci/apk-foreground-service-guard.sh \"$APK\""),
+        "the release job never reads the built APK back for a foreground service, so one folded in \
+         by the merger would reach Google Play and stop the release there (ERPlora/app#23)"
+    );
+    assert!(
+        !after_build.contains(&format!("{FOREGROUND_SERVICE_PERMISSION} ")),
+        "the release job still REQUIRES a foreground-service permission on the APK"
+    );
 }

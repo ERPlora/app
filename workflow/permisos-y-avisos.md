@@ -27,7 +27,7 @@ Entra: la operación y la lista de permisos que Android conoce en esta versión:
 anteriores no se pide lo que no existe (en algunos fabricantes colgaría el diálogo).
 Sale: el estado real de cada permiso; un «no» **se contesta, no se rechaza**: sin impresora el TPV tiene
 que seguir vendiendo; un «no» al micrófono deja el dictado sin empezar y el hub dice que el micrófono está
-denegado. El NFC y el servicio en primer plano son permisos de instalación: no hay diálogo. Un dispositivo
+denegado. El NFC es un permiso de instalación: no hay diálogo. Un dispositivo
 sin micrófono puede instalar la aplicación: no se exige.
 Si falla: sin el permiso de red local el barrido y el envío a la red son tiempos de espera, no errores
 (Android los bloquea por debajo de la API): sin protección parecería «no hay impresoras» (HUB_APP-F13).
@@ -125,32 +125,33 @@ Implicados: HUB_SHELL-F64, HUB_SHELL-F67, KITCHEN-F05
 QA: ninguno
 
 ### HUB_APP-F26 Seguir a la escucha con la pantalla apagada (Android)
-Estado: parcial — solo se mantiene a la escucha si hay sesión, el hub tiene cocina, citas o un contador en la campana y los avisos no están negados: la tablet de cocina sí escucha, pero un puesto de bar o de caja en un hub sin cocina, sin citas y sin contador se congela con la pantalla apagada; negar los avisos después en los ajustes de Android no apaga la escucha; y si el sistema mata el proceso no vuelve sola
+Estado: no hecho — la 1.1.34 quitó el servicio en primer plano (ERPlora/app#23): el Hub nuevo no lo encendía nunca (`keep_listening` no está en ERPlora/hub ni en ERPlora/ui) y Google Play no publica una versión con sus permisos sin una declaración y un vídeo del servicio funcionando. Vuelve con la parte de la página (ERPlora/hub#836)
 Actor: sistema
 Pantalla: Aviso del sistema
 Pasos:
-1. Decisión vigente (ERPlora/hub#2307): **no hay push**; los avisos con la pantalla apagada van por tener la
-   aplicación escuchando durante el turno.
-2. Con sesión iniciada, algo que avisar (cocina, citas o un módulo con contador en la campana) y los avisos
-   no negados, la página pide mantener la aplicación a la escucha con las palabras de la notificación en
-   el idioma del hub.
-3. Android arranca un servicio en primer plano y muestra la notificación permanente «ERPlora está a la
-   escucha». Mientras dura, la aplicación mantiene viva la página: la desbloquea cuando la pantalla se
-   apaga o la aplicación pasa al fondo (sin ello Chromium la congela al minuto) y los avisos de la
-   comanda y la cita siguen llegando.
-4. Al cerrar la sesión (`isAuthed=false`, `stopListeningWhenSignedOut` en `main.ts`), al cambiar de negocio o al
-   olvidar uno borrado (antes de olvidarlo, HUB_APP-F04 y F05), al destruirse la actividad o al cerrar la aplicación
-   desde recientes, se para. **No** se para al negar los avisos después.
-Entra: la petición de la página (activar con textos o desactivar).
-Sale: el servicio y su notificación silenciosa, sin sonido ni insignia. No se reinicia solo
-(`START_NOT_STICKY`): lo reabre la página al abrir la aplicación.
-Si falla: Android 12 o posterior no deja arrancar un servicio en primer plano desde el segundo plano: la
-orden rechaza y los avisos siguen funcionando con la aplicación en pantalla. Sin los permisos de servicio
-(Android 14) lanza error. En ordenador no se necesita: la aplicación no se duerme mientras esté abierta.
-Una página que no es el negocio enlazado no puede encender ni apagar la escucha: recibe `not_the_linked_hub`
-(HUB_APP-F10, ERPlora/hub#2642).
+1. Decisión vigente (ERPlora/hub#2307): **no hay push**; los avisos con la pantalla apagada irán por tener la
+   aplicación escuchando durante el turno, como las aplicaciones de pedidos para comercios.
+2. Hoy, con la pantalla apagada o la aplicación en segundo plano, Android la congela a los pocos minutos y los
+   avisos de la comanda, la cita o la campana llegan cuando alguien vuelve a abrirla. Con la aplicación en
+   pantalla llegan al momento (HUB_APP-F24).
+3. Lo que falta, para cuando entre ERPlora/hub#836: con sesión iniciada, algo que avisar y los avisos no
+   negados, la página pide mantener la aplicación a la escucha con las palabras de la notificación en el
+   idioma del hub; Android arranca un servicio en primer plano `specialUse` con la notificación permanente
+   «ERPlora está a la escucha», la aplicación mantiene viva la página con la pantalla apagada, y todo se para
+   al cerrar la sesión, cambiar de negocio, destruirse la actividad o cerrar la aplicación desde recientes.
+4. Volver a ponerlo es un solo cambio, juntos: el servicio y sus dos permisos (`FOREGROUND_SERVICE`,
+   `FOREGROUND_SERVICE_SPECIAL_USE`) con su `PROPERTY_SPECIAL_USE_FGS_SUBTYPE` en el manifiesto del plugin, la
+   orden de la página en el Hub, el vídeo y la declaración en Play (`GOOGLE-PLAY.md`), y quitar los dos
+   guardianes de abajo. La versión que lo quitó es el punto de partida (`git log -- '*NoticeListening.kt'`).
+Entra: nada; la aplicación no ofrece la orden de quedarse a la escucha.
+Sale: ningún servicio en primer plano ni notificación permanente. El manifiesto final, el del APK, no declara
+ningún permiso `FOREGROUND_SERVICE*`, ningún servicio con tipo ni el subtipo `specialUse`.
+Si falla: si uno de ellos vuelve a un manifiesto (el nuestro o el que trae una librería al fusionarlos), el test
+`no_manifest_declares_a_foreground_service_app23` y el paso «Check no foreground service on the APK» de la
+release (`scripts/ci/apk-foreground-service-guard.sh`) se ponen en rojo antes de publicar en ningún canal. En
+ordenador no hace falta: la aplicación no se duerme mientras esté abierta.
 Implicados: HUB-F60, HUB_SHELL-F69, HUB_SHELL-F139
-QA: qa-hub-android Pendiente (pantalla apagada y segundo plano)
+QA: ninguno — no hay comportamiento que probar hasta ERPlora/hub#836
 
 ### HUB_APP-F32 Lo que se escribe en la ventana no va al autocompletado del sistema (Android)
 Estado: hecho

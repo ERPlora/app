@@ -101,8 +101,7 @@ Pantalla: HUB_SHELL: Barra superior
 Pasos:
 1. Dentro de la aplicación (no en un navegador), pulsa el icono «Cambiar de negocio».
 2. Lee «¿Cambiar de negocio?» y confirma con «Cambiar» (o «Cancelar», o toca fuera: es un no).
-3. Antes de olvidar nada, la aplicación cierra la sesión de verdad (ERPlora/hub#2503), en este orden: en
-   Android deja de estar a la escucha (HUB_APP-F26), mientras la página aún es el negocio enlazado; el hub
+3. Antes de olvidar nada, la aplicación cierra la sesión de verdad (ERPlora/hub#2503), en este orden: el hub
    revoca la sesión (espera su respuesta hasta 5 s: si no contesta, se sigue igual); y se borran del
    dispositivo la sesión, el nombre y el correo de la persona y sus credenciales de erplora.com.
 4. Solo entonces olvida el negocio recordado y lleva la ventana a la lista de negocios del SaaS
@@ -112,8 +111,7 @@ Pasos:
 Entra: la confirmación de la persona.
 Sale: la sesión revocada en el hub; en el almacenamiento del origen del negocio anterior ya no quedan el token
 de sesión del hub, el usuario con nombre y correo ni los tokens de acceso y refresco de erplora.com
-(`signOutAndForgetHub` en `change-hub.ts`, el mismo camino que el 410 de HUB_APP-F05); la escucha de Android
-apagada; el fichero `hub.url` borrado y el negocio desenlazado (ninguna página maneja el hardware hasta elegir
+(`signOutAndForgetHub` en `change-hub.ts`, el mismo camino que el 410 de HUB_APP-F05); el fichero `hub.url` borrado y el negocio desenlazado (ninguna página maneja el hardware hasta elegir
 otro). **Se conserva `device.id`** (ancla de la sesión única por dispositivo): reasignar una caja a otro
 local no obliga a desinstalar (en Android, desinstalar lo destruiría).
 Si falla: un hub que no contesta a la revocación no retiene a la persona: a los 5 s se sigue (lo local ya está
@@ -132,7 +130,7 @@ Pasos:
 2. Si contesta 404 o 410 (el negocio se borró), la aplicación olvida `hub.url`, lo desenlaza y lleva la
    ventana al SaaS. Cualquier otra respuesta —viva, sin sesión, caída— o ningún contacto: lo conserva.
 3. Además, si estando dentro el Cloud contesta 410 «negocio no encontrado», el hub cierra la sesión como en
-   HUB_APP-F04 (escucha de Android apagada, sesión revocada, credenciales borradas) y solo después pide olvidar
+   HUB_APP-F04 (sesión revocada, credenciales borradas) y solo después pide olvidar
    (`forget_hub` sin lista forzada); como `forget_hub` navega toda la ventana, la persona acaba en `/shell/` del
    SaaS, no en el acceso del hub (en un navegador, en el acceso del hub).
 Entra: el `hub.url` y la respuesta del negocio.
@@ -174,8 +172,8 @@ Pasos:
 1. Cada vez que la ventana enseña una página, Tauri comprueba el origen contra los tres juegos de «Qué
    puede hacer cada página» (primera puerta, por patrón).
 2. Una orden nativa desde un origen que no la tiene concedida se rechaza antes de ejecutarse.
-3. Si la pasa y es una orden de la aplicación, del plugin de Android (`plugin:erplora-android`: permisos, escucha,
-   salir de la aplicación, abrir sus ajustes; ERPlora/hub#2642) o del plugin de avisos (`plugin:notification`:
+3. Si la pasa y es una orden de la aplicación, del plugin de Android (`plugin:erplora-android`: permisos, voz del
+   sistema, salir de la aplicación, abrir sus ajustes; ERPlora/hub#2642) o del plugin de avisos (`plugin:notification`:
    escuchar los toques; ERPlora/hub#2658), la segunda puerta (`src/hub_link.rs`) mira el origen de la
    página que enseña la ventana: si no es el del negocio enlazado, **o esa página aún no ha terminado de
    cargar** tras llegar desde otro origen, contesta `not_the_linked_hub` sin ejecutarla. La espera existe
@@ -197,7 +195,7 @@ Si falla: un origen fuera de la plataforma no puede pedir `device_context`; el a
 hardware; otro negocio, la web pública, el entorno de pruebas o el bucle local no lo tocan si no son el
 negocio enlazado; sin estado de enlace o sin poder leer la dirección de la página, la puerta se cierra; una
 página que manda la ventana al negocio enlazado y pide el hardware antes de que este cargue recibe
-`not_the_linked_hub`; otra página que pide los permisos de Android, encender la escucha o sacar a la persona de
+`not_the_linked_hub`; otra página que pide los permisos de Android, la voz del sistema o sacar a la persona de
 la aplicación recibe `not_the_linked_hub` y Android no enseña nada; otra página no oye los toques de los avisos
 ni lee la versión de la aplicación (`not_the_linked_hub`), y la página del negocio enlazado que se suscribe a los
 toques o pide la versión antes de terminar de cargar lo reintenta hasta unos 8 s después de su `load` (y si esa carga no llega a terminar, el negocio queda sin hardware hasta la siguiente
