@@ -508,4 +508,28 @@ fn the_release_build_refuses_an_apk_that_declares_a_foreground_service_app23() {
         !after_build.contains(&format!("{FOREGROUND_SERVICE_PERMISSION} ")),
         "the release job still REQUIRES a foreground-service permission on the APK"
     );
+    // Present is not enough: an `if:` on the step, or anything after the call (`|| true`, a `true`
+    // on the next line), keeps the check in the file and lets the APK through to every channel.
+    // `continue-on-error` is refused for the whole workflow by `tauri-release-workflow.test.sh`.
+    let step = after_build
+        .split("\n      - name: Check no foreground service on the APK\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n      - name:").next())
+        .expect("the build-android job has no «Check no foreground service on the APK» step after the build");
+    assert!(
+        !step.contains("\n        if:") && !step.starts_with("        if:"),
+        "the foreground-service check on the APK can be skipped (`if:`), so nothing stops an APK \
+         with one from reaching Google Play (ERPlora/app#23)"
+    );
+    let last_command = step
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .last();
+    assert_eq!(
+        last_command,
+        Some(r#"AAPT="$AAPT" ./scripts/ci/apk-foreground-service-guard.sh "$APK""#),
+        "the guard is not the last command of its step, so its exit code is not the step's: an APK \
+         with a foreground service would pass the check (ERPlora/app#23)"
+    );
 }
