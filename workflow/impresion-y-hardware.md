@@ -119,7 +119,7 @@ Implicados: HUB-F196, HUB-F197, HUB_PERIPHERALS-F04, PRINTING-F04
 QA: qa-hub §8
 
 ### HUB_APP-F18 Ser el puesto que imprime
-Estado: parcial — el puesto solo imprime mientras la ventana está viva (no hay icono de bandeja ni nada que la mantenga al cerrarla) y, en Android, mientras el sistema no la congele (HUB_APP-F26 solo lo evita si hay algo que avisar y los avisos no están negados); una función quitada en el hub no la retira este puesto
+Estado: parcial — el puesto solo imprime mientras la ventana está viva (no hay icono de bandeja ni nada que la mantenga al cerrarla) y, en Android, mientras el sistema no la congele (nada lo evita desde la 1.1.34: HUB_APP-F26 no hecho, ERPlora/app#23); una función quitada en el hub no la retira este puesto
 Actor: sistema
 Pantalla: ninguna
 Pasos:

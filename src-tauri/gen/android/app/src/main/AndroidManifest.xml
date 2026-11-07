@@ -46,12 +46,9 @@
          and the badge keeps arriving through the USB reader. -->
     <uses-feature android:name="android.hardware.nfc" android:required="false" />
 
-    <!-- Hearing the next notice with the screen off (hub#2307): the foreground service
-         `NoticeListeningService`, declared (with its `specialUse` type) in the plugin manifest,
-         which the merger folds in. Install-time permissions; without them `startForeground`
-         throws on Android 14+. -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- No foreground service and none of its permissions (ERPlora/app#23): Google Play refuses
+         the build until one is declared with a video, and the Hub never started the one the app
+         had (hub#2307). It comes back with ERPlora/hub#836; see the plugin manifest. -->
 
     <!-- Where the device is, for a module that calls `navigator.geolocation` (hub#2552); first
          consumer: the `attendance` module (clock-in near the venue). Runtime permissions, asked

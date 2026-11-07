@@ -78,9 +78,10 @@ decide:
 - **no existe** y no es mayor (o no es `X.Y.Z`, o minor/patch ≥ 1000) → **rojo** con el motivo: la
   Store y Play solo aceptan versiones crecientes y el `versionCode` es `major·10⁶ + minor·10³ + patch`.
 
-Para publicar: subir `version` en `src-tauri/tauri.conf.json` (hoy 1.1.33, la que saca las fichas
-del hub del autocompletado de Android: app#15; la 1.1.32 llevó a Google Play el acceso por `/launch` de
-app#5 y app#6, porque la 1.1.31 salió con Play apagado: app#11; la siguiente es 1.1.34 o mayor) y
+Para publicar: subir `version` en `src-tauri/tauri.conf.json` (hoy 1.1.34, la que quita el servicio en
+primer plano que Google Play no dejaba publicar sin declararlo con un vídeo: app#23; la 1.1.33 sacó las
+fichas del hub del autocompletado de Android: app#15; la 1.1.32 llevó a Google Play el acceso por `/launch`
+de app#5 y app#6, porque la 1.1.31 salió con Play apagado: app#11; la siguiente es 1.1.35 o mayor) y
 hacer push a `main`. **La versión se sube a mano**, nada la incrementa solo, y ese push es lo único que
 hace falta: un push a `main` sin cambio de versión no publica nada, tampoco en un canal que se acaba de
 encender (`GOOGLE-PLAY.md`, paso 4).
@@ -186,8 +187,9 @@ SHA y comentario a la vez.
 
 Contratos: `scripts/tests/tauri-release-workflow.test.sh`, `scripts/tests/test-shell-workflow.test.sh`,
 `scripts/release-version.test.sh`, `scripts/release-gate.test.sh`, `scripts/tests/require-config.test.sh`,
-`scripts/tests/s3-version-guard.test.sh` y los tests Rust `release_gate.rs`,
-`release_runner_assumptions.rs`, `app_update_channel.rs`.
+`scripts/tests/s3-version-guard.test.sh`, `scripts/tests/apk-foreground-service-guard.test.sh` (el APK no
+declara ningún servicio en primer plano: app#23) y los tests Rust `release_gate.rs`,
+`release_runner_assumptions.rs`, `app_update_channel.rs`, `android_local_network.rs`.
 
 ## Secrets y variables de la CI (solo nombres)
 

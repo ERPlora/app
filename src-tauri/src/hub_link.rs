@@ -6,8 +6,8 @@
 //! — another business's hub, the public website, the test SaaS — and this module is the second
 //! gate, in front of the app's own commands, of the Android plugin's (hub#2642) and of the
 //! notification plugin's (hub#2658): the printer, the drawer, the card reader, the way out to the
-//! browser, the Downloads folder, Android's permission dialogs, the listening service, the way out
-//! of the app and the taps on the notices answer only the page whose ORIGIN is the linked hub.
+//! browser, the Downloads folder, Android's permission dialogs, the system voice, the way out of
+//! the app and the taps on the notices answer only the page whose ORIGIN is the linked hub.
 //!
 //! The link itself needs the same care, or the gate is one navigation away from moot: any page
 //! the window shows could navigate to its own address with `?shell=1` and become "the hub". So a
@@ -185,8 +185,8 @@ pub fn linked_hub_only<R: Runtime>(invoke: &Invoke<R>) -> Result<(), &'static st
     Err(NOT_THE_LINKED_HUB)
 }
 
-/// The Android plugin (`plugin:erplora-android`: Android's permissions, the listening service, the
-/// way out of the app) as `run` registers it — behind the same gate as the app's own commands.
+/// The Android plugin (`plugin:erplora-android`: Android's permissions, the system voice, the way
+/// out of the app) as `run` registers it — behind the same gate as the app's own commands.
 pub fn android_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri_plugin_erplora_android::init(linked_hub_only::<R>)
 }
@@ -595,10 +595,9 @@ mod tests {
     // erplora.com — so what is measured is the second gate alone. On a computer the plugin answers
     // without Android (an empty permission map, nothing to leave), which is what "it ran" reads as.
 
-    const ANDROID_COMMANDS: [&str; 8] = [
+    const ANDROID_COMMANDS: [&str; 7] = [
         "check_permissions",
         "request_permissions",
-        "keep_listening",
         "leave_app",
         "open_app_settings",
         "tts_available",
@@ -630,10 +629,9 @@ mod tests {
     }
 
     /// What each Android command answers on a computer when it runs, with the arguments the shell
-    /// sends (`keep_listening` needs its `on`; the system voice, its text and language).
+    /// sends (the system voice needs its text and language).
     fn ask_android(till: &Till, command: &str) -> Result<serde_json::Value, serde_json::Value> {
         let body = match command {
-            "keep_listening" => serde_json::json!({ "on": false }),
             "tts_available" => serde_json::json!({ "language": "es-ES" }),
             "tts_speak" => serde_json::json!({ "text": "Hola", "language": "es-ES" }),
             _ => serde_json::json!({}),
@@ -690,7 +688,7 @@ mod tests {
     }
 
     #[test]
-    fn another_business_cannot_keep_the_till_listening_nor_send_the_person_out() {
+    fn another_business_cannot_ask_for_android_permissions_nor_send_the_person_out() {
         let till = till_with_the_android_plugin(
             "https://otronegocio.a.erplora.com/m/sales",
             Some(linked_to_the_hub()),
