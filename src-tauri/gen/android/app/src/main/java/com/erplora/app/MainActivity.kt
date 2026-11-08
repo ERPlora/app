@@ -6,6 +6,7 @@ import android.view.View
 import androidx.activity.enableEdgeToEdge
 import com.erplora.android.AutofillOptOut
 import com.erplora.android.NoticeTaps
+import com.erplora.android.ScreenOn
 import com.erplora.android.SystemBarInsets
 
 class MainActivity : TauriActivity() {
@@ -26,6 +27,7 @@ class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+    ScreenOn.apply(window::addFlags)
     SystemBarInsets.applyTopSystemBarPadding(findViewById<View>(android.R.id.content))
   }
 
