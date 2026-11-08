@@ -42,12 +42,17 @@ Pasos:
    (desde ahora es el único que usa el hardware, HUB_APP-F10), recuerda **el origen** de esa dirección y abre
    el negocio a pantalla completa, sin barra de direcciones.
 5. Cierra y vuelve a abrir: entra directa en el negocio, sin pasar por el SaaS.
+6. En Android, con la aplicación visible en primer plano, la pantalla no se apaga sola por inactividad.
+   El botón físico la apaga como siempre y, al pasar la aplicación a segundo plano, Android vuelve a decidir
+   cuándo apagarla. No hay un ajuste para desactivar este comportamiento.
 Entra: la cuenta del SaaS; la dirección del negocio. Solo se recuerda `<etiqueta>[.<etiqueta>…].erplora.com`
 (**incluye `www` y `pre`, que son el SaaS, y cualquier subdominio**; el apex `erplora.com` no) o el bucle local
 (`127.0.0.1`/`localhost`, `http` o `https`, **cualquier puerto**), también en la copia de producción.
 Sale: el origen en el fichero `hub.url` de la carpeta de datos de la aplicación, y el identificador de
 instalación `device.id` la primera vez (HUB_APP-F06). Una sola escritura por cambio. No se guarda
-ninguna contraseña ni sesión aquí: la sesión vive en la ventana (almacenamiento del origen del hub).
+ninguna contraseña ni sesión aquí: la sesión vive en la ventana (almacenamiento del origen del hub). En Android,
+la ventana lleva `FLAG_KEEP_SCREEN_ON`, sin permisos nuevos ni servicio en primer plano: Android aplica la
+bandera solo mientras esa ventana está visible.
 Si falla: una página que se lleva a sí misma, o a otro negocio, con `?shell=1` sin venir del SaaS (la web
 pública, otro negocio) **no se enlaza ni se recuerda**: el negocio enlazado sigue siendo el que era
 (ERPlora/hub#2504). Un destino que no es de la plataforma (el marcador viene de un enlace ajeno) **no se
@@ -55,7 +60,7 @@ recuerda** y no queda rastro (la aplicación no instala ningún destino para sus
 filtro se revalida al leerlo y, si no vale, se arranca en el SaaS. Sin red, HUB_APP-F11. Un negocio con
 dominio propio no tiene hardware en la aplicación (ver «Qué puede hacer cada página»).
 Implicados: HUB_SHELL-F02, REC_ALTA-F16, SAAS_AUTH-F19, SAAS_DASHBOARD-F02, SAAS_DASHBOARD-F07, SAAS_PUBLIC-F78
-QA: qa-hub-android Fase 0, qa-hub-android Fase 1
+QA: qa-hub-android Fase 0, qa-hub-android Fase 1; qa-hub-android Pendiente (tras la release, con la tablet desbloqueada: superar el tiempo de apagado en primer plano, pasar a segundo plano y comprobar el botón físico)
 
 ### HUB_APP-F03 Abrir un negocio desde un enlace
 Estado: hecho

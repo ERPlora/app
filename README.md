@@ -78,10 +78,11 @@ decide:
 - **no existe** y no es mayor (o no es `X.Y.Z`, o minor/patch ≥ 1000) → **rojo** con el motivo: la
   Store y Play solo aceptan versiones crecientes y el `versionCode` es `major·10⁶ + minor·10³ + patch`.
 
-Para publicar: subir `version` en `src-tauri/tauri.conf.json` (hoy 1.1.34, la que quita el servicio en
-primer plano que Google Play no dejaba publicar sin declararlo con un vídeo: app#23; la 1.1.33 sacó las
-fichas del hub del autocompletado de Android: app#15; la 1.1.32 llevó a Google Play el acceso por `/launch`
-de app#5 y app#6, porque la 1.1.31 salió con Play apagado: app#11; la siguiente es 1.1.35 o mayor) y
+Para publicar: subir `version` en `src-tauri/tauri.conf.json` (hoy 1.1.35, la que mantiene la pantalla
+encendida con la app Android en primer plano: app#26; la 1.1.34 quitó el servicio en primer plano que
+Google Play no dejaba publicar sin declararlo con un vídeo: app#23; la 1.1.33 sacó las fichas del hub del
+autocompletado de Android: app#15; la 1.1.32 llevó a Google Play el acceso por `/launch` de app#5 y app#6,
+porque la 1.1.31 salió con Play apagado: app#11; la siguiente es 1.1.36 o mayor) y
 hacer push a `main`. **La versión se sube a mano**, nada la incrementa solo, y ese push es lo único que
 hace falta: un push a `main` sin cambio de versión no publica nada, tampoco en un canal que se acaba de
 encender (`GOOGLE-PLAY.md`, paso 4).
