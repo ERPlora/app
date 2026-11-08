@@ -12,9 +12,11 @@ import android.webkit.WebView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import app.tauri.annotation.Command
+import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.Permission
 import app.tauri.annotation.PermissionCallback
 import app.tauri.annotation.TauriPlugin
+import app.tauri.plugin.Channel
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
@@ -41,6 +43,12 @@ import java.util.Locale
  * La clase es pegamento: toda decisión vive en las funciones puras del companion, probadas en la
  * JVM sin emulador.
  */
+/** The channel Rust hands `watchNoticeTaps` (hub#1039). */
+@InvokeArg
+class WatchNoticeTapsArgs {
+    lateinit var handler: Channel
+}
+
 @TauriPlugin(
     // El ALIAS ES el string del permiso, a propósito: lo que devuelve `check_permissions` se lee
     // igual que lo que dice `dumpsys`, sin una segunda nomenclatura que mantener.
@@ -80,7 +88,10 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
         NoticeTaps.pageLoading(activity, activity.intent)
     }
 
-    /** `take_notice_tap` (hub#2360) — hands the kept tap over, once: `{ tap: {id, notification} | null }`. */
+    /**
+     * `take_notice_tap` (hub#2360) — hands the kept tap over, once:
+     * `{ tap: {id, notification, path} | null }`, `path` being the screen the app wrote down (hub#1039).
+     */
     @Command
     fun takeNoticeTap(invoke: Invoke) {
         val tap = NoticeTaps.take()
@@ -91,9 +102,38 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
             val kept = JSObject()
             kept.put("id", tap.id)
             kept.put("notification", tap.notification)
+            kept.put("path", tap.path)
             answer.put("tap", kept)
         }
         invoke.resolve(answer)
+    }
+
+    /**
+     * `rememberNotice` (hub#1039) — writes down the screen a notice leads to, as it goes out: the
+     * notification plugin never stores the notice on the intent of its tap, which comes back with
+     * the notice's number only. Only Rust calls it (`ErploraAndroid::remember_notice`, from
+     * `erplora_notify`): it is in neither `build.rs` nor the default permissions.
+     */
+    @Command
+    fun rememberNotice(invoke: Invoke) {
+        val args = invoke.getArgs()
+        val id = args.optInt("id", NoticeLaunch.NO_ID)
+        val path = args.getString("path", null)
+        if (id != NoticeLaunch.NO_ID) NoticeTaps.remember(activity, id, path)
+        invoke.resolve()
+    }
+
+    /**
+     * `watchNoticeTaps` (hub#1039) — the channel through which a tap that waits for a page already
+     * listening is told to Rust, which tells the page; the page claims it with `takeNoticeTap`. The
+     * plugin's own `actionPerformed` for that tap says neither the number nor the screen. Only Rust
+     * calls it, once, at start-up (`ErploraAndroid::watch_notice_taps`).
+     */
+    @Command
+    fun watchNoticeTaps(invoke: Invoke) {
+        val handler = invoke.parseArgs(WatchNoticeTapsArgs::class.java).handler
+        NoticeTaps.onTapWaiting(activity) { handler.send(JSObject()) }
+        invoke.resolve()
     }
 
     /**

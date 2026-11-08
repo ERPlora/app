@@ -2109,8 +2109,10 @@ fn erplora_nfc_read(
 /// page older than this shell sends none and the notice goes out under the plugin's own id.
 ///
 /// `path` is the screen itself (hub#2360), for the taps that do not reach the page that sent the
-/// notice: on the computer the shell shows the notice itself and keeps the click, and on Android it
-/// travels in `extra`, which comes back with a tap that has to start the app.
+/// notice: on the computer the shell shows the notice itself and keeps the click. On Android it
+/// travels in `extra`, but the plugin never stores the notice on the intent of its tap, which comes
+/// back with the id only (hub#1039): Kotlin writes the screen down under the id before the notice
+/// goes out, and hands it back with the tap.
 ///
 /// **Never fails upwards.** If the user denied the permission or the platform cannot show it, it is
 /// logged and life goes on: a notice that does not go out cannot bring down the order behind it.
@@ -2121,8 +2123,13 @@ fn erplora_notify(app: tauri::AppHandle, title: String, body: String, id: Option
     // The thread is left to run on its own: it lasts as long as the notice does.
     let _ = notify_on_desktop(app, title, body, id, path, notice_tap::deliver);
     #[cfg(mobile)]
-    if let Err(e) = notice_builder(&app, &title, &body, id, path.as_deref()).show() {
-        eprintln!("notify: the platform could not show «{title}» ({e}) — carrying on");
+    {
+        use tauri_plugin_erplora_android::ErploraAndroidExt as _;
+        // Before the notice is out: a tap right after it must find its screen.
+        remember_notice_target(id, path.as_deref(), |id, path| app.erplora_android().remember_notice(id, path));
+        if let Err(e) = notice_builder(&app, &title, &body, id, path.as_deref()).show() {
+            eprintln!("notify: the platform could not show «{title}» ({e}) — carrying on");
+        }
     }
 }
 
@@ -2174,7 +2181,7 @@ fn launch_tap_payload<E: std::fmt::Display>(
     answer: Result<Option<tauri_plugin_erplora_android::LaunchNoticeTap>, E>,
 ) -> Option<serde_json::Value> {
     match answer {
-        Ok(tap) => tap.map(|tap| notice_tap::NoticeTap::from_launch(tap.id, tap.notification.as_deref()).payload()),
+        Ok(tap) => tap.map(|tap| notice_tap::NoticeTap::from_launch(tap.id, tap.notification.as_deref(), tap.path.as_deref()).payload()),
         Err(e) => {
             log::warn!("notice: the tap that started the app could not be read ({e})");
             None
@@ -2190,6 +2197,22 @@ fn take_notice_tap<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<serde
         return Some(tap.payload());
     }
     launch_tap_payload(app.erplora_android().take_notice_tap())
+}
+
+/// Writes down the screen a notice leads to under the number it goes out with (hub#1039), through
+/// `remember`. A notice under no number the plugin can hold goes out under the plugin's own, which
+/// nothing was written under. Never fails upwards: a screen that is not written down only means
+/// that the tap opens the app without it.
+#[cfg_attr(desktop, allow(dead_code))]
+fn remember_notice_target<E: std::fmt::Display>(
+    id: Option<i64>,
+    path: Option<&str>,
+    remember: impl FnOnce(i32, Option<&str>) -> Result<(), E>,
+) {
+    let Some(id) = notice_id(id) else { return };
+    if let Err(e) = remember(id, path) {
+        log::warn!("notice: the screen of notice {id} could not be written down ({e})");
+    }
 }
 
 /// The id the plugin can hold (`i32`), or none: an id out of range must not stop the notice, only
@@ -2342,6 +2365,16 @@ pub fn run() {
             app.manage(PrintDocuments::default());
             // The notice tap the page was not there to hear, until it claims it (hub#2360).
             app.manage(notice_tap::KeptNoticeTap::default());
+            // A tap on Android while the page listens: Kotlin keeps it with its screen and the page
+            // is told to claim it (hub#1039) — the plugin's own report of it says nothing.
+            #[cfg(target_os = "android")]
+            {
+                use tauri_plugin_erplora_android::ErploraAndroidExt as _;
+                let handle = app.handle().clone();
+                if let Err(e) = app.erplora_android().watch_notice_taps(move || notice_tap::tell_page(&handle)) {
+                    log::warn!("notice: the taps on the notices cannot be watched ({e})");
+                }
+            }
             // Who asks before a link links another hub (hub#2644): before the window, so a cold
             // start by such a link already has somebody to ask.
             app.manage(link_consent::native(app.handle().clone()));
@@ -2567,6 +2600,7 @@ mod tests {
         let tap = tauri_plugin_erplora_android::LaunchNoticeTap {
             id: 4,
             notification: Some(r#"{"id":4,"extra":{"path":"/m/appointments"}}"#.into()),
+            path: None,
         };
         assert_eq!(
             launch_tap_payload::<String>(Ok(Some(tap))),
@@ -2574,6 +2608,68 @@ mod tests {
         );
         assert_eq!(launch_tap_payload::<String>(Ok(None)), None);
         assert_eq!(launch_tap_payload(Err("plugin gone")), None);
+    }
+
+    // ── hub#1039: on Android a tap comes back with the notice's number only ──────────────────────
+
+    #[test]
+    fn a_kept_tap_without_its_notice_opens_the_screen_the_app_wrote_down() {
+        // The notification plugin never stores the notice on the tap's intent: the kitchen's notice
+        // comes back as its number, and the screen is the one Kotlin wrote down as it went out.
+        let tap = tauri_plugin_erplora_android::LaunchNoticeTap {
+            id: 8,
+            notification: None,
+            path: Some("/kitchen/display".into()),
+        };
+        assert_eq!(
+            launch_tap_payload::<String>(Ok(Some(tap))),
+            Some(serde_json::json!({ "notification": { "id": 8, "extra": { "path": "/kitchen/display" } } }))
+        );
+    }
+
+    #[test]
+    fn a_notice_writes_down_its_screen_under_the_number_it_goes_out_with() {
+        let mut written = Vec::new();
+        remember_notice_target(Some(1_727_000_008), Some("/kitchen/display"), |id, path| {
+            written.push((id, path.map(str::to_owned)));
+            Ok::<(), String>(())
+        });
+        assert_eq!(written, vec![(1_727_000_008, Some("/kitchen/display".to_owned()))]);
+    }
+
+    #[test]
+    fn a_notice_without_a_number_the_plugin_holds_writes_nothing_down() {
+        // Its tap comes back under the plugin's own number, which no screen was written under.
+        for id in [None, Some(i64::from(i32::MAX) + 1)] {
+            remember_notice_target(id, Some("/kitchen/display"), |_, _| -> Result<(), String> {
+                panic!("{id:?} was written down")
+            });
+        }
+    }
+
+    #[test]
+    fn a_screen_that_cannot_be_written_down_does_not_stop_the_notice() {
+        // Never fails upwards, like the notice itself: the order behind it goes on.
+        remember_notice_target(Some(7), Some("/kitchen/display"), |_, _| Err("plugin gone"));
+    }
+
+    #[test]
+    fn on_android_the_shell_writes_down_each_notice_and_tells_the_page_a_tap_waits_hub1039() {
+        // Android-only lines the desktop build never compiles: each one going missing leaves the tap
+        // on a notice where it was, with the app open (hub#1039).
+        let source = include_str!("lib.rs");
+        let shell = source.split("\n#[cfg(test)]\nmod tests").next().unwrap_or_default();
+        let body_of = |start: &str| shell.split(start).nth(1).unwrap_or_default().split("\n}\n").next().unwrap_or_default();
+        let notify = body_of("fn erplora_notify(");
+        let remember = notify
+            .find("remember_notice_target(id, path.as_deref(), |id, path| app.erplora_android().remember_notice(id, path))")
+            .expect("erplora_notify does not write down the screen of the notice");
+        let show = notify.find("notice_builder(&app,").expect("erplora_notify does not show the notice");
+        assert!(remember < show, "the screen is written down after the notice is out: a quick tap would miss it");
+        assert!(
+            body_of("pub fn run() {").contains(".watch_notice_taps(move || notice_tap::tell_page(&"),
+            "run() never hands Kotlin a way to tell the page a tap waits"
+        );
     }
 
     #[test]
