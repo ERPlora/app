@@ -20,15 +20,23 @@
 //! claims it through `erplora_take_notice_tap` — at boot, and every time [`NOTICE_TAPPED_EVENT`]
 //! says one is waiting. The page may be a new one whose memory of ids is empty, which is why the tap
 //! carries its screen and not only its id.
+//!
+//! * **Android, open (hub#1039).** The plugin never stores the notice on the intent of its tap
+//!   (`sourceJson` is never set, tauri-apps/plugins-workspace#3550): its `actionPerformed` says
+//!   neither the number nor the screen, and the page stayed where it was — with the app open, in the
+//!   background or started by the tap. So `erplora_notify` has Kotlin write each notice's screen
+//!   down under its number as it goes out, Kotlin keeps every such tap with that screen, and when
+//!   the page already listens it tells the shell, which tells the page with the same
+//!   [`NOTICE_TAPPED_EVENT`] as on the computer ([`tell_page`]).
 
 use std::sync::Mutex;
 
 #[cfg(desktop)]
-use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri::Manager;
+use tauri::{AppHandle, Emitter, Runtime};
 
 /// The event that tells the page a tap is waiting to be claimed. It carries nothing: the tap itself
 /// is handed over once, by `erplora_take_notice_tap`, so two listeners never open a screen twice.
-#[cfg(desktop)]
 pub const NOTICE_TAPPED_EVENT: &str = "erplora://notice-tapped";
 
 /// A tap on a notice: its id and the screen it was sent with, when it names one.
@@ -44,13 +52,15 @@ impl NoticeTap {
         serde_json::json!({ "notification": { "id": self.id, "extra": { "path": self.path } } })
     }
 
-    /// The tap that started the app on Android: the notice's id and the JSON the plugin stored the
-    /// notice as, whose `extra.path` is the screen. A JSON that does not read still opens the app —
-    /// only without a screen of its own.
-    pub fn from_launch(id: i32, notification: Option<&str>) -> Self {
+    /// A tap Kotlin kept on Android: the notice's id, the JSON the plugin stored the notice as,
+    /// whose `extra.path` is the screen, and the screen the app wrote down when it showed it
+    /// (`remembered`, hub#1039) — the plugin never stores that JSON today. A tap with neither still
+    /// opens the app, only without a screen of its own.
+    pub fn from_launch(id: i32, notification: Option<&str>, remembered: Option<&str>) -> Self {
         let path = notification
             .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
-            .and_then(|notice| notice["extra"]["path"].as_str().map(str::to_owned));
+            .and_then(|notice| notice["extra"]["path"].as_str().map(str::to_owned))
+            .or_else(|| remembered.map(str::to_owned));
         Self { id, path }
     }
 }
@@ -93,6 +103,13 @@ pub fn on_click<R: Runtime>(app: &AppHandle<R>, tap: Option<NoticeTap>) {
     if let Err(e) = window.set_focus() {
         log::warn!("notice: the window could not take the focus ({e})");
     }
+    tell_page(app);
+}
+
+/// Tells the page a tap waits to be claimed: a click on the computer, or a tap on Android while the
+/// page already listens (hub#1039), whose `actionPerformed` says nothing the page can open.
+#[cfg_attr(not(any(desktop, target_os = "android")), allow(dead_code))]
+pub fn tell_page<R: Runtime>(app: &AppHandle<R>) {
     if let Err(e) = app.emit_to("main", NOTICE_TAPPED_EVENT, ()) {
         log::warn!("notice: the page could not be told a tap is waiting ({e})");
     }
@@ -342,7 +359,7 @@ mod tests {
     fn the_tap_that_started_the_app_brings_its_screen_back() {
         let json = r#"{"id":9,"title":"New booking","extra":{"path":"/m/appointments"}}"#;
         assert_eq!(
-            NoticeTap::from_launch(9, Some(json)),
+            NoticeTap::from_launch(9, Some(json), None),
             NoticeTap { id: 9, path: Some("/m/appointments".into()) }
         );
     }
@@ -350,8 +367,44 @@ mod tests {
     #[test]
     fn a_launch_whose_notice_does_not_read_still_opens_the_app() {
         for broken in [None, Some("not json"), Some(r#"{"extra":{"path":42}}"#), Some("{}")] {
-            assert_eq!(NoticeTap::from_launch(9, broken), NoticeTap { id: 9, path: None }, "{broken:?}");
+            assert_eq!(NoticeTap::from_launch(9, broken, None), NoticeTap { id: 9, path: None }, "{broken:?}");
         }
+    }
+
+    // ── hub#1039: the tap comes back without its notice ──────────────────────────────────────────
+
+    #[test]
+    fn a_tap_whose_notice_was_not_stored_opens_the_screen_the_app_wrote_down() {
+        // What Android hands over today: the notification plugin never stores the notice on the
+        // tap's intent, so only the screen the app wrote down as it went out says where it leads.
+        assert_eq!(
+            NoticeTap::from_launch(8, None, Some("/kitchen/display")),
+            NoticeTap { id: 8, path: Some("/kitchen/display".into()) }
+        );
+        assert_eq!(
+            NoticeTap::from_launch(8, None, Some("/kitchen/display")).payload(),
+            serde_json::json!({ "notification": { "id": 8, "extra": { "path": "/kitchen/display" } } })
+        );
+    }
+
+    #[test]
+    fn the_notice_the_plugin_stored_says_its_own_screen() {
+        let json = r#"{"id":9,"extra":{"path":"/m/appointments"}}"#;
+        assert_eq!(
+            NoticeTap::from_launch(9, Some(json), Some("/kitchen/display")),
+            NoticeTap { id: 9, path: Some("/m/appointments".into()) }
+        );
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn the_page_is_told_a_tap_waits() {
+        let app = mock_app();
+        let heard = Arc::new(Mutex::new(0));
+        let counter = heard.clone();
+        app.listen_any(NOTICE_TAPPED_EVENT, move |_| *counter.lock().unwrap() += 1);
+        tell_page(app.handle());
+        assert_eq!(*heard.lock().unwrap(), 1, "the page was not told a tap is waiting");
     }
 
     #[test]

@@ -91,7 +91,9 @@ Pasos:
 2. En Android, la página pide antes el permiso de notificaciones (HUB_APP-F07); sin él **no manda el
    aviso** (para no abrir el diálogo de Android a pelo en pleno servicio).
 3. La aplicación muestra el aviso del sistema: Windows, con un enlace propio para poder abrirlo desde el
-   Centro de actividades; macOS y Linux, esperando el clic; Android, por el plugin de notificaciones.
+   Centro de actividades; macOS y Linux, esperando el clic; Android, por el plugin de notificaciones,
+   después de **apuntar en el dispositivo a qué pantalla lleva ese número** (los últimos 50 avisos), porque
+   el plugin no guarda el aviso en el toque (ERPlora/hub#1039).
 Entra: título, cuerpo, número (si cabe en 32 bits) y ruta (solo pantallas del propio hub).
 Sale: la notificación. **Nunca falla hacia arriba**: permiso negado o plataforma que no puede mostrarla se pierde sin rastro y la comanda o la cita siguen. Un número fuera de rango no impide el aviso, solo le quita su destino.
 Si falla: un navegador sin aplicación no tiene aviso del sistema. Sin permiso negado no hay otra señal que
@@ -107,16 +109,20 @@ Pasos:
 1. La persona toca (o hace clic en) el aviso.
 2. La aplicación se trae la ventana delante y la página abre **la pantalla de la que avisaba** (la
    conversación, la agenda, la cocina).
-3. **Android con la aplicación abierta**: el plugin entrega el toque a la página. **Android con la
-   aplicación cerrada o matada por el sistema**: el aviso guarda su destino, la aplicación arranca, y la
-   página lo reclama al arrancar. **Ordenador**: el clic se guarda y la página lo reclama (la aplicación le
-   avisa de que hay uno esperando). **Windows**: cada clic, también desde el Centro de actividades y con la
-   aplicación cerrada, lanza la aplicación con un enlace propio (`erplora://notice?...`) que la ya abierta
-   recibe.
+3. **Android**: el toque vuelve solo con el número del aviso: el plugin de notificaciones no guarda el
+   aviso en él (tauri-apps/plugins-workspace#3550), y su propio `actionPerformed` no dice ni número ni
+   pantalla (ERPlora/hub#1039). La aplicación guarda el toque con la pantalla que apuntó al mostrarlo.
+   **Con la aplicación abierta o en segundo plano**, avisa a la página de que hay uno esperando
+   (`erplora://notice-tapped`), como en el ordenador, y la página lo reclama. **Con la aplicación cerrada
+   o matada por el sistema**, la aplicación arranca y la página lo reclama al arrancar. **Ordenador**: el
+   clic se guarda y la página lo reclama (la aplicación le avisa de que hay uno esperando). **Windows**:
+   cada clic, también desde el Centro de actividades y con la aplicación cerrada, lanza la aplicación con
+   un enlace propio (`erplora://notice?...`) que la ya abierta recibe.
 Entra: el número del aviso y la ruta con que salió.
 Sale: la pantalla abierta; el toque se entrega **una vez**. Si la página es nueva y no recuerda el número,
 usa la ruta que el aviso trae, tras comprobar de nuevo que es una pantalla del hub.
-Si falla: un aviso sin número solo trae la ventana al frente. Una ruta que no es de una pantalla del hub
+Si falla: un aviso sin número solo trae la ventana al frente; en Android, también uno cuyo número ya no
+está entre los 50 apuntados o cuya pantalla no se pudo apuntar. Una ruta que no es de una pantalla del hub
 (otra dirección, `//…`) se descarta. Un aviso que pasó sin clic (macOS, Linux) no abre nada. Solo oye los
 toques la página del negocio enlazado: cualquier otra página de erplora.com que enseñe la ventana recibe
 `not_the_linked_hub` al suscribirse (ERPlora/hub#2658); la del negocio que se suscribe al arrancar, antes de

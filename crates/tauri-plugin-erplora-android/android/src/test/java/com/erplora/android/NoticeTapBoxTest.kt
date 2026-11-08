@@ -25,6 +25,18 @@ class NoticeTapBoxTest {
 
     private val launcher = NoticeLaunch.Launch(Intent.ACTION_MAIN, 0x10000000, NoticeLaunch.NO_ID, null, null)
 
+    /**
+     * What the notification plugin really puts on the intent of a tap (hub#1039): the notice's
+     * number, and no notice — it never fills `sourceJson` (tauri-apps/plugins-workspace#3550).
+     */
+    private fun bare(id: Int) = NoticeLaunch.Launch(Intent.ACTION_MAIN, 0x24000000, id, "tap", null)
+
+    /** The screens the app wrote down when it showed notices 7 and 8 ([NoticeTargets]). */
+    private val shown = mapOf(7 to "/appointments/calendar", 8 to "/kitchen/display")
+
+    private fun boxOf(memory: KeptTapMemory = Memory(), told: () -> Unit = {}) =
+        NoticeTapBox(memory) { shown[it] }.also { it.onTapWaiting(told) }
+
     @Test
     fun `a tap that starts the app is handed over once`() {
         val box = NoticeTapBox(Memory())
@@ -43,13 +55,56 @@ class NoticeTapBoxTest {
     }
 
     @Test
-    fun `once the page has claimed, a tap is the notification plugin's to deliver`() {
-        val box = NoticeTapBox(Memory())
+    fun `once the page has claimed, a tap that carries its notice is the notification plugin's to deliver`() {
+        var told = 0
+        val box = boxOf { told += 1 }
         box.pageLoading(launcher)
         assertNull(box.take())
         box.newIntent(tap(8, "/m/kitchen"))
-        // Kept, it would open that screen a second time at the next boot of the page.
+        // Kept, it would open that screen a second time: the plugin hands this one to the page.
         assertNull(box.take())
+        assertEquals(0, told)
+    }
+
+    @Test
+    fun `a tap the plugin hands over without its notice opens the screen it went out with while the page listens`() {
+        var told = 0
+        val box = boxOf { told += 1 }
+        box.pageLoading(launcher)
+        assertNull(box.take())
+        // The kitchen's notice, tapped with the app open: the plugin's own `actionPerformed` says
+        // neither its number nor its screen, so the page would stay where it was.
+        box.newIntent(bare(8))
+        assertEquals(1, told, "the page was not told a tap is waiting")
+        assertEquals(NoticeLaunch.Tap(8, null, "/kitchen/display"), box.take())
+        assertNull(box.take())
+    }
+
+    @Test
+    fun `a tap without its notice that starts the app opens the screen it went out with`() {
+        val box = boxOf()
+        box.pageLoading(bare(7))
+        assertEquals(NoticeLaunch.Tap(7, null, "/appointments/calendar"), box.take())
+    }
+
+    @Test
+    fun `a tap without its notice that reaches a dead process waits for the page with its screen`() {
+        var told = 0
+        val box = boxOf { told += 1 }
+        box.newIntent(bare(8))
+        box.pageLoading(launcher)
+        // Nobody listens yet: the page claims it when it boots.
+        assertEquals(0, told)
+        assertEquals("/kitchen/display", box.take()?.path)
+    }
+
+    @Test
+    fun `a tap on a notice the app did not write down still reaches the page`() {
+        val box = boxOf()
+        box.pageLoading(launcher)
+        box.take()
+        box.newIntent(bare(9))
+        assertEquals(NoticeLaunch.Tap(9, null, null), box.take())
     }
 
     @Test
