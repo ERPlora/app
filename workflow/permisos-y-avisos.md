@@ -33,7 +33,7 @@ Si falla: sin el permiso de red local el barrido y el envío a la red son tiempo
 (Android los bloquea por debajo de la API): sin protección parecería «no hay impresoras» (HUB_APP-F13).
 Después de dos «no» Android deja de mostrar el diálogo para siempre: la salida es HUB_APP-F08. Una página que
 no es el negocio enlazado (otro negocio, la web pública, el entorno de pruebas) no puede preguntar ni pedir
-ningún permiso: recibe `not_the_linked_hub` y Android no enseña nada (HUB_APP-F10, ERPlora/hub#2642). El
+ningún permiso: recibe `not_the_linked_hub` y Android no enseña nada (HUB_APP-F10, erplora-old/hub#2642). El
 micrófono y la ubicación los pide el navegador integrado y solo para las páginas de ERPlora (cualquier hub,
 erplora.com y, en desarrollo, este mismo equipo): una página de otro sitio cargada en la ventana recibe un
 «no» sin que Android pregunte, aunque la persona ya los haya concedido para el hub.
@@ -125,7 +125,7 @@ Si falla: un aviso sin número solo trae la ventana al frente; en Android, tambi
 está entre los 50 apuntados o cuya pantalla no se pudo apuntar. Una ruta que no es de una pantalla del hub
 (otra dirección, `//…`) se descarta. Un aviso que pasó sin clic (macOS, Linux) no abre nada. Solo oye los
 toques la página del negocio enlazado: cualquier otra página de erplora.com que enseñe la ventana recibe
-`not_the_linked_hub` al suscribirse (ERPlora/hub#2658); la del negocio que se suscribe al arrancar, antes de
+`not_the_linked_hub` al suscribirse (erplora-old/hub#2658); la del negocio que se suscribe al arrancar, antes de
 terminar de cargar, lo reintenta hasta unos 8 s después de su `load`.
 Implicados: HUB_SHELL-F64, HUB_SHELL-F67, KITCHEN-F05
 QA: ninguno
@@ -135,7 +135,7 @@ Estado: no hecho — la 1.1.34 quitó el servicio en primer plano (ERPlora/app#2
 Actor: sistema
 Pantalla: Aviso del sistema
 Pasos:
-1. Decisión vigente (ERPlora/hub#2307): **no hay push**; los avisos con la pantalla apagada irán por tener la
+1. Decisión vigente (erplora-old/hub#2307): **no hay push**; los avisos con la pantalla apagada irán por tener la
    aplicación escuchando durante el turno, como las aplicaciones de pedidos para comercios.
 2. Hoy, con la pantalla apagada o la aplicación en segundo plano, Android la congela a los pocos minutos y los
    avisos de la comanda, la cita o la campana llegan cuando alguien vuelve a abrirla. Con la aplicación en

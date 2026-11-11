@@ -3,13 +3,27 @@
 Prefijo: HUB_APP
 Alcance MVP: transversal
 
-> Contrato de comportamiento de la app de este repo (`ERPlora/app`; antes `apps/tauri` en ERPlora/hub) y, por referencia, de `crates/tauri-plugin-erplora-android`
+> Contrato de comportamiento de la app de este repo (`ERPlora/app`; antes `apps/tauri` del monorepo `ERPlora/hub`, hoy
+> `erplora-old/hub`) y, por referencia, de `crates/tauri-plugin-erplora-android`
 > (el Kotlin de Android: permisos, Bluetooth, NFC, aviso permanente, guardar y imprimir). Contrastado
-> contra `origin/develop` del hub el 05/10/2026. Todo lo que aquí se afirma está **leído en el código,
-> sin ejecutar**: no se ha instalado la aplicación ni tocado ningún emulador. Lo técnico vive en
-> `architecture/hub/apps/tauri.md`; el protocolo de la impresora, en `crates/peripherals/WORKFLOW.md`
-> (`HUB_PERIPHERALS`); lo que el servidor hace con la cola, en `WORKFLOW.md` de la raíz (`HUB`, área
-> Impresión); lo que se ve en las pantallas del hub, en `apps/web/WORKFLOW.md` (`HUB_SHELL`).
+> contra `origin/develop` del hub viejo el 05/10/2026. Todo lo que aquí se afirma está **leído en el código,
+> sin ejecutar**: no se ha instalado la aplicación ni tocado ningún emulador. Lo técnico vivía en
+> `architecture/hub/apps/tauri.md` (`erplora-old/architecture`); el protocolo de la impresora, en
+> `crates/peripherals/WORKFLOW.md` de este repo (`HUB_PERIPHERALS`); lo que el servidor hace con la cola, en
+> `WORKFLOW.md` de la raíz del hub viejo (`HUB`, área Impresión); lo que se ve en las pantallas del hub, en
+> `apps/web/WORKFLOW.md` del hub viejo (`HUB_SHELL`).
+>
+> **Referencias del producto viejo.** Los prefijos de flujo `HUB`, `HUB_SHELL`, `REC_ALTA`, `SALES`, `SAAS_PUBLIC`,
+> `SAAS_DASHBOARD` y `SAAS_AUTH` que citan «Implicados», «Fuera de HUB_APP» y «Fuentes contrastadas» son de los
+> `WORKFLOW.md` de `erplora-old`: los `WORKBOOK.md` de `ERPlora/hub` y `ERPlora/saas` no los usan (el Hub nuevo dice
+> `SALE`, no `SALES`; `PRINTING`, `KITCHEN`, `RESERVATION`, `VERIFACTU`, `BASE` y `ACCOUNTS` sí existen, pero sus números
+> no se han vuelto a contrastar). Igual las referencias
+> `hub#N`, `saas#N` y `pm#N` sin organización: son de `erplora-old/…`. Los guiones de QA `qa-hub-android` y `qa-hub`
+> (`.claude/agents/qa-hub-android.md`, `.claude/qa/qa-hub.md`) eran del producto viejo y no están en este repo.
+>
+> **Contrastado de nuevo el 2026-11-11** contra `origin/main` de `ERPlora/hub`, `@erplora/ui` y `ERPlora/saas`, solo
+> en la tabla «Órdenes nativas: quién las llama» (columna «Quién la llama»): varias órdenes no tienen llamador en la
+> plataforma nueva. Los estados de los flujos no se han cambiado en esa pasada.
 
 ## Para qué sirve y para quién
 
@@ -41,7 +55,7 @@ que citan los comentarios del código; **no se han vuelto a contrastar con el me
 - **Seguir a la escucha con la pantalla apagada** como las aplicaciones de pedidos para comercios
   (Uber Eats Orders, Glovo Partners, Deliveroo Restaurant Hub): servicio en primer plano con su aviso
   permanente. Desde la 1.1.34 la aplicación no lo lleva, hasta que el Hub lo encienda (HUB_APP-F26,
-  ERPlora/app#23, ERPlora/hub#836). **No hay push** (decisión vigente, ERPlora/hub#2307, cerrada).
+  ERPlora/app#23, ERPlora/hub#836). **No hay push** (decisión vigente, erplora-old/hub#2307, cerrada).
 - **Atrás cierra lo de encima antes de salir** (Square, Loyverse) y **un aviso abre lo que sonó**
   (Square, Shopify Inbox, Zendesk).
 - **Cobrar fuera de la aplicación**: las compras se hacen en el navegador del sistema (ADR-0114 §4),
@@ -130,7 +144,7 @@ las dos (HUB_APP-F10).
 1. **Por patrón** (Tauri): decide por el origen de la página qué órdenes nativas acepta. Hay tres juegos
    (`capabilities/*.json`), todos para la ventana `main`. Cualquier otra ventana (la de impresión) no
    tiene ninguno.
-2. **Por el negocio enlazado** (`src/hub_link.rs`, ERPlora/hub#2504): de las páginas que deja pasar el
+2. **Por el negocio enlazado** (`src/hub_link.rs`, erplora-old/hub#2504): de las páginas que deja pasar el
    patrón, **solo la del negocio enlazado** (mismo origen que `hub.url`: esquema, nombre y puerto) usa las
    órdenes de la aplicación, y solo **una vez cargada** si la ventana llegó a ella desde otro origen (la
    dirección de la ventana cambia al empezar la navegación, mientras la página anterior sigue viva). Las
@@ -139,14 +153,14 @@ las dos (HUB_APP-F10).
    el error `not_the_linked_hub` sin ejecutarse. Sin negocio enlazado (instalación nueva, tras «Cambiar
    de negocio» o tras olvidar uno borrado) ninguna página maneja el equipo. Las órdenes del plugin de Android
    (`plugin:erplora-android`: permisos, voz del sistema, salir, ajustes) pasan por la misma puerta, sin ninguna abierta
-   (ERPlora/hub#2642), y también la del plugin de avisos `plugin:notification` (escuchar los toques;
-   ERPlora/hub#2658). El plugin `plugin:app` de Tauri (la versión) no se puede poner tras la puerta, así que
+   (erplora-old/hub#2642), y también la del plugin de avisos `plugin:notification` (escuchar los toques;
+   erplora-old/hub#2658). El plugin `plugin:app` de Tauri (la versión) no se puede poner tras la puerta, así que
    ningún juego concede su versión: el negocio enlazado la lee con `erplora_bridge_status`; de ese plugin solo
-   queda la escucha, por la que llega el botón Atrás de Android (ERPlora/hub#2658).
+   queda la escucha, por la que llega el botón Atrás de Android (erplora-old/hub#2658).
 
 | Juego | Se aplica a | Puede | No puede |
 |---|---|---|---|
-| `default` | `https://*.erplora.com/*`: **cualquier subdominio** (los hubs de cualquier negocio, y también `www` y `pre`, que sirven el SaaS), `http://127.0.0.1:8787` y `:5173` (puertos de desarrollo que viajan en el binario de producción) **y la página incluida en la aplicación** | **Si además es el negocio enlazado (segunda puerta)**: todo el hardware (buscar, añadir, probar, imprimir, cajón, funciones, nombres, quitar), `device_context`, `forget_hub`, abrir enlace externo, guardar descarga, imprimir A4, avisos del sistema, escuchar los toques de los avisos y reclamar el de un aviso, la versión de la aplicación (`erplora_bridge_status`), NFC, arranque automático y los permisos de Android, la voz del sistema, salir y sus ajustes. **Cualquier página del patrón**: los juegos básicos de Tauri, `core:default` menos `core:app`, del que solo queda la escucha (el botón Atrás de Android, HUB_APP-F28; ERPlora/hub#2658) | Las órdenes crudas del plugin de abrir ficheros; navegar la ventana; `plugin:app` (versión, ERPlora/hub#2658) |
+| `default` | `https://*.erplora.com/*`: **cualquier subdominio** (los hubs de cualquier negocio, y también `www` y `pre`, que sirven el SaaS), `http://127.0.0.1:8787` y `:5173` (puertos de desarrollo que viajan en el binario de producción) **y la página incluida en la aplicación** | **Si además es el negocio enlazado (segunda puerta)**: todo el hardware (buscar, añadir, probar, imprimir, cajón, funciones, nombres, quitar), `device_context`, `forget_hub`, abrir enlace externo, guardar descarga, imprimir A4, avisos del sistema, escuchar los toques de los avisos y reclamar el de un aviso, la versión de la aplicación (`erplora_bridge_status`), NFC, arranque automático y los permisos de Android, la voz del sistema, salir y sus ajustes. **Cualquier página del patrón**: los juegos básicos de Tauri, `core:default` menos `core:app`, del que solo queda la escucha (el botón Atrás de Android, HUB_APP-F28; erplora-old/hub#2658) | Las órdenes crudas del plugin de abrir ficheros; navegar la ventana; `plugin:app` (versión, erplora-old/hub#2658) |
 | `onboarding` | `https://erplora.com/*` (el apex, el SaaS) y `127.0.0.1:8001` (desarrollo) | Solo `device_context` (identidad para iniciar sesión) y `forget_hub` | Todo el hardware, abrir enlaces, guardar, imprimir, avisos, NFC, permisos de Android, versión |
 | `degraded` | Solo la página incluida en la aplicación (sin `remote`) | Añade solo `shell_retry` (comprobar la red y mover la ventana) | Nada más propio; hereda de `default` lo que ya tiene esa página |
 
@@ -155,15 +169,15 @@ Lo que esto significa de verdad:
 - El hardware **es del negocio enlazado**: otro negocio, `www`, `pre` o el bucle local pasan el patrón pero
   la segunda puerta les contesta `not_the_linked_hub`. Una página no se enlaza a sí misma: `?shell=1` solo
   enlaza cuando la ventana llega desde la página de entrada del SaaS (o es el negocio ya enlazado). Lo mismo los
-  permisos de Android, la voz del sistema y salir de la aplicación (ERPlora/hub#2642). Y escuchar los toques de los avisos y
-  leer la versión (ERPlora/hub#2658). Lo que queda abierto: que un enlace `erplora://hub/…` acepta como destino
-  también `www`/`pre` (ERPlora/hub#2645); ese enlace, si lleva a otro negocio, solo enlaza cuando la persona
-  contesta «Abrir» en un diálogo del sistema (ERPlora/hub#2644). `[SEG]`
+  permisos de Android, la voz del sistema y salir de la aplicación (erplora-old/hub#2642). Y escuchar los toques de los avisos y
+  leer la versión (erplora-old/hub#2658). Lo que queda abierto: que un enlace `erplora://hub/…` acepta como destino
+  también `www`/`pre` (erplora-old/hub#2645); ese enlace, si lleva a otro negocio, solo enlaza cuando la persona
+  contesta «Abrir» en un diálogo del sistema (erplora-old/hub#2644). `[SEG]`
 - El bucle local pasa el patrón solo en `:8787` y `:5173`, pero un enlace profundo lo acepta —y lo enlaza—
   con **cualquier puerto** (`hub_url_for_host`) y la captura lo deja recordado también con `https`
   (`trusted_hub_origin`): un proceso local que escuche en un puerto y un enlace dejan el mostrador arrancando
   siempre en su página, sin barra de direcciones y titulada «ERPlora» (en Android release lo frenaría quizá
-  `usesCleartextTraffic=false`: sin confirmar; ERPlora/hub#2643). `[SEG]`
+  `usesCleartextTraffic=false`: sin confirmar; erplora-old/hub#2643). `[SEG]`
 - Una página de otro dominio (dominio propio del negocio) **no puede ni pedir su identidad**, así que parece
   funcionar y no imprime. El SaaS usa para el alta el `app_access_url` (dirección de la plataforma) por esto
   (hub#448, cerrada).
@@ -173,36 +187,37 @@ Lo que esto significa de verdad:
 **Regla: una orden nativa no se renombra ni se quita; se añade la nueva y la vieja se mantiene.** El hub sirve
 la página nueva mientras en los mostradores hay binarios viejos (y al revés): renombrar una orden rompe todas
 las instalaciones hasta que se actualicen. Hay que tocar a la vez `build.rs`, `generate_handler!`,
-`capabilities/*.json`, `permissions/autogenerated`, el SDK (`packages/module-sdk`), `apps/web/src/lib` y los
+`capabilities/*.json`, `permissions/autogenerated`, el SDK (`packages/module-sdk`), `apps/web/src/lib` (en la plataforma
+nueva, `src/shell/` y `src/sdk/` de `@erplora/ui` y `base/frontend/lib/` y `apps/*/frontend/` de `ERPlora/hub`) y los
 tests `tests/shell_surface.rs`, `app_update_channel.rs` y `notice_tap.rs`.
 
-| Orden | Quién la llama | Flujos HUB_APP | Fuera de HUB_APP |
-|---|---|---|---|
-| `device_context` | `device.ts` (inicio de sesión) | F06 | HUB-F137, HUB-F139; SaaS (login) |
-| `forget_hub` | `change-hub.ts` (`signOutAndForgetHub`, también el 410 de `main.ts`) | F04, F05 | HUB_SHELL Barra superior |
-| `open_external_url` | `open-external.ts` (pago, plan, descarga) | F29, F31 | HUB_SHELL Aplicaciones/plan, Sistema |
-| `save_download` | `save-download.ts` | F30 | HUB_SHELL Archivos, Ajustes |
-| `print_document` | `native-print.ts` → `print.ts` | F22 | PRINTING-F08 |
-| `shell_retry` | `shell-dist/index.html` | F11 | — |
-| `erplora_bridge_status` | SDK `detect` → Impresión, Sistema; `app-update.ts` (la versión instalada, ERPlora/hub#2658) | F18, F31 | PRINTING-F02 |
-| `erplora_discover_printers` | SDK → Impresión | F13, F15, F16 | PRINTING-F02 |
-| `erplora_get_devices` | `print.ts`, `print-host.ts`, `print-on-sale.ts` | F17–F21 | HUB-F196 |
-| `erplora_print` | SDK → `print.ts`, `print-host.ts` | F19 | PRINTING-F07/F10, SALES-F01, KITCHEN-F08, HUB-F199 |
-| `erplora_test_print` | SDK → Impresión | F20 | PRINTING-F03/F05 |
-| `erplora_open_drawer` | SDK → `print-on-sale.ts` | F21 | PRINTING-F13, SALES-F01, HUB-F207 |
-| `erplora_set_device_role` | SDK → Impresión, `print-host.ts` | F17, F18 | PRINTING-F04 |
-| `erplora_add_network_printer` | SDK → Impresión | F14 | PRINTING-F03 |
-| `erplora_set_device_name`, `erplora_remove_device` | nadie | F17 | — |
-| `erplora_notify` | `bridge-transport.ts`, SDK `notify` | F24 | KITCHEN-F05, HUB-F60 |
-| `erplora_take_notice_tap` | `main.ts:342-345` | F25 | — |
-| `erplora_nfc_read` | `nfc-badge.ts` | F23 | HUB-F134 |
-| `autostart_*` | `autostart.ts` → Ajustes | F27 | HUB_SHELL Ajustes |
-| `plugin:erplora-android` `check_permissions` y `request_permissions` (solo el negocio enlazado, ERPlora/hub#2642) | `device-permission.ts`, `bridge-transport.ts`, SDK | F07, F08, F13 | PRINTING-F02 |
-| `plugin:erplora-android` `leave_app` (solo el negocio enlazado, ERPlora/hub#2642) | `router/back-closes-overlay.ts` | F28 | — |
-| `plugin:erplora-android` `open_app_settings` (solo el negocio enlazado, ERPlora/hub#2642) | `device-permission.ts` → Sistema | F08 | — |
-| `plugin:erplora-android` `tts_available`, `tts_speak` y `tts_stop` (solo el negocio enlazado; ronda 2026-11-04a) | `@erplora/ui` `nativeVoice.ts` (asistente, «Leer en voz alta») | F33 | Asistente del Hub |
-| `plugin:notification` `register_listener` (solo el negocio enlazado, ERPlora/hub#2658) | `notice-tap.ts` vía `main.ts:339` | F25 | HUB_SHELL-F67 |
-| `plugin:app` `version` (Tauri; solo la contestan las aplicaciones anteriores a ERPlora/hub#2658, en las nuevas ningún juego la concede) | `app-update.ts` | F31 | — |
+| Orden | Quién la llama (hub viejo, 2026-10-05) | En `ERPlora/hub`, `@erplora/ui` y `ERPlora/saas` (2026-11-11) | Flujos HUB_APP | Fuera de HUB_APP |
+|---|---|---|---|---|
+| `device_context` | `device.ts` (inicio de sesión) | hub `base/frontend/lib/management.ts` | F06 | HUB-F137, HUB-F139; SaaS (login) |
+| `forget_hub` | `change-hub.ts` (`signOutAndForgetHub`, también el 410 de `main.ts`) | **nadie** | F04, F05 | HUB_SHELL Barra superior |
+| `open_external_url` | `open-external.ts` (pago, plan, descarga) | ui `src/shell/open-external.ts`, que usan `UserMenuPopover.vue` y pantallas del hub (`FileDocument.vue`, `saas-pass.ts`…) | F29, F31 | HUB_SHELL Aplicaciones/plan, Sistema |
+| `save_download` | `save-download.ts` | hub `base/frontend/lib/download.ts` | F30 | HUB_SHELL Archivos, Ajustes |
+| `print_document` | `native-print.ts` → `print.ts` | hub `base/frontend/lib/print-paper.ts`, `apps/printing/templates/printing/test_page.html`; ui `src/shell/device-printer.ts` | F22 | PRINTING-F08 |
+| `shell_retry` | `shell-dist/index.html` | `shell-dist/index.html` (este repo) | F11 | — |
+| `erplora_bridge_status` | SDK `detect` → Impresión, Sistema; `app-update.ts` (la versión instalada, erplora-old/hub#2658) | **nadie** | F18, F31 | PRINTING-F02 |
+| `erplora_discover_printers` | SDK → Impresión | hub `apps/printing/frontend/lib/discovery.ts` | F13, F15, F16 | PRINTING-F02 |
+| `erplora_get_devices` | `print.ts`, `print-host.ts`, `print-on-sale.ts` | **nadie** | F17–F21 | HUB-F196 |
+| `erplora_print` | SDK → `print.ts`, `print-host.ts` | ui `src/shell/device-printer.ts` (`sdk/print-channel.ts`, `shell/print-host.ts`) | F19 | PRINTING-F07/F10, SALES-F01, KITCHEN-F08, HUB-F199 |
+| `erplora_test_print` | SDK → Impresión | ui `src/shell/device-printer.ts`; hub `apps/printing/templates/printing/test_page.html` | F20 | PRINTING-F03/F05 |
+| `erplora_open_drawer` | SDK → `print-on-sale.ts` | ui `src/shell/device-printer.ts` | F21 | PRINTING-F13, SALES-F01, HUB-F207 |
+| `erplora_set_device_role` | SDK → Impresión, `print-host.ts` | **nadie** | F17, F18 | PRINTING-F04 |
+| `erplora_add_network_printer` | SDK → Impresión | **nadie** | F14 | PRINTING-F03 |
+| `erplora_set_device_name`, `erplora_remove_device` | nadie | **nadie** | F17 | — |
+| `erplora_notify` | `bridge-transport.ts`, SDK `notify` | ui `src/shell/device-notices.ts` | F24 | KITCHEN-F05, HUB-F60 |
+| `erplora_take_notice_tap` | `main.ts:342-345` | ui `src/shell/device-notices.ts` | F25 | — |
+| `erplora_nfc_read` | `nfc-badge.ts` | **nadie** | F23 | HUB-F134 |
+| `autostart_*` | `autostart.ts` → Ajustes | **nadie** | F27 | HUB_SHELL Ajustes |
+| `plugin:erplora-android` `check_permissions` y `request_permissions` (solo el negocio enlazado, erplora-old/hub#2642) | `device-permission.ts`, `bridge-transport.ts`, SDK | ui `src/shell/device-notices.ts` (solo el de notificaciones) | F07, F08, F13 | PRINTING-F02 |
+| `plugin:erplora-android` `leave_app` (solo el negocio enlazado, erplora-old/hub#2642) | `router/back-closes-overlay.ts` | hub `base/frontend/lib/system-back.ts` | F28 | — |
+| `plugin:erplora-android` `open_app_settings` (solo el negocio enlazado, erplora-old/hub#2642) | `device-permission.ts` → Sistema | **nadie** | F08 | — |
+| `plugin:erplora-android` `tts_available`, `tts_speak` y `tts_stop` (solo el negocio enlazado; ronda 2026-11-04a) | `@erplora/ui` `nativeVoice.ts` (asistente, «Leer en voz alta») | ui `src/components/Assistant/nativeVoice.ts` | F33 | Asistente del Hub |
+| `plugin:notification` `register_listener` (solo el negocio enlazado, erplora-old/hub#2658) | `notice-tap.ts` vía `main.ts:339` | ui `src/shell/device-notices.ts` (`addPluginListener`) | F25 | HUB_SHELL-F67 |
+| `plugin:app` `version` (Tauri; solo la contestan las aplicaciones anteriores a erplora-old/hub#2658, en las nuevas ningún juego la concede) | `app-update.ts` | **nadie** | F31 | — |
 
 ## Flujos
 
@@ -248,7 +263,7 @@ El detalle de cada flujo vive en `workflow/<área>.md`; este índice solo lo enu
 
 | Elemento | Estado | Flujo |
 |---|---|---|
-| Instalar desde la tienda (Play, Microsoft Store) | parcial: publicación sin confirmar | F01 |
+| Instalar desde la tienda (Play, Microsoft Store) | parcial: las dos fichas son públicas (2026-11-11), pero la de Play enseña la 1.1.28, que no deja entrar con el SaaS nuevo (app#11) | F01 |
 | Instalador directo de Windows y `.dmg` de macOS | parcial: sin firmar / sin notarizar | F01 |
 | Elegir negocio y recordarlo | hecho | F02 |
 | Enlace profundo para abrir un negocio | hecho | F03 |
@@ -307,17 +322,17 @@ El detalle de cada flujo vive en `workflow/<área>.md`; este índice solo lo enu
 
 ## Reglas que no se rompen
 
-- **El hardware solo lo usa el negocio enlazado** (ERPlora/hub#2504): la primera puerta lo limita a orígenes
+- **El hardware solo lo usa el negocio enlazado** (erplora-old/hub#2504): la primera puerta lo limita a orígenes
   `*.erplora.com`, al bucle local en dos puertos y a la página incluida, sin el apex (`capabilities/default.json`,
   `tests/remote_acl.rs`); la segunda, al origen exacto del negocio enlazado **ya cargado** (`src/hub_link.rs`:
   tras una navegación a otro origen nada maneja el equipo hasta que la página nueva termina de cargar). Toda orden nueva
   nace cerrada: solo `device_context`, `forget_hub` y `shell_retry` están abiertas a cualquier página del patrón.
-  Las del plugin de Android pasan por la misma puerta (ERPlora/hub#2642) y las de `plugin:notification`
-  también (ERPlora/hub#2658); `plugin:app`, que no se puede envolver, no lo concede ningún juego.
+  Las del plugin de Android pasan por la misma puerta (erplora-old/hub#2642) y las de `plugin:notification`
+  también (erplora-old/hub#2658); `plugin:app`, que no se puede envolver, no lo concede ningún juego.
 - **Solo el SaaS elige el negocio**: `?shell=1` enlaza y se recuerda solo si la ventana sale de la página de
   entrada (el origen del SaaS; en desarrollo también el de `ERPLORA_SHELL_URL`) o cae en el negocio ya enlazado.
   La aplicación enlaza por su cuenta el negocio recordado al arrancar; el destino de un enlace `erplora://hub/…`
-  a otro negocio, solo cuando la persona contesta «Abrir» en el diálogo del sistema (ERPlora/hub#2644).
+  a otro negocio, solo cuando la persona contesta «Abrir» en el diálogo del sistema (erplora-old/hub#2644).
 - **Solo se recuerda o se abre por enlace** `<etiqueta>.erplora.com` (incluidos `www` y `pre`) o el bucle local
   con cualquier puerto; al navegador del sistema también van el apex, `checkout.stripe.com` y, solo por su
   ruta exacta, el cotejo del QR en las dos sedes de la AEAT (HUB_APP-F29).
@@ -327,7 +342,7 @@ El detalle de cada flujo vive en `workflow/<área>.md`; este índice solo lo enu
   llega, devuelve el error (HUB_APP-F19, hub#2494).
 - **La copia de Google Play no sigue páginas del SaaS que cobran ni nombra otro sitio donde pagar**, salvo los
   cambios de página por dentro del panel y las salidas al navegador del sistema, que no pasan por la lista
-  (ERPlora/hub#1918, abierta).
+  (erplora-old/hub#1918, abierta).
 - **Un permiso que Android no conoce no se pide, y uno que falta no se lee como denegado.**
 - **Una descarga nunca pisa otro fichero en el escritorio; el nombre lo pone la página (saneado y rechazado si no
   vale) y la carpeta la decide la aplicación.**
@@ -357,7 +372,7 @@ El detalle de cada flujo vive en `workflow/<área>.md`; este índice solo lo enu
 Se resuelven con `market-decision`; no las decide el worker.
 
 1. **Báscula**: no existe en la aplicación (ni orden, ni permiso, ni evento `erplora:scale-weight`);
-   ERPlora/hub#1217 sigue abierta (P1, hardware). ¿Entra en el MVP o después del primer cliente?
+   erplora-old/hub#1217 sigue abierta (P1, hardware). ¿Entra en el MVP o después del primer cliente?
 2. **¿Se sigue anunciando Linux?** Se construyen `.deb` y AppImage («canal de QA») y ningún documento
    de producto los ofrece, pero la descarga web de erplora.com sí reparte la AppImage. ¿Se retira de la matriz o se declara?
 3. **macOS**: el `.dmg` sale sin notarizar y `downloadPlatform` no tiene destino para él. ¿Se publica una
@@ -373,19 +388,19 @@ Se resuelven con `market-decision`; no las decide el worker.
 7. La ventana emergente de **Meta** («Tu número» de WhatsApp) usa una ventana nueva del navegador integrado,
    que en la aplicación no abre ninguna (`window.open` no hace nada): sin confirmar cómo se completa ahí.
 
-8. ~~`[SEG]` ¿Se restringe el hardware a los hubs?~~ Resuelta por ERPlora/hub#2504: solo el negocio enlazado
-   usa las órdenes de la aplicación, desde ERPlora/hub#2642 las del plugin de Android y desde
-   ERPlora/hub#2658 los toques de los avisos y la versión. Desde ERPlora/hub#2644 un enlace a otro negocio
-   pregunta antes de enlazarlo. Quedan `www`/`pre` como negocio (ERPlora/hub#2645) y el bucle local en producción
-   (ERPlora/hub#2643).
-9. ~~`[SEG]` **Cambiar de negocio** debería cerrar la sesión del hub.~~ Resuelta por ERPlora/hub#2503: revoca
+8. ~~`[SEG]` ¿Se restringe el hardware a los hubs?~~ Resuelta por erplora-old/hub#2504: solo el negocio enlazado
+   usa las órdenes de la aplicación, desde erplora-old/hub#2642 las del plugin de Android y desde
+   erplora-old/hub#2658 los toques de los avisos y la versión. Desde erplora-old/hub#2644 un enlace a otro negocio
+   pregunta antes de enlazarlo. Quedan `www`/`pre` como negocio (erplora-old/hub#2645) y el bucle local en producción
+   (erplora-old/hub#2643).
+9. ~~`[SEG]` **Cambiar de negocio** debería cerrar la sesión del hub.~~ Resuelta por erplora-old/hub#2503: revoca
    la sesión, borra la sesión, el usuario y los tokens de erplora.com y solo entonces
    olvida el negocio (HUB_APP-F04); el 410 de HUB_APP-F05 va por el mismo camino.
 10. **Sin confirmar en un dispositivo**: que `usesCleartextTraffic=false` impida en Android release cargar el
     bucle local por http;
     si el aviso de la comanda suena (canal por defecto del plugin); si `ping`/`arp` del vigilante hacen
     parpadear una consola en Windows; si en macOS `wait_for_click` vuelve tras pasar el aviso al Centro de
-    notificaciones; el estado real de Play y de la Store.
+    notificaciones. (El estado real de Play y de la Store ya se sabe: ver HUB_APP-F01.)
 11. **Escucha en Android**: ¿debe pararse el servicio si los avisos se niegan después en los ajustes del
     sistema? Sin servicio desde la 1.1.34 (ERPlora/app#23): se decide al volver a ponerlo con ERPlora/hub#836.
 
@@ -395,7 +410,7 @@ Se resuelven con `market-decision`; no las decide el worker.
   la 1.1.34. El servicio en primer plano `specialUse` de hub#2307 se quitó (ERPlora/app#23): el Hub nuevo no lo
   arrancaba nunca (`keep_listening` no está en ERPlora/hub ni en ERPlora/ui) y Play no publica la versión sin
   declararlo con un vídeo.
-- El README antiguo de la app (`apps/tauri/README.md` en ERPlora/hub) y los comentarios de `app-update.ts` decían que macOS «se construye solo en local»;
+- El README antiguo de la app (`apps/tauri/README.md` del monorepo `ERPlora/hub`, hoy `erplora-old/hub`) y los comentarios de `app-update.ts` decían que macOS «se construye solo en local»;
   `tauri-release.yml` ya construye el `.dmg` en CI (sin notarizar).
 - El guion de QA de Android (`qa-hub-android.md`) no tiene identificadores de escenario, solo fases;
   `PRINTING` cita `qa-hub-android §15`, que es el paso 15 de la Fase 3: debería escribirse `qa-hub-android Fase 3`.

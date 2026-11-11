@@ -37,7 +37,7 @@ Entra: la pulsación.
 Sale: la aplicación en segundo plano.
 Si falla: una aplicación más antigua que la orden devuelve el botón a Tauri, que sale por sí misma. Una página
 que no es el negocio enlazado no puede mandar la aplicación al fondo: recibe `not_the_linked_hub`
-(HUB_APP-F10, ERPlora/hub#2642).
+(HUB_APP-F10, erplora-old/hub#2642).
 Implicados: HUB_SHELL-F15
 QA: ninguno
 
@@ -93,7 +93,7 @@ Pantalla: HUB_SHELL: Sistema
 Pasos:
 1. Al arrancar y cada 6 horas, la página pregunta a la aplicación qué versión es y al hub cuál es la última
    publicada. Primero por la orden estándar de Tauri, que contestan las aplicaciones anteriores a
-   ERPlora/hub#2658; en las nuevas, por `erplora_bridge_status`, que solo contesta al negocio enlazado (si la
+   erplora-old/hub#2658; en las nuevas, por `erplora_bridge_status`, que solo contesta al negocio enlazado (si la
    página aún está cargando, lo reintenta hasta unos 8 s después de su `load`).
 2. Solo si hay sesión iniciada (la consulta la exige), la publicada es **estrictamente mayor** (comparando número a
    número) y quien está conectado administra el negocio, el menú lateral enseña «Actualizar ERPlora ({versión})»
