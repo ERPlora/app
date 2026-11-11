@@ -68,10 +68,10 @@ motivo («impresora inalcanzable: …» o `bluetooth_permission_denied`) y la pe
 prueba y el hub marca el trabajo como fallido para reintentar. El conectar puede tardar segundos; la
 orden no deja la pantalla colgada porque corre fuera del hilo principal.
 Implicados: HUB_PERIPHERALS-F09, HUB_PERIPHERALS-F14, PRINTING-F02, PRINTING-F05, REC_ALTA-F17
-QA: qa-hub-android Pendiente (Bluetooth SPP, fase C)
+QA: qa-hub-android Pendiente (Bluetooth SPP, fase C; la prueba en una tablet real la sigue ERPlora/app#33)
 
 ### HUB_APP-F16 Impresora USB (solo ordenador)
-Estado: parcial — una USB se ve, recibe función y se prueba, pero no recibe tiques, comandas, trabajos de la cola ni el cajón al cobrar; en Windows no existe (ERPlora/hub#1269)
+Estado: parcial — una USB se ve, recibe función y se prueba, pero no recibe tiques, comandas, trabajos de la cola ni el cajón al cobrar; en Windows no existe (erplora-old/hub#1269)
 Actor: administrador, responsable, empleado
 Pantalla: printing: Impresoras
 Pasos:
@@ -239,7 +239,7 @@ Implicados: HUB_SHELL-F77
 QA: qa-hub-android Fase 3
 
 ### HUB_APP-F23 Leer una tarjeta NFC para entrar
-Estado: parcial — la lectura con tarjeta y tableta reales no está validada (pm#145); en ordenador no existe y el lector USB sigue siendo la vía
+Estado: parcial — la lectura con tarjeta y tableta reales no está validada (ERPlora/app#33, que sustituye a erplora-old/pm#145); en ordenador no existe y el lector USB sigue siendo la vía
 Actor: responsable, empleado
 Pantalla: HUB_SHELL: Acceso
 Pasos:

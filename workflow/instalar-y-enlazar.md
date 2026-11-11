@@ -5,7 +5,7 @@ Prefijo: HUB_APP
 ## Flujos
 
 ### HUB_APP-F01 Instalar la aplicación
-Estado: parcial — Google Play: producción (1.1.28, solo España) enviada a revisión el 19/09/2026 según `TODO-ANDROID.md`, resultado sin confirmar; Microsoft Store sin confirmar; el `.dmg` de macOS se construye sin notarizar y el hub no ofrece descarga para macOS
+Estado: parcial — Google Play: la ficha pública existe y enseña la 1.1.28 («Updated on Sep 19, 2026», comprobado el 2026-11-11; solo España según el `TODO-ANDROID.md` del hub viejo, que no está en este repo, sin volver a comprobar), que no deja entrar con el SaaS nuevo (app#11); la 1.1.34 y la 1.1.35 están solo en el track `internal` (`GOOGLE-PLAY.md`); Microsoft Store: la ficha `9P5C0XP1GS69` es pública y se actualizó el 2026-11-08 con la release 1.1.35; el `.dmg` de macOS se construye sin notarizar y el hub no ofrece descarga para macOS
 Actor: administrador, responsable
 Pantalla: HUB_SHELL: Sistema
 Pasos:
@@ -18,7 +18,7 @@ Pasos:
    dispositivo y la oculta dentro de la propia aplicación.
 Entra: el instalador del canal; en el instalador de Windows y en el de la Store, el esquema
 `erplora://` queda registrado al instalar.
-Sale: la aplicación `com.erplora.app` con su versión (la de `tauri.conf.json`, única fuente: cada publicación la toma tal cual y crea el tag `v<versión>`; hoy 1.1.30) y su canal
+Sale: la aplicación `com.erplora.app` con su versión (la de `tauri.conf.json`, única fuente: cada publicación la toma tal cual y crea el tag `v<versión>`; el 2026-11-11, 1.1.35) y su canal
 (`play`, `msstore` o `direct`), horneado al compilar en Android y deducido en ejecución en Windows
 (una copia que corre desde `WindowsApps` es `msstore`). Ante la duda es `direct`, a propósito.
 Si falla: Windows muestra su aviso de editor desconocido; macOS, el de desarrollador no verificado;
@@ -55,7 +55,7 @@ la ventana lleva `FLAG_KEEP_SCREEN_ON`, sin permisos nuevos ni servicio en prime
 bandera solo mientras esa ventana está visible.
 Si falla: una página que se lleva a sí misma, o a otro negocio, con `?shell=1` sin venir del SaaS (la web
 pública, otro negocio) **no se enlaza ni se recuerda**: el negocio enlazado sigue siendo el que era
-(ERPlora/hub#2504). Un destino que no es de la plataforma (el marcador viene de un enlace ajeno) **no se
+(erplora-old/hub#2504). Un destino que no es de la plataforma (el marcador viene de un enlace ajeno) **no se
 recuerda** y no queda rastro (la aplicación no instala ningún destino para sus registros); un `hub.url` editado a mano o de una versión sin el
 filtro se revalida al leerlo y, si no vale, se arranca en el SaaS. Sin red, HUB_APP-F11. Un negocio con
 dominio propio no tiene hardware en la aplicación (ver «Qué puede hacer cada página»).
@@ -95,7 +95,7 @@ Si falla: un enlace que no cuadra (otro dominio, el apex, con usuario, con puert
 hace nada, en silencio y a propósito: el que decide qué mostrar es el navegador que lo lanzó. Un
 negocio inexistente sí se acepta (se valida la forma, no la existencia) y se pregunta igual. Si el diálogo no
 puede enseñarse o no contesta «Abrir», el enlace **no se sigue** (ni enlaza ni navega); sin quien pregunte (iOS,
-que no se construye) tampoco (ERPlora/hub#2644). Un enlace `erplora://notice` no es una navegación: es el clic en un aviso (HUB_APP-F25).
+que no se construye) tampoco (erplora-old/hub#2644). Un enlace `erplora://notice` no es una navegación: es el clic en un aviso (HUB_APP-F25).
 Implicados: HUB_SHELL-F19, SAAS_DASHBOARD-F06
 QA: ninguno
 
@@ -106,7 +106,7 @@ Pantalla: HUB_SHELL: Barra superior
 Pasos:
 1. Dentro de la aplicación (no en un navegador), pulsa el icono «Cambiar de negocio».
 2. Lee «¿Cambiar de negocio?» y confirma con «Cambiar» (o «Cancelar», o toca fuera: es un no).
-3. Antes de olvidar nada, la aplicación cierra la sesión de verdad (ERPlora/hub#2503), en este orden: el hub
+3. Antes de olvidar nada, la aplicación cierra la sesión de verdad (erplora-old/hub#2503), en este orden: el hub
    revoca la sesión (espera su respuesta hasta 5 s: si no contesta, se sigue igual); y se borran del
    dispositivo la sesión, el nombre y el correo de la persona y sus credenciales de erplora.com.
 4. Solo entonces olvida el negocio recordado y lleva la ventana a la lista de negocios del SaaS
@@ -170,7 +170,7 @@ Implicados: HUB-F137, HUB-F139
 QA: qa-hub-android Fase 0
 
 ### HUB_APP-F10 Cada página tiene su juego de permisos
-Estado: parcial — el binario publicado deja pasar el bucle local (`127.0.0.1:8787` y `:5173`) y lo acepta como negocio enlazado, con el hardware (ERPlora/hub#2643)
+Estado: parcial — el binario publicado deja pasar el bucle local (`127.0.0.1:8787` y `:5173`) y lo acepta como negocio enlazado, con el hardware (erplora-old/hub#2643)
 Actor: sistema
 Pantalla: ninguna
 Pasos:
@@ -178,15 +178,15 @@ Pasos:
    puede hacer cada página» (primera puerta, por patrón).
 2. Una orden nativa desde un origen que no la tiene concedida se rechaza antes de ejecutarse.
 3. Si la pasa y es una orden de la aplicación, del plugin de Android (`plugin:erplora-android`: permisos, voz del
-   sistema, salir de la aplicación, abrir sus ajustes; ERPlora/hub#2642) o del plugin de avisos (`plugin:notification`:
-   escuchar los toques; ERPlora/hub#2658), la segunda puerta (`src/hub_link.rs`) mira el origen de la
+   sistema, salir de la aplicación, abrir sus ajustes; erplora-old/hub#2642) o del plugin de avisos (`plugin:notification`:
+   escuchar los toques; erplora-old/hub#2658), la segunda puerta (`src/hub_link.rs`) mira el origen de la
    página que enseña la ventana: si no es el del negocio enlazado, **o esa página aún no ha terminado de
    cargar** tras llegar desde otro origen, contesta `not_the_linked_hub` sin ejecutarla. La espera existe
    porque la dirección de la ventana cambia al EMPEZAR la navegación mientras la página que la pidió sigue
    ejecutándose: sin ella, otra página podría mandar la ventana al negocio y pedir el cajón acto seguido. Solo
    `device_context`, `forget_hub` y `shell_retry` se saltan esta comprobación. La versión de la aplicación no
    la da el plugin `plugin:app` de Tauri, que no se puede envolver y ningún juego concede, sino
-   `erplora_bridge_status`, detrás de la puerta (ERPlora/hub#2658).
+   `erplora_bridge_status`, detrás de la puerta (erplora-old/hub#2658).
 4. Qué negocio está enlazado lo decide la aplicación: el recordado al arrancar, el de un enlace
    `erplora://hub/…` tras contestar «Abrir» (HUB_APP-F03), o el que el SaaS elige con `?shell=1` (HUB_APP-F02); se desenlaza al
    cambiar de negocio o al olvidar uno borrado (HUB_APP-F04, F05).
@@ -234,7 +234,7 @@ Implicados: HUB_SHELL-F13, HUB_SHELL-F14, REC_ALTA-F16
 QA: qa-hub-android Fase 4
 
 ### HUB_APP-F12 En la copia de Google Play, solo páginas del SaaS que no cobran
-Estado: parcial — los cambios de página por dentro del panel del SaaS (sin recargar la página) y lo que se abre en el navegador del sistema no pasan por la lista (ERPlora/hub#1918, abierta)
+Estado: parcial — los cambios de página por dentro del panel del SaaS (sin recargar la página) y lo que se abre en el navegador del sistema no pasan por la lista (erplora-old/hub#1918, abierta)
 Actor: sistema
 Pantalla: Aviso «Esta página no está disponible en la aplicación.»
 Pasos:

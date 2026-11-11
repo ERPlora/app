@@ -11,15 +11,16 @@ job **`build-android`**. ADR-0196 remata la dirección: **la app Kotlin de
 > «CI/CD»); ya no hay tags `v*` a mano: el tag lo crea la propia release al terminar.
 
 > ✅ **El job `publish-play` ya existe** en este workflow y el AAB sale firmado del pipeline. Lo
-> que falta es trámite, no cableado — ver «Estado real» aquí abajo. Seguimiento: hub#984 (hub#308
-> se consolidó ahí).
+> que falta es trámite, no cableado — ver «Estado real» aquí abajo. Seguimiento: erplora-old/hub#984 (hub#308
+> se consolidó ahí). Las referencias `hub#N` y `saas#N` sin organización de este documento son del producto viejo
+> (`erplora-old/hub`, `erplora-old/saas`); las del producto nuevo llevan `ERPlora/`.
 
 Sigue vigente la decisión de canal (2026-07-16): Android de cara al cliente se distribuye
 **SOLO por Google Play** (UE; confianza; todos los terminales objetivo tienen Play). La
 landing no ofrece APK: el endpoint de descarga del SaaS hace **redirect 302** a Play
 (saas#707).
 
-## Estado real (consola: 2026-08-19; canal de CI y cuenta del revisor: 2026-10-28)
+## Estado real (consola: 2026-08-19; canal de CI y cuenta del revisor: 2026-10-28; ficha pública y versiones: 2026-11-11)
 
 | Pieza | Estado |
 | --- | --- |
@@ -28,7 +29,8 @@ landing no ofrece APK: el endpoint de descarga del SaaS hace **redirect 302** a 
 | Primera subida manual | Hecha (registra la upload key). En la consola hay `1001003 (1.1.3)` en *Closed testing - Alpha* |
 | Formularios | **Los 10 completos** y en «Ready to send for review»: content rating, target audience 18+, privacy policy, ads, data safety, health apps, government apps, financial features, advertising ID, sign in details |
 | Cuenta para el revisor | Declarada («ERPlora reviewer account», usuario + contraseña + instrucciones). Desde el 2026-10-28 lleva en el SaaS la marca «Cuenta de revisión de tienda» (`User.is_store_review_account`, ACCOUNTS-F49, ERPlora/saas#137) y su dirección está verificada por el admin de erplora.com |
-| Envío a revisión | ⚠️ **Nunca se había hecho.** `Submission activity` estaba vacío y los 14 cambios llevaban desde el 14/08 guardados sin enviar. La app seguía en `Draft` como `com.erplora.app (unreviewed)` |
+| Envío a revisión | El 2026-08-19 **nunca se había hecho**: `Submission activity` estaba vacío, los 14 cambios llevaban desde el 14/08 guardados sin enviar y la app seguía en `Draft` como `com.erplora.app (unreviewed)`. **Después se hizo:** la ficha pública `play.google.com/store/apps/details?id=com.erplora.app` existe (200 el 2026-11-11) y enseña la **1.1.28**, «Updated on Sep 19, 2026» |
+| Versiones en Play (2026-11-11) | La ficha pública sigue en la **1.1.28**, que no conoce el acceso por `/launch` del SaaS nuevo (app#11). La 1.1.34 (run `42366729655`) y la 1.1.35 (run `42509814446`) se subieron por la CI al track `internal` (no hay Variable `PLAY_TRACK`); la 1.1.32 y la 1.1.33 no llegaron (su `publish-play` falló). La ficha pública no enseña ninguna de ellas: la promoción a Producción es manual (ver «Lo que YA está hecho») |
 | Guardia del revisor (paso 0) | ✅ `OK` contra producción el 2026-10-28: la cuenta entra, su negocio `restaurante-demo-play` está `active` y abre en `https://restaurante-demo-play.erplora.com` con 26 módulos |
 | `PLAY_PACKAGE_NAME` / `PLAY_SERVICE_ACCOUNT_JSON` | ✅ Existen en `ERPlora/app` (2026-10-28): `PLAY_PACKAGE_NAME=com.erplora.app` volvió ese día y el secret ya estaba, igual que `PLAY_REVIEWER_EMAIL`, `PLAY_REVIEWER_HUB` y `PLAY_REVIEWER_PASSWORD` → `publish-play` corre en cada release |
 | `RELEASE_CHANNELS_PENDING` | ✅ Borrada el 2026-10-28: ningún canal pendiente. La Store, Play y S3 publican en cada release y un fallo de cualquiera la pone en rojo |
@@ -43,8 +45,8 @@ landing no ofrece APK: el endpoint de descarga del SaaS hace **redirect 302** a 
 > El 2026-10-28 se reactivó. ERPlora/saas#137 (de ERPlora/saas#132) trajo la marca «Cuenta de
 > revisión de tienda» (ACCOUNTS-F49); el admin de erplora.com se la puso a la cuenta del revisor y
 > marcó su dirección como verificada, porque se creó el 15/10 sin verificar y el código de
-> confirmación no llegaba (el SES de producción sigue en sandbox: README de ERPlora/aws, «SES fuera
-> del sandbox»). La guardia salió `OK` contra producción con el negocio `active`, se volvió a poner
+> confirmación no llegaba (el correo de producción salía por SES, en sandbox: README de ERPlora/aws, «SES fuera
+> del sandbox»; desde el 2026-11-10 sale por el SMTP de OVH, ERPlora/aws#67). La guardia salió `OK` contra producción con el negocio `active`, se volvió a poner
 > `PLAY_PACKAGE_NAME=com.erplora.app` (paso 3) y se borró `RELEASE_CHANNELS_PENDING` (paso 4). Desde
 > entonces, cada versión nueva en `src-tauri/tauri.conf.json` que llega a `main` publica también en
 > Play.
@@ -54,10 +56,14 @@ landing no ofrece APK: el endpoint de descarga del SaaS hace **redirect 302** a 
 > quedó con la **1.1.28** (ficha pública: «Updated on Sep 19, 2026»), que no conoce el acceso por
 > `/launch` del SaaS nuevo: al pulsar «Sign in» sale «This page is not available in the app.» y nadie
 > que instale la app desde Play entra, tampoco el revisor de Google. El arreglo (app#5 y app#6) ya iba
-> en la 1.1.31; lo que faltaba era una versión nueva. La **1.1.32** lo publica: `publish-play` la sube
-> al track `internal` (no hay Variable `PLAY_TRACK`) y la envía a revisión. **A la ficha pública solo
+> en la 1.1.31; lo que faltaba era una versión nueva. La **1.1.32** tenía que publicarlo, pero su
+> `publish-play` falló (run `41201817578`: la API de Google Play no estaba activada en el proyecto de la
+> service account), igual que el de la 1.1.33 (run `41931983087`: el servicio en primer plano sin declarar,
+> app#23). **La 1.1.34 fue la primera que llegó** (run `42366729655`, 2026-11-07), y después la 1.1.35: `publish-play`
+> las sube al track `internal` (no hay Variable `PLAY_TRACK`) y las envía a revisión. **A la ficha pública solo
 > llega cuando se promociona a Producción en Play Console**, a mano (la service account solo tiene
-> «Release to testing tracks»; ver la advertencia de «Lo que YA está hecho»). Es la primera versión
+> «Release to testing tracks»; ver la advertencia de «Lo que YA está hecho»); el 2026-11-11 la ficha pública seguía en
+> la 1.1.28. La 1.1.34 es la primera versión
 > que llega a Play con el micrófono (`RECORD_AUDIO`, app#4): *App content › Data safety* tiene que
 > declarar el audio (ver «Formularios de Play que dependen de un permiso») antes de que Google la
 > revise. Se comprueba instalando desde Play y entrando con la cuenta del revisor hasta abrir su
@@ -76,7 +82,8 @@ landing no ofrece APK: el endpoint de descarga del SaaS hace **redirect 302** a 
 
    Entra con `PLAY_REVIEWER_EMAIL`/`PLAY_REVIEWER_PASSWORD` del `.env` de la raíz —las mismas
    credenciales que recorre Google— y hace el mismo camino que el revisor en la plataforma nueva
-   (desde el 2026-10-14: saas-next en `erplora.com`, hub-next en `https://<slug>.erplora.com`):
+   (desde el 2026-10-14: el SaaS nuevo, `ERPlora/saas`, en `erplora.com`, y el Hub nuevo, `ERPlora/hub`, en
+   `https://<slug>.erplora.com`):
    login de allauth headless (`/_allauth/browser/v1/auth/login`, con CSRF), lista de negocios
    (`/api/hubs/businesses`), `/readyz` del hub, el salto «Abrir» (`/auth/login` del hub →
    `/hub-login/` del SaaS → `/auth/callback`) y las apps que ve dentro (`/api/me`). **Para el envío**
@@ -89,14 +96,17 @@ landing no ofrece APK: el endpoint de descarga del SaaS hace **redirect 302** a 
    puede leer ese buzón, así que la cuenta tiene que estar marcada como cuenta de revisión en el
    SaaS (ERPlora/saas#132). La guardia solo llama al login (`…/auth/login`), que nunca da de alta a
    nadie —el alta es otra puerta, `…/auth/signup`, que no toca—, tenga el SaaS el alta abierta o no
-   (app#7). `/readyz` de hub-next es del servicio, no de un hub: qué hub existe y se puede abrir lo
+   (app#7). `/readyz` del Hub es del servicio, no de un hub: qué hub existe y se puede abrir lo
    dice el SaaS. Si falla, se arregla el hub o la variable y se vuelve a correr: **no se envía con
    esto en rojo.** Con el canal de CI encendido (pasos 3 y 4) la corre además el job `publish-play`
    antes de subir cada release (hub#1888).
 
-1. Enviar a revisión el lote de la Alpha cerrada (botón «Submit N changes for review»).
-2. Aprobada: crear release de **Producción** y enviarla también. Hasta que Producción esté LIVE,
-   `play.google.com/store/apps/details?id=com.erplora.app` responde **404**.
+1. **Hecho** (antes del 2026-09-19; la fecha exacta no se ve desde fuera de la consola): enviar a revisión el lote
+   de la Alpha cerrada (botón «Submit N changes for review»).
+2. **Hecho** (la ficha pública enseña la 1.1.28, «Updated on Sep 19, 2026»): crear release de **Producción** y
+   enviarla también. Hasta que Producción estuvo LIVE, `play.google.com/store/apps/details?id=com.erplora.app`
+   respondía **404**; el 2026-11-11 responde 200. Lo que queda abierto es otra cosa: promocionar a Producción una
+   versión que deje entrar con el SaaS nuevo (la 1.1.34 o posterior, hoy solo en `internal`).
 3. **Hecho el 2026-10-28** (`PLAY_PACKAGE_NAME` volvió ese día; el secret y las tres del revisor ya
    estaban). Se deja el procedimiento por si hubiera que rehacerlo.
    Service account (invitada en Play Console con «Release to testing tracks») → secret
@@ -120,7 +130,10 @@ landing no ofrece APK: el endpoint de descarga del SaaS hace **redirect 302** a 
    cambio que lo enciende sube `version` en `src-tauri/tauri.conf.json`. El 2026-10-28 no se hizo y
    Play siguió con la 1.1.28, que no deja entrar con el acceso nuevo (app#11).
 5. Mergear el cambio del SaaS que retira el APK de Android (`store_url_for`), **solo cuando el
-   paso 2 esté LIVE**: antes mandaría al usuario a un 404 de Google.
+   paso 2 esté LIVE**: antes mandaría al usuario a un 404 de Google. **Hecho en el SaaS nuevo:** `ERPlora/saas` no
+   reparte el APK (Android no está en `_APP_PLATFORM_FILES` de `public/appdist.py`) y `store_url_for` de
+   `public/downloads.py` manda Android a la ficha de Play mientras `GOOGLE_PLAY_LISTING_LIVE` esté encendido (lo está
+   por defecto y la tarea de prod no lo cambia).
 
 ## Requisitos
 
@@ -185,7 +198,7 @@ revisión la versión que lo lleva: sin ello Google la rechaza o la para. Lo hac
 | Build del AAB | este repo, [`tauri-release.yml`](.github/workflows/tauri-release.yml) job `build-android` |
 | Subida a S3 (AWS, OIDC) | ídem, job `upload-s3` |
 | Publicación en Play | ídem, job **`publish-play`** — gateado por la Variable `PLAY_PACKAGE_NAME` (vacía = saltado) y saltado también mientras `play` esté en `RELEASE_CHANNELS_PENDING` (app#7); corre en cada release desde el 2026-10-28 |
-| Redirect 302 a Play | SaaS `apps/public/downloads.py::store_url_for` + setting `GOOGLE_PLAY_APP_ID` |
+| Redirect 302 a Play | SaaS `public/downloads.py::store_url_for` + settings `GOOGLE_PLAY_LISTING_LIVE` (si la ficha existe) y `GOOGLE_PLAY_APP_ID` (otro `applicationId`; vacío = `com.erplora.app`) |
 
 ## Lo que YA está hecho
 

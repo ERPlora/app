@@ -81,8 +81,11 @@ decide:
 Para publicar: subir `version` en `src-tauri/tauri.conf.json` (hoy 1.1.35, la que mantiene la pantalla
 encendida con la app Android en primer plano: app#26; la 1.1.34 quitó el servicio en primer plano que
 Google Play no dejaba publicar sin declararlo con un vídeo: app#23; la 1.1.33 sacó las fichas del hub del
-autocompletado de Android: app#15; la 1.1.32 llevó a Google Play el acceso por `/launch` de app#5 y app#6,
-porque la 1.1.31 salió con Play apagado: app#11; la siguiente es 1.1.36 o mayor) y
+autocompletado de Android: app#15; la 1.1.32 tenía que llevar a Google Play el acceso por `/launch` de app#5 y app#6,
+porque la 1.1.31 salió con Play apagado: app#11. La 1.1.32 y la 1.1.33 no llegaron a Play: su `publish-play` falló
+(la 1.1.32, run `41201817578`, con la API de Google Play sin activar en el proyecto; la 1.1.33, run `41931983087`, por
+el servicio en primer plano sin declarar, app#23), así que sus GitHub Releases siguen en borrador y sin tag; la
+Store y S3 sí las recibieron. La primera que subió a Play fue la 1.1.34; la siguiente es 1.1.36 o mayor) y
 hacer push a `main`. **La versión se sube a mano**, nada la incrementa solo, y ese push es lo único que
 hace falta: un push a `main` sin cambio de versión no publica nada, tampoco en un canal que se acaba de
 encender (`GOOGLE-PLAY.md`, paso 4).
@@ -121,12 +124,12 @@ primero sus Variables y secrets y después se quita de la lista; quitarlo es lo 
 **S3 (AWS, OIDC, sin claves estáticas).** `upload-s3` asume el rol `AWS_DOWNLOADS_ROLE_ARN` y escribe
 en `DOWNLOADS_BUCKET` las claves de siempre: `downloads/app/v<versión>/…` y `downloads/app/latest/…`,
 con `downloads/app/latest/latest.json` al final (lo que lee el SaaS en `GET /api/v1/app/release/`).
-El rol de aws-next debe confiar **solo** en los runs de `main` de este repo: sujeto OIDC
+El rol de `ERPlora/aws` debe confiar **solo** en los runs de `main` de este repo: sujeto OIDC
 `repo:ERPlora/app:ref:refs/heads/main`. Ojo: la organización emite sujetos con id inmutable, así que
 el que llega de verdad es
 `repo:ERPlora@183305526/app@1418874207:ref:refs/heads/main` (org `ERPlora` = 183305526, repo
 `ERPlora/app` = 1418874207); la condición de confianza tiene que usar ese.
-aws-next creó el bucket y el rol el 2026-10-14 (PLAN-AWS, ronda 18; `stacks/prod/s3_downloads.tf`):
+`ERPlora/aws` creó el bucket y el rol el 2026-10-14 (PLAN-AWS, ronda 18; `stacks/prod/s3_downloads.tf`):
 
 - Bucket `erplora-prod-downloads` (`eu-west-1`): privado, sin nada público. El SaaS lee `latest.json`
   con el rol de su tarea y sirve cada descarga con una URL prefirmada de 300 s.
@@ -203,7 +206,8 @@ declara ningún servicio en primer plano: app#23) y los tests Rust `release_gate
 - **Variables**: `AWS_REGION` (`eu-west-1`), `AWS_DOWNLOADS_ROLE_ARN`, `DOWNLOADS_BUCKET`,
   `MSIX_IDENTITY_NAME`, `MSIX_PUBLISHER`, `MSIX_PUBLISHER_DISPLAY`, `MICROSOFT_STORE_PRODUCT_ID`,
   `PLAY_PACKAGE_NAME`, `PLAY_TRACK`, `PLAY_REVIEWER_EMAIL`, `PLAY_REVIEWER_HUB`,
-  `RELEASE_CHANNELS_PENDING`.
+  `RELEASE_CHANNELS_PENDING`. Son los nombres que lee la CI: a 2026-11-11 están puestas todas menos `PLAY_TRACK`
+  (opcional: sin ella, `internal`) y `RELEASE_CHANNELS_PENDING` (borrada el 2026-10-28).
 
 Ningún secreto vive en el repo: la keystore y `keystore.properties` los escribe el job de Android
 desde los secrets, y `.gitignore` excluye `*.jks`, `*.keystore`, `keystore.properties` y
@@ -244,9 +248,12 @@ release con el flujo antiguo.
 
 ## Tests retirados
 
-Leían el frontend web del monorepo (`apps/web`), que no existe aquí: la SPA nueva vive en `hub-next`
-(`packages/ui`) y el puente JS aún no está portado. Se quitó **solo** la aserción sobre el fichero web;
-lo que se puede comprobar en este repo sigue. El port del puente JS en `hub-next` debe recrearlas.
+Leían el frontend web del monorepo (`apps/web`), que no existe aquí: la SPA nueva vive en `ERPlora/hub` y
+`@erplora/ui` (`ERPlora/ui`, el submódulo `packages/ui`). Se quitó **solo** la aserción sobre el fichero web;
+lo que se puede comprobar en este repo sigue. El port del puente JS debía recrearlas. A 2026-11-11 está portada la
+parte de los avisos (`src/shell/device-notices.ts` de `@erplora/ui`, con su test, que llama a `erplora_notify` y
+`erplora_take_notice_tap`); la de la versión instalada (`plugin:app|version` y `erplora_bridge_status`) no tiene
+llamador en `ERPlora/hub`, `@erplora/ui` ni `ERPlora/saas`.
 
 - `src-tauri/tests/app_update_channel.rs`, test `the_page_and_the_shell_name_the_same_command`
   (retirado entero): `apps/web/src/lib/app-update.ts` invoca `plugin:app|version` y

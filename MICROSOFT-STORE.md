@@ -43,6 +43,14 @@ app; si algún día se añade, **excluirlo del build de Store** (las updates las
 
 ## Pasos manuales (Ioan) — en orden
 
+> **Estado a 2026-11-11: las fases 0 a 3 están hechas, y la 4 en lo que se comprueba desde fuera (el enlace; la
+> insignia de la página no se ha mirado).** La ficha `9P5C0XP1GS69` es pública (la Store dice que se
+> actualizó por última vez el 2026-11-08 a las 18:53 UTC, minutos después de la release 1.1.35); en `ERPlora/app` están
+> las tres `MSIX_*`, `MICROSOFT_STORE_PRODUCT_ID` y los cuatro secrets de la Fase 3, y `RELEASE_CHANNELS_PENDING` no
+> existe desde el 2026-10-28; «Publish to Microsoft Store» salió en verde en las releases 1.1.32 a 1.1.35; y la tarea
+> `saas` de prod lleva `MICROSOFT_STORE_APP_ID=9P5C0XP1GS69`, así que `erplora.com/app/download/windows/` responde 302
+> al Web Installer de la Store. Lo de abajo queda como procedimiento por si hubiera que rehacerlo.
+
 ### Fase 0 — cuenta y ficha (una vez)
 
 1. Cuenta de desarrollador (empresa, **gratuita**) en <https://storedeveloper.microsoft.com/>.
@@ -116,6 +124,11 @@ parece descarga propia pero firma/updates son de la Store) y ponerla en la pági
 descargas junto a macOS/Linux (que siguen sirviéndose de `downloads/` en S3, AWS).
 Enlace a ficha: `https://apps.microsoft.com/detail/<STORE_ID>`.
 
+En el SaaS nuevo (`ERPlora/saas`, 2026-11-11) la descarga de Windows es ese Web Installer, por `store_url_for` de
+`public/downloads.py` con `MICROSOFT_STORE_APP_ID`; la de Linux es la AppImage de la última GitHub Release de este
+repo (`GITHUB_RELEASE_URLS`), no `downloads/` de S3; y macOS no tiene descarga (no hay certificado de Apple ni nada
+publicado).
+
 ## 🪦 Bridge headless: retirado (ADR-0160 → ADR-0196, ejecutado en hub#340)
 
 **Decisión (Ioan, ADR-0160):** NO hay segunda ficha en ninguna tienda. Una sola ficha
@@ -125,7 +138,10 @@ Bridge» (hub#120–#124) quedó **descartada**.
 
 **ADR-0196 fue más lejos y hub#340 lo ejecutó (2026-08-08):** ya no hay binario headless. Del
 árbol se fueron `apps/bridge`, su manifest MSIX, el workflow `bridge-release.yml` y con él la
-publicación a `downloads/bridge/`. Lo que queda por hacer en otros repos:
+publicación a `downloads/bridge/`. Lo que quedaba por hacer en otros repos del producto viejo (`erplora-old/hub` y
+`erplora-old/saas`; en la plataforma nueva no hay nada de eso: `ERPlora/saas` responde 404 en `/bridge/download/`, con
+su test, no tiene `MICROSOFT_STORE_BRIDGE_ID` ni las rutas o los modelos del pairing, y `ERPlora/hub` no tiene
+`/bridge/download/`):
 
 - **hub#507** — Sistema → «Descargar la app» todavía apunta a `/bridge/download/`, que sirve el
   binario retirado. Debe repuntar a `/app/download/`, que el Cloud sirve desde saas#1242.
@@ -136,8 +152,11 @@ publicación a `downloads/bridge/`. Lo que queda por hacer en otros repos:
 
 El packer `scripts/pack-msix.ps1` **ya es de la app**: venía del bridge y `tauri-release.yml` lo
 llamaba sin `-Flavor`, así que el MSIX de la app no podía construirse. **hub#340 / PR #585 lo
-arregló.** Lo único que falta es verificarlo en un runner Windows de verdad, que es DoD de
-**hub#392** (la publicación en Microsoft Store), no de hub#577.
+arregló.** Faltaba verificarlo en un runner Windows de verdad, que es DoD de
+**hub#392** (la publicación en Microsoft Store), no de hub#577. Ya está verificado: el MSIX se construye en
+`windows-latest` en cada release y «Publish to Microsoft Store» salió en verde en las releases 1.1.32 a 1.1.35.
+
+Las referencias `hub#N` y `saas#N` sin organización de este documento son del producto viejo (`erplora-old/…`).
 
 ## Prueba local del MSIX (opcional, en Windows)
 
