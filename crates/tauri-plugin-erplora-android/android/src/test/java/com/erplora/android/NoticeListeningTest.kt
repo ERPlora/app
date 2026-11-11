@@ -8,7 +8,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 /**
- * HUB_APP-F26 (hub#836; the old hub's hub#2307) — the decisions behind keeping the app listening for notices while the screen is off.
+ * HUB_APP-F26 (hub#836; the old hub's hub#2307) — the decisions behind keeping the app listening
+ * for notices while the screen is off.
  *
  * The service itself is Android glue; what can go wrong without anyone noticing lives here, pure:
  * the service type Android 14 demands (without it `startForeground` throws and nothing listens),

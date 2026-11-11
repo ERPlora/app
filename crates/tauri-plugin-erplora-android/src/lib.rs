@@ -220,6 +220,24 @@ struct AskToOpenHubAnswer {
     open: bool,
 }
 
+/// HUB_APP-F26 (hub#836; the old hub's hub#2307) — what the page asks of the listening service: `on`,
+/// and the words of the ongoing notification in the app's language (ADR-0055: the catalogue lives
+/// with the page). Off, no words.
+#[derive(Debug, Serialize)]
+struct KeepListeningArgs {
+    on: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    body: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    channel: Option<String>,
+}
+
+/// `keepListening` resolves with no data (`invoke.resolve()` → `null`): read it as anything (hub#2024).
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+type KeepListeningAnswer = serde::de::IgnoredAny;
+
 /// `leaveApp` resolves with no data (`invoke.resolve()` → `null`): read it as anything (hub#2024).
 type LeaveAppAnswer = serde::de::IgnoredAny;
 
@@ -417,6 +435,26 @@ impl<R: Runtime> ErploraAndroid<R> {
         }
         #[cfg(not(target_os = "android"))]
         Ok(())
+    }
+
+    /// HUB_APP-F26 (hub#836) — keeps the app running with the screen off (a foreground service and
+    /// its ongoing notification) or lets Android reclaim it again. Every notice is born in the page,
+    /// so this is what makes them arrive while nobody looks at the device. On desktop the app is not
+    /// reclaimed.
+    fn keep_listening(&self, args: KeepListeningArgs) -> Result<(), Error> {
+        #[cfg(target_os = "android")]
+        {
+            return self
+                .0
+                .run_mobile_plugin::<KeepListeningAnswer>("keepListening", args)
+                .map(|_| ())
+                .map_err(|e| Error::PluginInvoke(e.to_string()));
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = args;
+            Ok(())
+        }
     }
 
     /// Round 2026-11-04a — whether the system voice (Android's `TextToSpeech`) can read the language.
@@ -775,6 +813,19 @@ async fn open_app_settings<R: Runtime>(app: tauri::AppHandle<R>) -> Result<(), E
     app.erplora_android().open_app_settings()
 }
 
+/// HUB_APP-F26 (hub#836) — the page asks the app to keep listening for notices with the screen off,
+/// or to stop.
+#[tauri::command]
+async fn keep_listening<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    on: bool,
+    title: Option<String>,
+    body: Option<String>,
+    channel: Option<String>,
+) -> Result<(), Error> {
+    app.erplora_android().keep_listening(KeepListeningArgs { on, title, body, channel })
+}
+
 /// Round 2026-11-04a — whether the system voice reads `language` (`es-ES`): `{ available }`. The
 /// first call waits for the engine to start, so it waits on a blocking thread.
 #[tauri::command]
@@ -833,6 +884,7 @@ where
         request_permissions,
         leave_app,
         open_app_settings,
+        keep_listening,
         tts_available,
         tts_speak,
         tts_stop

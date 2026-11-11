@@ -6,8 +6,9 @@
 //! — another business's hub, the public website, the test SaaS — and this module is the second
 //! gate, in front of the app's own commands, of the Android plugin's (hub#2642) and of the
 //! notification plugin's (hub#2658): the printer, the drawer, the card reader, the way out to the
-//! browser, the Downloads folder, Android's permission dialogs, the system voice, the way out of
-//! the app and the taps on the notices answer only the page whose ORIGIN is the linked hub.
+//! browser, the Downloads folder, Android's permission dialogs, the listening service, the system
+//! voice, the way out of the app and the taps on the notices answer only the page whose ORIGIN is
+//! the linked hub.
 //!
 //! The link itself needs the same care, or the gate is one navigation away from moot: any page
 //! the window shows could navigate to its own address with `?shell=1` and become "the hub". So a
@@ -185,8 +186,9 @@ pub fn linked_hub_only<R: Runtime>(invoke: &Invoke<R>) -> Result<(), &'static st
     Err(NOT_THE_LINKED_HUB)
 }
 
-/// The Android plugin (`plugin:erplora-android`: Android's permissions, the system voice, the way
-/// out of the app) as `run` registers it — behind the same gate as the app's own commands.
+/// The Android plugin (`plugin:erplora-android`: Android's permissions, the listening service, the
+/// system voice, the way out of the app) as `run` registers it — behind the same gate as the app's
+/// own commands.
 pub fn android_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri_plugin_erplora_android::init(linked_hub_only::<R>)
 }

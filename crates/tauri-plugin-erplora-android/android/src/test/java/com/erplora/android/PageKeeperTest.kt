@@ -12,7 +12,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 /**
- * HUB_APP-F26 (hub#836; the old hub's hub#2307) — the glue that keeps the page running while the app listens with the screen off.
+ * HUB_APP-F26 (hub#836; the old hub's hub#2307) — the glue that keeps the page running while the
+ * app listens with the screen off.
  *
  * The foreground service alone kept the process and lost the page: Chromium froze it a minute after
  * Android hid it (measured: 5 heartbeats and a `freeze` at 60 s, against 18/18 with this class).
