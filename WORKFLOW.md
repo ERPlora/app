@@ -54,8 +54,8 @@ que citan los comentarios del código; **no se han vuelto a contrastar con el me
   sola.
 - **Seguir a la escucha con la pantalla apagada** como las aplicaciones de pedidos para comercios
   (Uber Eats Orders, Glovo Partners, Deliveroo Restaurant Hub): servicio en primer plano con su aviso
-  permanente. Desde la 1.1.34 la aplicación no lo lleva, hasta que el Hub lo encienda (HUB_APP-F26,
-  ERPlora/app#23, ERPlora/hub#836). **No hay push** (decisión vigente, erplora-old/hub#2307, cerrada).
+  permanente, que enciende la página del negocio (HUB_APP-F26, ERPlora/hub#836). **No hay push**
+  (decisión vigente, erplora-old/hub#2307, cerrada).
 - **Atrás cierra lo de encima antes de salir** (Square, Loyverse) y **un aviso abre lo que sonó**
   (Square, Shopify Inbox, Zendesk).
 - **Cobrar fuera de la aplicación**: las compras se hacen en el navegador del sistema (ADR-0114 §4),
@@ -127,9 +127,9 @@ Los diálogos del sistema operativo (red local, notificaciones, Bluetooth), prec
 hub («Vamos a buscar tu impresora», «Deja que te avisemos»). Los textos son de `HUB_SHELL`.
 
 ### Aviso del sistema
-La notificación del sistema (Windows, macOS, Linux, Android) con título y cuerpo. En Android no hay
-notificación permanente de escucha desde la 1.1.34: se quitó con su servicio en primer plano (HUB_APP-F26,
-ERPlora/app#23).
+La notificación del sistema (Windows, macOS, Linux, Android) con título y cuerpo. En Android, mientras la
+aplicación está a la escucha, además la notificación permanente «ERPlora está a la escucha», silenciosa
+(HUB_APP-F26).
 
 ### Pantallas de otros que esta aplicación usa
 `saas: Abre tu hub` (la lista de negocios de `/shell/`) · `printing: Impresoras` (buscar, añadir, probar,
@@ -250,7 +250,7 @@ El detalle de cada flujo vive en `workflow/<área>.md`; este índice solo lo enu
 | HUB_APP-F23 | Leer una tarjeta NFC para entrar | parcial | [workflow/impresion-y-hardware.md](workflow/impresion-y-hardware.md) |
 | HUB_APP-F24 | Avisar con el sistema aunque nadie mire la pantalla | hecho | [workflow/permisos-y-avisos.md](workflow/permisos-y-avisos.md) |
 | HUB_APP-F25 | Tocar un aviso | hecho | [workflow/permisos-y-avisos.md](workflow/permisos-y-avisos.md) |
-| HUB_APP-F26 | Seguir a la escucha con la pantalla apagada (Android) | no hecho | [workflow/permisos-y-avisos.md](workflow/permisos-y-avisos.md) |
+| HUB_APP-F26 | Seguir a la escucha con la pantalla apagada (Android) | hecho | [workflow/permisos-y-avisos.md](workflow/permisos-y-avisos.md) |
 | HUB_APP-F27 | Arrancar con el ordenador | hecho | [workflow/salidas-y-actualizacion.md](workflow/salidas-y-actualizacion.md) |
 | HUB_APP-F28 | Botón Atrás de Android | hecho | [workflow/salidas-y-actualizacion.md](workflow/salidas-y-actualizacion.md) |
 | HUB_APP-F29 | Abrir un enlace fuera de la aplicación | hecho | [workflow/salidas-y-actualizacion.md](workflow/salidas-y-actualizacion.md) |
@@ -286,7 +286,7 @@ El detalle de cada flujo vive en `workflow/<área>.md`; este índice solo lo enu
 | Imprimir A4 con el diálogo del sistema | hecho | F22 |
 | Tarjeta NFC | parcial: sin validar con hardware | F23 |
 | Aviso del sistema y abrir su pantalla al tocarlo | hecho | F24, F25 |
-| Avisos con la pantalla apagada (sin push) | no hecho: la 1.1.34 quitó el servicio (ERPlora/app#23); vuelve con ERPlora/hub#836 | F26 |
+| Avisos con la pantalla apagada (sin push) | hecho: servicio en primer plano que enciende el Hub (ERPlora/hub#836); en Play, tras su declaración | F26 |
 | Arranque automático | hecho | F27 |
 | Atrás de Android | hecho | F28 |
 | Enlace externo, guardar descarga | hecho / parcial | F29, F30 |
@@ -353,9 +353,8 @@ El detalle de cada flujo vive en `workflow/<área>.md`; este índice solo lo enu
 
 - No lleva el negocio ni la base de datos dentro: no hay servidor local, ni modo sin conexión, ni
   autorización de módulos (la decide el servidor).
-- No hay push (FCM): los avisos con la pantalla apagada irán por mantener la aplicación escuchando
-  (HUB_APP-F26). Desde la 1.1.34 no hay servicio en primer plano: con la pantalla apagada Android congela la
-  aplicación y los avisos llegan al volver a ella.
+- No hay push (FCM): los avisos con la pantalla apagada van por mantener la aplicación escuchando
+  (HUB_APP-F26), y solo mientras la página tiene algo que avisar.
 - No empareja Bluetooth ni escanea dispositivos (solo lee los emparejados); no pide el permiso de escaneo.
 - No actualiza la aplicación por sí misma.
 - No tiene icono de bandeja ni mantiene la aplicación viva al cerrar la ventana.
@@ -381,8 +380,8 @@ Se resuelven con `market-decision`; no las decide el worker.
    consulta su estado ESC/POS en tiempo real antes de dar el papel por salido? (hub#2716; la impresora apagada ya
    la cerró hub#2494: se confirma la escritura en el socket y la caja ve un aviso fijo con «Reintentar».)
 5. **Puesto de impresión que solo imprime** en Android: ¿debe mantenerse a la escucha aunque no haya cocina,
-   citas ni contador de campana? Hoy no escucha ningún puesto (HUB_APP-F26); se decide al portar
-   ERPlora/hub#836.
+   citas ni contador de campana? Hoy escucha solo el puesto con algo que avisar (HUB_APP-F26, BASE-F113 del
+   Hub): uno que solo imprime se congela con la pantalla apagada. La regla es del Hub.
 6. **El QR del menú abre el negocio por https**, no `erplora://`: en un móvil con la aplicación instalada se
    abre en el navegador. ¿Es lo que se quiere?
 7. La ventana emergente de **Meta** («Tu número» de WhatsApp) usa una ventana nueva del navegador integrado,
@@ -401,15 +400,16 @@ Se resuelven con `market-decision`; no las decide el worker.
     si el aviso de la comanda suena (canal por defecto del plugin); si `ping`/`arp` del vigilante hacen
     parpadear una consola en Windows; si en macOS `wait_for_click` vuelve tras pasar el aviso al Centro de
     notificaciones. (El estado real de Play y de la Store ya se sabe: ver HUB_APP-F01.)
-11. **Escucha en Android**: ¿debe pararse el servicio si los avisos se niegan después en los ajustes del
-    sistema? Sin servicio desde la 1.1.34 (ERPlora/app#23): se decide al volver a ponerlo con ERPlora/hub#836.
+11. ~~**Escucha en Android**: ¿debe pararse el servicio si los avisos se niegan después en los ajustes del
+    sistema?~~ Resuelta con ERPlora/hub#836: la página lo comprueba cada vez que arranca y, con los avisos
+    negados, apaga la escucha (BASE-F113); hasta entonces sigue (HUB_APP-F26).
 
 ## Fuentes contrastadas
 
-- `GOOGLE-PLAY.md` dice «Sin declaración de FGS… la app no corre en segundo plano»: vuelve a ser cierto desde
-  la 1.1.34. El servicio en primer plano `specialUse` de hub#2307 se quitó (ERPlora/app#23): el Hub nuevo no lo
-  arrancaba nunca (`keep_listening` no está en ERPlora/hub ni en ERPlora/ui) y Play no publica la versión sin
-  declararlo con un vídeo.
+- El servicio en primer plano `specialUse` de erplora-old/hub#2307 se quitó en la 1.1.34 (ERPlora/app#23)
+  porque el Hub nuevo no lo arrancaba nunca, y volvió con ERPlora/hub#836, cuando el Hub ya lo pedía
+  (`KEEP_LISTENING_COMMAND` de `@erplora/ui`). Play no publica una versión con él sin su declaración y un
+  vídeo (`GOOGLE-PLAY.md`).
 - El README antiguo de la app (`apps/tauri/README.md` del monorepo `ERPlora/hub`, hoy `erplora-old/hub`) y los comentarios de `app-update.ts` decían que macOS «se construye solo en local»;
   `tauri-release.yml` ya construye el `.dmg` en CI (sin notarizar).
 - El guion de QA de Android (`qa-hub-android.md`) no tiene identificadores de escenario, solo fases;
@@ -421,7 +421,7 @@ Se resuelven con `market-decision`; no las decide el worker.
 - `PRINTING-F02` dice que el permiso de red local negado sale «sin traducir»; por el código el shell lo cambia
   por la frase en español (`bridge-transport.ts:151-167`): verificar en pantalla.
 - `KITCHEN-F05` omite tres condiciones del aviso «Nueva comanda»: avisos sin negar, la escucha de Android
-  (HUB_APP-F26, hoy no hecho) y que sale en todos los dispositivos con el hub abierto, también el que la disparó.
+  (HUB_APP-F26) y que sale en todos los dispositivos con el hub abierto, también el que la disparó.
 - `architecture/hub/apps/tauri.md` §«Las cuatro preguntas del ciclo de vida» dice que no hay control para
   cambiar de negocio (hub#447): sí lo hay (HUB_APP-F04), cerrada.
 - `README.md` de la app llama «Bridge» a la app: el Bridge no existe (ADR-0196); lo que queda con ese nombre
