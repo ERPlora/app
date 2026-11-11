@@ -595,9 +595,10 @@ mod tests {
     // erplora.com — so what is measured is the second gate alone. On a computer the plugin answers
     // without Android (an empty permission map, nothing to leave), which is what "it ran" reads as.
 
-    const ANDROID_COMMANDS: [&str; 7] = [
+    const ANDROID_COMMANDS: [&str; 8] = [
         "check_permissions",
         "request_permissions",
+        "keep_listening",
         "leave_app",
         "open_app_settings",
         "tts_available",
@@ -628,14 +629,34 @@ mod tests {
         Till { _app: app, window }
     }
 
+    /// What the Hub sends to keep the app listening (`@erplora/ui`, `src/shell/device-notices.ts`,
+    /// hub#836): `on` and the three words of the ongoing notification, in the person's language.
+    fn hub_starts_listening() -> serde_json::Value {
+        serde_json::json!({
+            "on": true,
+            "title": "ERPlora está a la escucha",
+            "body": "Te avisará cuando algo necesite tu atención, aunque la pantalla esté apagada.",
+            "channel": "Avisos con la pantalla apagada",
+        })
+    }
+
     /// What each Android command answers on a computer when it runs, with the arguments the shell
-    /// sends (the system voice needs its text and language).
+    /// sends (`keep_listening` its `on` and the words; the system voice, its text and language).
     fn ask_android(till: &Till, command: &str) -> Result<serde_json::Value, serde_json::Value> {
         let body = match command {
+            "keep_listening" => hub_starts_listening(),
             "tts_available" => serde_json::json!({ "language": "es-ES" }),
             "tts_speak" => serde_json::json!({ "text": "Hola", "language": "es-ES" }),
             _ => serde_json::json!({}),
         };
+        ask_android_with(till, command, body)
+    }
+
+    fn ask_android_with(
+        till: &Till,
+        command: &str,
+        body: serde_json::Value,
+    ) -> Result<serde_json::Value, serde_json::Value> {
         tauri::test::get_ipc_response(
             &till.window,
             tauri::webview::InvokeRequest {
@@ -707,6 +728,17 @@ mod tests {
         for command in ANDROID_COMMANDS {
             assert_eq!(ask_android(&till, command), ran(command), "{command} refused to the linked hub");
         }
+    }
+
+    /// hub#836 — the sign-out sends the bare order (`{ on: false }`, `stopNoticeListening`), with no
+    /// words: the linked hub is heard, another business is not.
+    #[test]
+    fn the_linked_hub_stops_the_listening_with_the_bare_order_of_the_sign_out_hub836() {
+        let stop = serde_json::json!({ "on": false });
+        let hub = till_with_the_android_plugin("https://panaderia.a.erplora.com/m/sales", Some(linked_to_the_hub()));
+        assert_eq!(ask_android_with(&hub, "keep_listening", stop.clone()), ran("keep_listening"));
+        let other = till_with_the_android_plugin("https://otronegocio.a.erplora.com/", Some(linked_to_the_hub()));
+        assert_eq!(ask_android_with(&other, "keep_listening", stop), refused());
     }
 
     #[test]
