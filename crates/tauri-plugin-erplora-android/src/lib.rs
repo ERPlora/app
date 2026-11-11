@@ -1045,6 +1045,13 @@ mod tests {
             production.contains("run_mobile_plugin::<KeepListeningAnswer>(\"keepListening\", args)"),
             "Rust does not reach Kotlin under the name Kotlin answers to"
         );
+        // On a computer the command answers `Ok` whatever it is handed, so no test can see what
+        // reaches Kotlin: with `on` or one of the words dropped here, the tablet never listens (or
+        // never stops) and every other test stays green.
+        assert!(
+            production.contains("keep_listening(KeepListeningArgs { on, title, body, channel })"),
+            "the command does not hand Kotlin the order and the words exactly as the page sent them"
+        );
         assert!(
             DEFAULT_PERMISSIONS.contains("\"allow-keep-listening\""),
             "erplora-android:default does not grant allow-keep-listening: the hub's capability would refuse it"
