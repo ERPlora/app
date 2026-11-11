@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.view.ViewGroup
 import android.webkit.WebView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -64,6 +65,9 @@ class WatchNoticeTapsArgs {
 )
 class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
 
+    /** Keeps the page running while listening for notices (HUB_APP-F26); `null` until the WebView loads. */
+    private var pageKeeper: PageKeeper? = null
+
     /**
      * Round 2026-11-04a — the system's voice for the assistant's «Read aloud» (the Android WebView
      * has no `speechSynthesis`). Its engine is made on the first `tts_*` request, never before.
@@ -77,6 +81,8 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
      * instead of the notice's. A tap that reaches a dead process through `onNewIntent` is kept by
      * `MainActivity` into the same box.
      *
+     * HUB_APP-F26 (hub#836) — the same WebView gets its `PageKeeper`, which `keep_listening` switches on/off.
+     *
      * hub#247, hub#2552 — only our own pages get the microphone and the position: the origin check
      * goes in front of wry's client on the next turn of the looper. Tauri calls this `load` from wry's
      * `on_webview_created`, after wry's `setWebChromeClient`; the `post` keeps it that way whatever
@@ -86,6 +92,13 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
         super.load(webView)
         webView.post { WebPermissionGate.install(webView) }
         NoticeTaps.pageLoading(activity, activity.intent)
+        val keeper = PageKeeper(webView)
+        val owner = activity as? AppCompatActivity
+        val root = activity.window?.decorView as? ViewGroup
+        if (owner != null && root != null) {
+            keeper.install(root, owner)
+            pageKeeper = keeper
+        }
     }
 
     /**
@@ -173,6 +186,45 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /**
+     * `keep_listening` (HUB_APP-F26, hub#836; the old hub's hub#2307) — keeps the app running with the
+     * screen off so the notices born in the page still arrive (`on: true`, with the words of the
+     * ongoing notification), or lets Android reclaim it again (`on: false`). See [NoticeListening].
+     *
+     * Android refuses to start a foreground service from the background (12+); the page only asks
+     * while somebody is using it, and a refusal is REJECTED so the page can log it — the notices keep
+     * working with the app on screen, as before.
+     */
+    @Command
+    fun keepListening(invoke: Invoke) {
+        val args = invoke.getArgs()
+        if (!args.optBoolean("on", false)) {
+            pageKeeper?.setListening(false)
+            NoticeListeningService.stop(activity)
+            invoke.resolve()
+            return
+        }
+        val texts = NoticeListening.textsOf(
+            args.getString("title", null),
+            args.getString("body", null),
+            args.getString("channel", null),
+        )
+        if (texts == null) {
+            invoke.reject(NoticeListening.TEXT_MISSING)
+            return
+        }
+        try {
+            NoticeListeningService.start(activity, texts)
+            pageKeeper?.setListening(true)
+            invoke.resolve()
+        } catch (e: IllegalStateException) {
+            // `ForegroundServiceStartNotAllowedException` (API 31+) is one of these.
+            invoke.reject(NoticeListening.START_REFUSED)
+        } catch (e: SecurityException) {
+            invoke.reject(NoticeListening.START_REFUSED)
+        }
+    }
+
+    /**
      * `askToOpenHub` (hub#2644) — «Open <hub> on this device?» before a link links another hub.
      *
      * Only Rust calls it (`ErploraAndroid::ask_to_open_hub`): it is in neither `build.rs` nor the
@@ -212,8 +264,15 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
-    /** Round 2026-11-04a: with the activity gone, what was being read answers and the engine's service is unbound. */
+    /**
+     * The page is what listens; with its activity gone, the service would only keep a notification
+     * saying «listening» over nothing (HUB_APP-F26). A configuration change recreates the page, which
+     * asks again on its boot.
+     */
     override fun onDestroy(activity: AppCompatActivity) {
+        pageKeeper?.setListening(false)
+        NoticeListeningService.stop(activity)
+        // Round 2026-11-04a: what was being read answers, and the engine's service is unbound.
         systemVoice.shutdown()
     }
 

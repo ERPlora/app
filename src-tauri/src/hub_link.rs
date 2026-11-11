@@ -6,8 +6,9 @@
 //! — another business's hub, the public website, the test SaaS — and this module is the second
 //! gate, in front of the app's own commands, of the Android plugin's (hub#2642) and of the
 //! notification plugin's (hub#2658): the printer, the drawer, the card reader, the way out to the
-//! browser, the Downloads folder, Android's permission dialogs, the system voice, the way out of
-//! the app and the taps on the notices answer only the page whose ORIGIN is the linked hub.
+//! browser, the Downloads folder, Android's permission dialogs, the listening service, the system
+//! voice, the way out of the app and the taps on the notices answer only the page whose ORIGIN is
+//! the linked hub.
 //!
 //! The link itself needs the same care, or the gate is one navigation away from moot: any page
 //! the window shows could navigate to its own address with `?shell=1` and become "the hub". So a
@@ -185,8 +186,9 @@ pub fn linked_hub_only<R: Runtime>(invoke: &Invoke<R>) -> Result<(), &'static st
     Err(NOT_THE_LINKED_HUB)
 }
 
-/// The Android plugin (`plugin:erplora-android`: Android's permissions, the system voice, the way
-/// out of the app) as `run` registers it — behind the same gate as the app's own commands.
+/// The Android plugin (`plugin:erplora-android`: Android's permissions, the listening service, the
+/// system voice, the way out of the app) as `run` registers it — behind the same gate as the app's
+/// own commands.
 pub fn android_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri_plugin_erplora_android::init(linked_hub_only::<R>)
 }
@@ -595,9 +597,10 @@ mod tests {
     // erplora.com — so what is measured is the second gate alone. On a computer the plugin answers
     // without Android (an empty permission map, nothing to leave), which is what "it ran" reads as.
 
-    const ANDROID_COMMANDS: [&str; 7] = [
+    const ANDROID_COMMANDS: [&str; 8] = [
         "check_permissions",
         "request_permissions",
+        "keep_listening",
         "leave_app",
         "open_app_settings",
         "tts_available",
@@ -628,14 +631,34 @@ mod tests {
         Till { _app: app, window }
     }
 
+    /// What the Hub sends to keep the app listening (`@erplora/ui`, `src/shell/device-notices.ts`,
+    /// hub#836): `on` and the three words of the ongoing notification, in the person's language.
+    fn hub_starts_listening() -> serde_json::Value {
+        serde_json::json!({
+            "on": true,
+            "title": "ERPlora está a la escucha",
+            "body": "Te avisará cuando algo necesite tu atención, aunque la pantalla esté apagada.",
+            "channel": "Avisos con la pantalla apagada",
+        })
+    }
+
     /// What each Android command answers on a computer when it runs, with the arguments the shell
-    /// sends (the system voice needs its text and language).
+    /// sends (`keep_listening` its `on` and the words; the system voice, its text and language).
     fn ask_android(till: &Till, command: &str) -> Result<serde_json::Value, serde_json::Value> {
         let body = match command {
+            "keep_listening" => hub_starts_listening(),
             "tts_available" => serde_json::json!({ "language": "es-ES" }),
             "tts_speak" => serde_json::json!({ "text": "Hola", "language": "es-ES" }),
             _ => serde_json::json!({}),
         };
+        ask_android_with(till, command, body)
+    }
+
+    fn ask_android_with(
+        till: &Till,
+        command: &str,
+        body: serde_json::Value,
+    ) -> Result<serde_json::Value, serde_json::Value> {
         tauri::test::get_ipc_response(
             &till.window,
             tauri::webview::InvokeRequest {
@@ -707,6 +730,17 @@ mod tests {
         for command in ANDROID_COMMANDS {
             assert_eq!(ask_android(&till, command), ran(command), "{command} refused to the linked hub");
         }
+    }
+
+    /// hub#836 — the sign-out sends the bare order (`{ on: false }`, `stopNoticeListening`), with no
+    /// words: the linked hub is heard, another business is not.
+    #[test]
+    fn the_linked_hub_stops_the_listening_with_the_bare_order_of_the_sign_out_hub836() {
+        let stop = serde_json::json!({ "on": false });
+        let hub = till_with_the_android_plugin("https://panaderia.a.erplora.com/m/sales", Some(linked_to_the_hub()));
+        assert_eq!(ask_android_with(&hub, "keep_listening", stop.clone()), ran("keep_listening"));
+        let other = till_with_the_android_plugin("https://otronegocio.a.erplora.com/", Some(linked_to_the_hub()));
+        assert_eq!(ask_android_with(&other, "keep_listening", stop), refused());
     }
 
     #[test]

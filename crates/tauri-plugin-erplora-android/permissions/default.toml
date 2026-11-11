@@ -3,6 +3,8 @@
 # (hub#1906) sends the app to the background, the same as the system Back on the root screen: there
 # is nothing to protect behind it. `allow-open-app-settings` (hub#1886) only opens the app's page in
 # the system settings: the person still decides.
+# `allow-keep-listening` (HUB_APP-F26, hub#836) keeps the app running with the screen off, with Android's ongoing
+# notification saying so; the page only asks for it while somebody is signed in with notices on.
 # `allow-tts-available`, `allow-tts-speak` and `allow-tts-stop` (round 2026-11-04a) read the
 # assistant's answers aloud in the system voice, when the person asks for it: the Android WebView
 # has no `speechSynthesis`, and without them the assistant is mute in the app.
@@ -12,5 +14,5 @@
 "$schema" = "schemas/schema.json"
 
 [default]
-description = "Check and request the runtime permissions the till needs on Android, leave the app with the Back button, open the app's page in the system settings and read the assistant's answers aloud in the system voice."
-permissions = ["allow-check-permissions", "allow-request-permissions", "allow-leave-app", "allow-open-app-settings", "allow-tts-available", "allow-tts-speak", "allow-tts-stop"]
+description = "Check and request the runtime permissions the till needs on Android, leave the app with the Back button, open the app's page in the system settings, keep listening for notices with the screen off and read the assistant's answers aloud in the system voice."
+permissions = ["allow-check-permissions", "allow-request-permissions", "allow-leave-app", "allow-open-app-settings", "allow-keep-listening", "allow-tts-available", "allow-tts-speak", "allow-tts-stop"]

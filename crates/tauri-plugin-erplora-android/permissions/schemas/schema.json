@@ -307,6 +307,18 @@
           "markdownDescription": "Denies the check_permissions command without any pre-configured scope."
         },
         {
+          "description": "Enables the keep_listening command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-keep-listening",
+          "markdownDescription": "Enables the keep_listening command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the keep_listening command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-keep-listening",
+          "markdownDescription": "Denies the keep_listening command without any pre-configured scope."
+        },
+        {
           "description": "Enables the leave_app command without any pre-configured scope.",
           "type": "string",
           "const": "allow-leave-app",
@@ -379,10 +391,10 @@
           "markdownDescription": "Denies the tts_stop command without any pre-configured scope."
         },
         {
-          "description": "Check and request the runtime permissions the till needs on Android, leave the app with the Back button, open the app's page in the system settings and read the assistant's answers aloud in the system voice.\n#### This default permission set includes:\n\n- `allow-check-permissions`\n- `allow-request-permissions`\n- `allow-leave-app`\n- `allow-open-app-settings`\n- `allow-tts-available`\n- `allow-tts-speak`\n- `allow-tts-stop`",
+          "description": "Check and request the runtime permissions the till needs on Android, leave the app with the Back button, open the app's page in the system settings, keep listening for notices with the screen off and read the assistant's answers aloud in the system voice.\n#### This default permission set includes:\n\n- `allow-check-permissions`\n- `allow-request-permissions`\n- `allow-leave-app`\n- `allow-open-app-settings`\n- `allow-keep-listening`\n- `allow-tts-available`\n- `allow-tts-speak`\n- `allow-tts-stop`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Check and request the runtime permissions the till needs on Android, leave the app with the Back button, open the app's page in the system settings and read the assistant's answers aloud in the system voice.\n#### This default permission set includes:\n\n- `allow-check-permissions`\n- `allow-request-permissions`\n- `allow-leave-app`\n- `allow-open-app-settings`\n- `allow-tts-available`\n- `allow-tts-speak`\n- `allow-tts-stop`"
+          "markdownDescription": "Check and request the runtime permissions the till needs on Android, leave the app with the Back button, open the app's page in the system settings, keep listening for notices with the screen off and read the assistant's answers aloud in the system voice.\n#### This default permission set includes:\n\n- `allow-check-permissions`\n- `allow-request-permissions`\n- `allow-leave-app`\n- `allow-open-app-settings`\n- `allow-keep-listening`\n- `allow-tts-available`\n- `allow-tts-speak`\n- `allow-tts-stop`"
         }
       ]
     }

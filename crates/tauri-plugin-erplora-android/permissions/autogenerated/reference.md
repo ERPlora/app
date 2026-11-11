@@ -1,6 +1,6 @@
 ## Default Permission
 
-Check and request the runtime permissions the till needs on Android, leave the app with the Back button, open the app's page in the system settings and read the assistant's answers aloud in the system voice.
+Check and request the runtime permissions the till needs on Android, leave the app with the Back button, open the app's page in the system settings, keep listening for notices with the screen off and read the assistant's answers aloud in the system voice.
 
 #### This default permission set includes the following:
 
@@ -8,6 +8,7 @@ Check and request the runtime permissions the till needs on Android, leave the a
 - `allow-request-permissions`
 - `allow-leave-app`
 - `allow-open-app-settings`
+- `allow-keep-listening`
 - `allow-tts-available`
 - `allow-tts-speak`
 - `allow-tts-stop`
@@ -43,6 +44,32 @@ Enables the check_permissions command without any pre-configured scope.
 <td>
 
 Denies the check_permissions command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`erplora-android:allow-keep-listening`
+
+</td>
+<td>
+
+Enables the keep_listening command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`erplora-android:deny-keep-listening`
+
+</td>
+<td>
+
+Denies the keep_listening command without any pre-configured scope.
 
 </td>
 </tr>

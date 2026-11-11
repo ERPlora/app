@@ -489,6 +489,8 @@ jobs:
                    android.permission.POST_NOTIFICATIONS \
                    android.permission.BLUETOOTH_CONNECT \
                    android.permission.NFC \
+                   android.permission.FOREGROUND_SERVICE \
+                   android.permission.FOREGROUND_SERVICE_SPECIAL_USE \
                    android.permission.ACCESS_FINE_LOCATION \
                    android.permission.ACCESS_COARSE_LOCATION \
                    android.permission.RECORD_AUDIO \
@@ -512,16 +514,6 @@ jobs:
           # (aapt2, targetSdk 36). Dictating to the assistant is optional; the till sells without it.
           echo "$BADGING" | grep -qE "uses-feature-not-required: ?name='android.hardware.microphone'" \
             || { echo "::error::the APK REQUIRES android.hardware.microphone — Play would hide it from devices without a microphone (hub#247)"; echo "$BADGING" | grep -i microphone; exit 1; }
-
-      # No foreground service on the APK (ERPlora/app#23): Google Play refuses the build until one is
-      # declared in Play Console with a video, and the Hub never started the one 1.1.33 had. Read off
-      # the MERGED manifest, so one a library folds in is caught too, before any channel publishes.
-      - name: Check no foreground service on the APK
-        run: |
-          set -euo pipefail
-          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt2 | sort | tail -1)
-          APK=$(find . -name '*.apk' -path '*release*' | head -1)
-          AAPT="$AAPT" ./scripts/ci/apk-foreground-service-guard.sh "$APK"
 
       # Both or red: `if-no-files-found: error` below only fires when NEITHER is there.
       - name: Stage artifacts
