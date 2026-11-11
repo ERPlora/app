@@ -110,7 +110,7 @@ jobs:
   # ── Does this push release? ──────────────────────────────────────────────────────────────────
   version:
     name: Version gate
-    runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     # `write` only to SEE draft releases: GitHub lists drafts to a token with push access alone, so
     # with `contents: read` the draft check below would find none and pass — failing open. This
@@ -160,11 +160,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux may run on our own runner (`CI_RUNNER_LABEL`); Windows and macOS stay on GitHub's
-          # images because there is nowhere else to run them (no Windows images at Hetzner, macOS
-          # needs Apple hardware). ERPlora/app is public, and the org Variable is visible only to
-          # private repos, so today all three are GitHub-hosted.
-          - os: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
+          # All three on GitHub's images: the old stack's shared Linux runner is gone, so no job
+          # reads a runner from a Variable (contract §10).
+          - os: ubuntu-latest
             label: linux
           - os: windows-latest
             label: windows
@@ -360,7 +358,7 @@ jobs:
     name: Build android
     needs: [version, test]
     if: needs.version.outputs.build == 'true'
-    runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -558,7 +556,7 @@ jobs:
     name: Check installers + open draft release
     needs: [version, build, build-android]
     if: needs.version.outputs.release == 'true'
-    runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: write
@@ -703,7 +701,7 @@ jobs:
     needs: [version, collect]
     if: needs.version.outputs.release == 'true' && vars.PLAY_PACKAGE_NAME != '' && !contains(vars.RELEASE_CHANNELS_PENDING, 'play')
     # `jarsigner` (JDK) is what this job takes from the image without installing it.
-    runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       # For the two checks below: this job builds nothing.
@@ -767,7 +765,7 @@ jobs:
     name: Upload to S3 (installers + latest.json)
     needs: [version, collect]
     if: needs.version.outputs.release == 'true' && !contains(vars.RELEASE_CHANNELS_PENDING, 's3')
-    runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     # A hung `aws s3 cp` must not hold the run for hours: fail fast and re-run this job alone
     # (`gh run rerun --failed`, the artifacts persist).
     timeout-minutes: 15
@@ -882,7 +880,7 @@ jobs:
     # the skipped jobs would skip it too. Only on a release: a docs push or a dispatch with
     # `publish=false` publishes nothing on purpose.
     if: always() && needs.version.outputs.release == 'true'
-    runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -919,7 +917,7 @@ jobs:
     name: Tag + GitHub Release
     needs: [version, release-gate]
     if: always() && needs.version.outputs.release == 'true' && needs.release-gate.result == 'success'
-    runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: write

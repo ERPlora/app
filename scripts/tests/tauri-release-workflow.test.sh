@@ -555,6 +555,52 @@ for name in sorted(os.listdir(workflows_dir)):
                 line.strip(),
             )
 
+# ── 10 · Every job runs on a GitHub-hosted image (app#31) ────────────────────────────────────
+# The org Variable `CI_RUNNER_LABEL` (`self-hosted`, visible to private repos only) named the old
+# stack's shared runner, which no longer exists: the org has 0 runners. This repo is public, so it
+# never received the Variable and `|| 'ubuntu-latest'` won by luck; the day it became visible every
+# job behind it would wait forever for a machine that is gone. So the runner is written, never
+# read from a Variable — in every workflow of the repo, matrix entries included.
+HOSTED = ("ubuntu-latest", "windows-latest", "macos-latest")
+
+
+def runners_of(workflow_jobs):
+    """`(job, runner)` for every job that picks a runner; a matrix job yields one per entry."""
+    out = []
+    for job_id, body in workflow_jobs.items():
+        if not isinstance(body, dict) or "uses" in body:
+            continue  # a reusable-workflow call has no runner of its own
+        runs_on = body.get("runs-on")
+        if str(runs_on).strip() == "${{ matrix.os }}":
+            include = ((body.get("strategy") or {}).get("matrix") or {}).get("include") or []
+            entries = [e for e in include if isinstance(e, dict)]
+            out.extend((f"{job_id} ({e.get('label')})", e.get("os")) for e in entries)
+            if not entries:
+                out.append((job_id, None))
+        else:
+            out.append((job_id, runs_on))
+    return out
+
+
+for name in sorted(os.listdir(workflows_dir)):
+    if not name.endswith((".yml", ".yaml")):
+        continue
+    with open(os.path.join(workflows_dir, name), encoding="utf-8") as fh:
+        other_text = fh.read()
+    other_code = "\n".join(ln for ln in other_text.splitlines() if not ln.lstrip().startswith("#"))
+    check(
+        f"{name} does not read `vars.CI_RUNNER_LABEL` (the shared runner it named is gone)",
+        "CI_RUNNER_LABEL" not in other_code,
+        "a runner chosen by an org Variable queues forever once the Variable reaches this repo",
+    )
+    other_jobs = (yaml.safe_load(other_text) or {}).get("jobs") or {}
+    for job_id, runner in runners_of(other_jobs):
+        check(
+            f"{name}: `{job_id}` runs on a GitHub-hosted image ({', '.join(HOSTED)})",
+            runner in HOSTED,
+            f"runs-on is {runner!r}",
+        )
+
 if failures:
     print(f"FAIL: {len(failures)} contract case(s) on {path}", file=sys.stderr)
     for f in failures:

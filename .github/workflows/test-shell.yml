@@ -115,7 +115,7 @@ jobs:
   scripts:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: actionlint + script tests
-    runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -172,7 +172,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
+          - os: ubuntu-latest
             label: linux
             timeout: 30
           - os: windows-latest

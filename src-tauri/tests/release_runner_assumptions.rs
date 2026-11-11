@@ -243,8 +243,11 @@ fn the_cargo_cache_does_not_prune_the_registry_a_concurrent_job_is_reading() {
     );
 }
 
-/// Marker that a job is scheduled on `ci-runner-1` instead of a GitHub-hosted image.
-const SELF_HOSTED_MARKER: &str = "CI_RUNNER_LABEL";
+/// Marker that a workflow can land on a self-hosted runner instead of a GitHub-hosted image: the
+/// label GitHub gives every self-hosted runner. It used to be the org Variable `CI_RUNNER_LABEL`,
+/// which named `ci-runner-1`; that runner is gone and no workflow reads the Variable any more
+/// (app#31), so matching its name would let a new self-hosted job without the guard pass unseen.
+const SELF_HOSTED_MARKER: &str = "self-hosted";
 
 /// Every workflow file in the repository, as `(file name, contents with comments stripped)`.
 fn all_workflows_code() -> Vec<(String, String)> {
@@ -295,8 +298,9 @@ fn no_workflow_on_the_shared_runner_prunes_the_cargo_registry() {
 
     assert!(
         unguarded.is_empty(),
-        "these workflows run on `ci-runner-1` and save a cargo cache without \
-         `{CACHE_SAVE_GUARD}`: {unguarded:?}. The two runner slots share one `$HOME`, so the \
+        "these workflows can run on a self-hosted runner and save a cargo cache without \
+         `{CACHE_SAVE_GUARD}`: {unguarded:?}. The slots of such a runner share one `$HOME` (as \
+         `ci-runner-1`'s two did), so the \
          `Post` of rust-cache `rmRF`s `~/.cargo/registry/src` while the job on the other slot is \
          still compiling from it — measured on v1.1.1: `Cleaning cargo registry` at 00:54:22 and \
          the Android build dead at 00:54:30 with `could not parse/generate dep info ... No such \
