@@ -140,8 +140,12 @@ check(
     sorted(by_label) == ["linux", "macos", "windows"],
     f"labels are {sorted(by_label)}",
 )
+# Linux is GitHub's image, written as such: the org Variable `CI_RUNNER_LABEL` (`self-hosted`)
+# named the old stack's shared runner, which no longer exists (the org has 0 runners). The public
+# repo does not receive it, so `|| 'ubuntu-latest'` won by luck; made visible, every Linux job
+# would queue forever for a machine that is gone (app#31).
 expected_os = {
-    "linux": "${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}",
+    "linux": "ubuntu-latest",
     "windows": "windows-latest",
     "macos": "macos-latest",
 }

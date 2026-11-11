@@ -176,10 +176,12 @@ gh variable set -R ERPlora/app PLAY_TRACK --body internal                      #
 Un job de tienda que corre sin uno de sus secrets sale en **rojo nombrándolo**
 (`scripts/ci/require-config.sh`), nunca se salta en silencio.
 
-**Runner.** `CI_RUNNER_LABEL` es una Variable de la organización `ERPlora` (`self-hosted`) con
-visibilidad solo para repos privados: `ERPlora/app` es público, no la ve, y todos los jobs Linux caen
-en `ubuntu-latest` (lo correcto en un repo público: un runner propio no debe ejecutar código de PRs
-ajenas). No se ha copiado al repo.
+**Runner.** Todos los jobs corren en las máquinas de GitHub (`ubuntu-latest`, `windows-latest`,
+`macos-latest`), escritas en cada `runs-on`, nunca leídas de una Variable: la `CI_RUNNER_LABEL` de la
+organización apuntaba al runner compartido del stack viejo, que ya no existe, y si llegara al repo
+dejaría los jobs en cola para siempre (app#31). Lo exige el contrato de los workflows (§10 de
+`tauri-release-workflow.test.sh`). Es lo correcto en un repo público: un runner propio no debe
+ejecutar código de PRs ajenas.
 
 Las acciones de terceros (todo lo que no es `actions/*`) van fijadas por SHA de commit, con la
 versión en un comentario; el contrato lo exige en todos los workflows. Para subir una: resolver el SHA
@@ -201,7 +203,7 @@ declara ningún servicio en primer plano: app#23) y los tests Rust `release_gate
 - **Variables**: `AWS_REGION` (`eu-west-1`), `AWS_DOWNLOADS_ROLE_ARN`, `DOWNLOADS_BUCKET`,
   `MSIX_IDENTITY_NAME`, `MSIX_PUBLISHER`, `MSIX_PUBLISHER_DISPLAY`, `MICROSOFT_STORE_PRODUCT_ID`,
   `PLAY_PACKAGE_NAME`, `PLAY_TRACK`, `PLAY_REVIEWER_EMAIL`, `PLAY_REVIEWER_HUB`,
-  `RELEASE_CHANNELS_PENDING`, `CI_RUNNER_LABEL` (de la organización, no visible aquí).
+  `RELEASE_CHANNELS_PENDING`.
 
 Ningún secreto vive en el repo: la keystore y `keystore.properties` los escribe el job de Android
 desde los secrets, y `.gitignore` excluye `*.jks`, `*.keystore`, `keystore.properties` y
