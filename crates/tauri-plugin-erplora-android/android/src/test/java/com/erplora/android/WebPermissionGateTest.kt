@@ -22,7 +22,7 @@ import kotlin.test.assertTrue
 import kotlin.test.fail
 
 /**
- * Which pages may use the device's microphone and position (hub#247, hub#2552).
+ * Which pages may use the device's microphone and position.
  *
  * wry's `RustWebChromeClient` grants both to WHATEVER page asks: it asks Android once for the app
  * and, once granted, hands the capture to every origin. And the window does load pages that are not
@@ -172,7 +172,7 @@ class WebPermissionGateTest {
         val wry = RecordingClient()
         val client = guarded(wry)
 
-        assertTrue(client.onShowFileChooser(null, null, null), "attaching a file to the assistant (BASE-F94)")
+        assertTrue(client.onShowFileChooser(null, null, null), "attaching a file to the assistant")
         assertTrue(client.onJsAlert(null, "u", "m", null))
         assertTrue(client.onJsConfirm(null, "u", "m", null))
         assertTrue(client.onJsPrompt(null, "u", "m", "d", null))

@@ -1,4 +1,4 @@
-//! A tap on a system notice opens the screen it is about (hub#2305) — and both ends of that are
+//! A tap on a system notice opens the screen it is about — and both ends of that are
 //! strings nothing compiles against, so both can go missing in silence.
 //!
 //! * The page subscribes to the notification plugin's `actionPerformed` through
@@ -36,7 +36,7 @@ fn the_hub_pwa_may_hear_a_notice_being_tapped() {
     assert!(
         permissions.iter().any(|p| p == REGISTER_LISTENER),
         "capabilities/default.json does not grant {REGISTER_LISTENER}: the hub PWA cannot hear a \
-         tap on a notice, and tapping «New booking» opens the app wherever it was (hub#2305)"
+         tap on a notice, and tapping «New booking» opens the app wherever it was"
     );
 }
 
@@ -53,8 +53,8 @@ fn only_the_hub_pwa_gets_to_listen() {
 
 #[test]
 fn the_page_and_the_shell_name_the_same_event_and_argument() {
-    // The page half (`apps/web/src/main.ts`, `apps/web/src/lib/bridge-transport.ts`) did not move
-    // with the app; only the shell half is checked here (README.md, «Tests retirados»).
+    // The page half lives in the hub's web app, outside this repo; only the shell half is checked
+    // here.
     let shell = read("src/lib.rs");
     assert!(
         shell.contains(
@@ -68,14 +68,14 @@ fn the_page_and_the_shell_name_the_same_event_and_argument() {
         shell.contains("notice_builder(&app, &title, &body, id, path.as_deref()).show()"),
         "`erplora_notify` takes the `id` but no longer hands it to the notice it shows"
     );
-    // On the computer the plugin reports no click (hub#2360): the shell shows the notice itself.
+    // On the computer the plugin reports no click: the shell shows the notice itself.
     assert!(
         shell.contains("notify_on_desktop(app, title, body, id, path, notice_tap::deliver);"),
         "`erplora_notify` no longer shows the desktop notice itself: a click opens nothing"
     );
 }
 
-// ── hub#2360: the tap the page was not there to hear ────────────────────────────────────────────
+// ── The tap the page was not there to hear ──────────────────────────────────────────────────────
 //
 // A click on the computer and a tap that starts the app on Android both land in the shell before
 // (or without) the page hearing them. The shell keeps the tap and the page claims it through a
@@ -83,8 +83,8 @@ fn the_page_and_the_shell_name_the_same_event_and_argument() {
 
 #[test]
 fn the_page_claims_the_tap_the_shell_kept() {
-    // The page half (`apps/web/src/main.ts`) did not move with the app; only the shell half is
-    // checked here (README.md, «Tests retirados»).
+    // The page half lives in the hub's web app, outside this repo; only the shell half is checked
+    // here.
     let shell = read("src/notice_tap.rs");
     assert!(
         shell.contains("pub const NOTICE_TAPPED_EVENT: &str = \"erplora://notice-tapped\";"),
@@ -122,7 +122,7 @@ fn the_hub_pwa_may_claim_a_kept_tap() {
 fn a_tap_that_reaches_a_dead_process_is_kept_by_the_activity() {
     // The system killed the process but kept the task: the activity is restored with its old
     // launcher intent and the tap arrives through `onNewIntent` before the WebView — and so before
-    // any plugin — exists (rv-2411, measured on the emulator). Only the activity sees it.
+    // any plugin — exists. Only the activity sees it.
     let activity = read("gen/android/app/src/main/java/com/erplora/app/MainActivity.kt");
     let hook = activity
         .split("override fun onNewIntent(intent: Intent)")

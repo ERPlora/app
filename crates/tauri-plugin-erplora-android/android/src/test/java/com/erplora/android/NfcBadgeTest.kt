@@ -8,12 +8,12 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * The decidable half of reading a staff badge off the tablet's own NFC reader (hub#988).
+ * The decidable half of reading a staff badge off the tablet's own NFC reader.
  *
- * Same split as `BluetoothSppTest`: the radio can only be proven with a card in a hand, and that
- * validation is booked in pm#145. What CAN be pinned without hardware is every decision around the
- * tap — how a UID becomes the badge string the hub already stores, which UIDs are refused because
- * they would enrol a badge that never matches again, and how long the reader waits.
+ * Same split as `BluetoothSppTest`: the radio can only be proven with a card in a hand. What CAN be
+ * pinned without hardware is every decision around the tap — how a UID becomes the badge string the
+ * hub already stores, which UIDs are refused because they would enrol a badge that never matches
+ * again, and how long the reader waits.
  */
 class NfcBadgeTest {
 
@@ -157,7 +157,7 @@ class NfcBadgeTest {
     @Test
     fun `each refusal has its own code`() {
         // Three different things to do about it: buy a reader, switch NFC on, use another card.
-        // One shared code would collapse them into "it did not work" (the hub#338 lesson).
+        // One shared code would collapse them into "it did not work".
         assertEquals(
             3,
             setOf(NfcBadge.NFC_UNAVAILABLE, NfcBadge.NFC_DISABLED, NfcBadge.NFC_RANDOM_UID).size,

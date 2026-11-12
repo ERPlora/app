@@ -7,7 +7,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Saving a file where the user will find it, on Android (hub#499).
+ * Saving a file where the user will find it, on Android.
  *
  * `MediaStore` cannot be touched without a device, so what is pinned here is what the publisher
  * DECIDES: which Android versions have somewhere public to save at all, what type the file enters
@@ -44,8 +44,8 @@ class DownloadPublisherTest {
     @Test
     fun `the three files a till actually saves get their real type`() {
         // Not cosmetic: the type is what makes a tap in the Files app open the PDF viewer instead
-        // of a text editor. And these are exactly the three of hub#480 — the invoice, the backup
-        // and a document out of `/files`.
+        // of a text editor. And these are the three a till saves — the invoice, the backup and a
+        // document out of `/files`.
         assertEquals("application/pdf", DownloadPublisher.mimeTypeOf("factura-2026-0042.pdf"))
         assertEquals("application/zip", DownloadPublisher.mimeTypeOf("hub.blueprint.zip"))
         assertEquals("text/csv", DownloadPublisher.mimeTypeOf("ventas.csv"))

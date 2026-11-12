@@ -1,8 +1,8 @@
 package com.erplora.android
 
 /**
- * The question the app asks before a link links another hub (hub#2644): «Open <hub> on this
- * device?», answered in an `AlertDialog` by the person, never by the page. The app writes the words
+ * The question the app asks before a link links another hub: «Open <hub> on this device?»,
+ * answered in an `AlertDialog` by the person, never by the page. The app writes the words
  * in English and in Spanish ([ErploraAndroidPlugin.askToOpenHub]); this picks and checks them, pure,
  * so it is decided without a device.
  */

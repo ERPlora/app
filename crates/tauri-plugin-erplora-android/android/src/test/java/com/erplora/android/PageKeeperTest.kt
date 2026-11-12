@@ -12,14 +12,13 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 /**
- * HUB_APP-F26 (hub#836; the old hub's hub#2307) — the glue that keeps the page running while the
- * app listens with the screen off.
+ * The glue that keeps the page running while the app listens with the screen off.
  *
- * The foreground service alone kept the process and lost the page: Chromium froze it a minute after
- * Android hid it (measured: 5 heartbeats and a `freeze` at 60 s, against 18/18 with this class).
- * None of that is seen by the compiler or by the pure decision's test, so without these the fix can
- * be unplugged — the keeper never told to listen, never installed, deaf to the lifecycle — with
- * every other test green and the notices lost again.
+ * The foreground service alone keeps the process and loses the page: Chromium freezes it a minute
+ * after Android hides it (measured: 5 heartbeats and a `freeze` at 60 s, against 18/18 with this
+ * class). None of that is seen by the compiler or by the pure decision's test, so without these the
+ * keeper can be unplugged — never told to listen, never installed, deaf to the lifecycle — with
+ * every other test green and the notices lost.
  *
  * The Android classes are the stubs of the unit-test jar (`isReturnDefaultValues`): the WebView
  * below only records what it is asked to do, and runs at once what is posted to it.

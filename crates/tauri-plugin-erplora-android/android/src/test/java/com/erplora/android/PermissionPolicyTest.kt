@@ -6,49 +6,49 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Qué permisos hay que PEDIR en runtime, por versión de Android.
+ * Which permissions have to be ASKED for at runtime, by Android version.
  *
- * Declararlos en el manifest no basta, y los dos que necesita el TPV fallan **en silencio**:
+ * Declaring them in the manifest is not enough, and the two the till needs fail **silently**:
  *
- *  - Sin `POST_NOTIFICATIONS` (API 33+) la notificación no aparece. Sin excepción ni error: la
- *    comanda entra en cocina y nadie se entera.
- *  - Sin `ACCESS_LOCAL_NETWORK` (API 37+) se bloquea TODO el tráfico a la LAN, por debajo de la
- *    API. El barrido del 9100 son 254 **timeouts**, no errores — indistinguible de «este local no
- *    tiene impresoras». Verificado en el emulador API 37: `discover_printers` devolvía `[]` sin la
- *    menor queja hasta que se concedió el permiso a mano con `adb`.
+ *  - Without `POST_NOTIFICATIONS` (API 33+) the notification does not show. No exception, no error:
+ *    the order reaches the kitchen and nobody notices.
+ *  - Without `ACCESS_LOCAL_NETWORK` (API 37+) ALL traffic to the LAN is blocked, below the API. The
+ *    sweep of 9100 is 254 **timeouts**, not errors — impossible to tell from «this venue has no
+ *    printers». Verified on the API 37 emulator: `discover_printers` returned `[]` without the
+ *    slightest complaint until the permission was granted by hand with `adb`.
  *
- * Y pedir un permiso que la versión no conoce es peor que no pedirlo: en algunos fabricantes deja
- * el diálogo colgado. Por eso la lista se CALCULA y no se escribe fija.
+ * And asking for a permission the version does not know is worse than not asking: on some
+ * manufacturers it leaves the dialog hanging. That is why the list is COMPUTED, not written out.
  */
 class PermissionPolicyTest {
 
     @Test
-    fun `en Android 17 hacen falta los dos`() {
+    fun `Android 17 needs both`() {
         val permisos = PermissionPolicy.required(sdkInt = 37)
         assertTrue(PermissionPolicy.POST_NOTIFICATIONS in permisos)
         assertTrue(PermissionPolicy.ACCESS_LOCAL_NETWORK in permisos)
     }
 
     @Test
-    fun `en Android 16 la red local va implicita en INTERNET y NO se pide`() {
+    fun `on Android 16 the local network comes with INTERNET and is NOT asked for`() {
         val permisos = PermissionPolicy.required(sdkInt = 36)
         assertTrue(PermissionPolicy.POST_NOTIFICATIONS in permisos)
         assertFalse(
             PermissionPolicy.ACCESS_LOCAL_NETWORK in permisos,
-            "pedir un permiso que la versión no conoce puede colgar el diálogo",
+            "asking for a permission the version does not know can hang the dialog",
         )
     }
 
     @Test
-    fun `antes de Android 13 las notificaciones van concedidas y no se piden`() {
+    fun `before Android 13 notifications are granted and not asked for`() {
         val permisos = PermissionPolicy.required(sdkInt = 32)
         assertFalse(PermissionPolicy.POST_NOTIFICATIONS in permisos)
     }
 
     @Test
-    fun `se puede pedir solo lo que la app va a usar`() {
-        // Un despliegue solo-pantalla (KDS sin impresora) no tiene por qué pedir la red local, y
-        // un permiso que se pide sin usarlo es un «no» fácil del usuario.
+    fun `only what the app will use can be asked for`() {
+        // A screen-only deployment (a KDS with no printer) has no reason to ask for the local
+        // network, and a permission asked for without being used is an easy «no» from the user.
         assertEquals(
             listOf(PermissionPolicy.POST_NOTIFICATIONS),
             PermissionPolicy.required(sdkInt = 37, localNetwork = false, bluetooth = false),
@@ -60,7 +60,7 @@ class PermissionPolicyTest {
     }
 
     @Test
-    fun `sin nada que usar no se molesta al usuario`() {
+    fun `with nothing to use the user is not bothered`() {
         assertEquals(
             emptyList(),
             PermissionPolicy.required(
@@ -73,8 +73,8 @@ class PermissionPolicyTest {
     }
 
     @Test
-    fun `el orden es estable — notificaciones, red local, bluetooth`() {
-        // El usuario ve los diálogos en este orden; que cambie entre versiones desconcierta.
+    fun `the order is stable — notifications, local network, bluetooth`() {
+        // The user sees the dialogs in this order; having it change between versions is confusing.
         assertEquals(
             listOf(
                 PermissionPolicy.POST_NOTIFICATIONS,
@@ -85,7 +85,7 @@ class PermissionPolicyTest {
         )
     }
 
-    // ── ADR-0204 / hub#388: the SPP transport needs BLUETOOTH_CONNECT on Android 12+ ─────────
+    // ── The SPP transport needs BLUETOOTH_CONNECT on Android 12+ ──────────────────────────────
 
     @Test
     fun `bluetooth connect is required from Android 12 on`() {
@@ -105,8 +105,8 @@ class PermissionPolicyTest {
 
     @Test
     fun `a bluetooth-only scope does not drag the other dialogs in`() {
-        // ADR-0204 point 4: permissions in context. Printing to a bluetooth printer has nothing
-        // to do with the LAN or with notifications.
+        // Permissions are asked in context: printing to a bluetooth printer has nothing to do with
+        // the LAN or with notifications.
         assertEquals(
             listOf(PermissionPolicy.BLUETOOTH_CONNECT),
             PermissionPolicy.required(sdkInt = 37, notifications = false, localNetwork = false),

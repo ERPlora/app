@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs a command that installs system packages and re-runs it while ANOTHER process holds one of
-# apt's locks (ERPlora/infra#313).
+# apt's locks.
 #
 #   bash scripts/ci/apt-lock-retry.sh sudo apt-get update
 #   bash scripts/ci/apt-lock-retry.sh pnpm -F @erplora/web exec playwright install --with-deps chromium
@@ -48,10 +48,10 @@ while :; do
         exit "$rc"
     fi
     if [ "$(date +%s)" -ge "$deadline" ]; then
-        echo "::error::apt lock still held by another job after ${wait_seconds}s (${attempt} attempts) — giving up (infra#313)" >&2
+        echo "::error::apt lock still held by another job after ${wait_seconds}s (${attempt} attempts) — giving up" >&2
         exit "$rc"
     fi
-    echo "apt lock held by another job on this runner — attempt ${attempt} failed, retrying in ${interval}s (infra#313)" >&2
+    echo "apt lock held by another job on this runner — attempt ${attempt} failed, retrying in ${interval}s" >&2
     sleep "$interval"
     attempt=$((attempt + 1))
 done

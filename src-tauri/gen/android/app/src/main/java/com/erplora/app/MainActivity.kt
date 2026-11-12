@@ -11,12 +11,12 @@ import com.erplora.android.SystemBarInsets
 
 class MainActivity : TauriActivity() {
   /**
-   * Reserve the status bar and the cutout before anything is drawn (hub#1719).
+   * Reserve the status bar and the cutout before anything is drawn.
    *
-   * `enableEdgeToEdge()` only asks for the window to extend behind the system bars; nothing was
-   * reserving the strip they sit on, so the window's content started at the physical top of the
-   * screen and every page loaded inside it — the sign-in page the SaaS serves, the till, a module
-   * — painted over the clock.
+   * `enableEdgeToEdge()` only asks for the window to extend behind the system bars; without
+   * reserving the strip they sit on, the window's content starts at the physical top of the screen
+   * and every page loaded inside it — the sign-in page the SaaS serves, the till, a module — paints
+   * over the clock.
    *
    * The padding goes on the activity's content view, which is the WebView's container: it is
    * already there at this point (the WebView is not — the Rust side creates it later, during
@@ -34,13 +34,13 @@ class MainActivity : TauriActivity() {
   /**
    * No autofill for the window (app#15). The WebView takes its `AutofillManager` from this
    * activity; without one, the hub's forms — customers' e-mails and notes — never reach Android's
-   * autofill service, which offered to save them as a password. See [AutofillOptOut].
+   * autofill service, which would offer to save them as a password. See [AutofillOptOut].
    */
   override fun getSystemService(name: String): Any? =
     AutofillOptOut.systemService(name) { super.getSystemService(it) }
 
   /**
-   * A tap on a notice while the task is alive (hub#2360). When the system had killed the process,
+   * A tap on a notice while the task is alive. When the system had killed the process,
    * the activity comes back with its old launcher intent and the tap arrives here — before the
    * WebView, and so before any plugin, exists: nobody else would hear it. The box keeps it until the
    * page claims it; once the page listens, the notification plugin delivers the taps itself.

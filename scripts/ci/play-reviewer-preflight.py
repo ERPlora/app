@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""Does the Google review account really get inside a living business? — ERPlora/hub#1718.
+"""Does the Google review account really get inside a living business?
 
 The step a person runs BEFORE sending the app to Google (`GOOGLE-PLAY.md`, step 0), and the
 `publish-play` job before every upload. The instructions handed to the reviewer promise that
-signing in with the test account shows the app working; on 2026-09-09 that was measured and it was
-false — the account landed on the empty «Crea tu negocio gratis» screen, and once a hub existed, on
-a hub with zero modules. A reviewer who cannot see the app rejects it, and a rejection costs another
-whole round.
+signing in with the test account shows the app working. If the account lands on the empty «Crea tu
+negocio gratis» screen, or on a hub with zero modules, the reviewer cannot see the app and rejects
+it, and a rejection costs another whole round.
 
-It walks the reviewer's own path on the platform live since 2026-10-14 — saas-next at `erplora.com`,
-hub-next at `https://<slug>.erplora.com`:
+It walks the reviewer's own path — the SaaS at `erplora.com`, the hub at
+`https://<slug>.erplora.com`:
 
   1. sign-in     allauth.headless, browser client: `GET /_allauth/browser/v1/config` (CSRF cookie)
                  and `POST /_allauth/browser/v1/auth/login` → `meta.is_authenticated` + session;
@@ -26,25 +25,25 @@ Exits 0 only when ALL of it holds, and 1 naming the first thing that does not:
   saas_unreachable     the SaaS did not answer
   code_required        the account signs in, but the SaaS asks it for the code it mails
                        (`login_by_code`, `verify_email`): Google's reviewer cannot read that
-                       mailbox → mark it as a review account in the SaaS (ERPlora/saas#132)
+                       mailbox → mark it as a review account in the SaaS
   login_rejected       the account no longer signs in
   hubs_unreadable      the SaaS would not list the account's businesses
-  no_hubs              the account has no business at all               → the 09/09 signup screen
+  no_hubs              the account has no business at all               → the sign-up screen
   hub_not_in_account   PLAY_REVIEWER_HUB names a hub that is not one of the account's
   hub_unreachable      that hub's address does not answer
   hub_not_ready        the SaaS cannot open it, or it answers but is not ready
   hub_session_refused  the jump into the hub did not open a session for the account
   hub_detail_withheld  the hub opened one but would not say which apps the account sees
-  hub_without_modules  it is up and EMPTY                               → the 09/09 shell
+  hub_without_modules  it is up and EMPTY                               → an empty shell
 
 What it writes on the platform: the SaaS session of the login, and, on success, one single-use code
 and the hub's session — exactly what the reviewer's own «Open» writes (the hub keeps its copy of the
 user on first entry). It never creates an account nor a hub: it posts only to the sign-in, which in
 allauth.headless never signs anyone up — the sign-up is its own door, `POST …/auth/signup`, that this
-control never calls (saas-next `accounts/doors.py`), whatever `is_open_for_signup` says (app#7).
+control never calls (the SaaS's `accounts/doors.py`), whatever `is_open_for_signup` says (app#7).
 
 The slug is never written here: it comes from `PLAY_REVIEWER_HUB`. A hardcoded one would keep
-passing after the `.env` is pointed elsewhere (2026-09-09). The password is read and sent, never
+passing after the `.env` is pointed elsewhere. The password is read and sent, never
 printed — not even on the failure paths.
 
 Usage:  python3 scripts/ci/play-reviewer-preflight.py
@@ -64,29 +63,29 @@ import urllib.request
 from html.parser import HTMLParser
 from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 
-# 🪤 Measured 2026-09-16: with urllib's default User-Agent, Cloudflare answered 403 «error code:
-# 1010» and the control died at the login without looking at anything.
+# 🪤 With urllib's default User-Agent, Cloudflare answers 403 «error code: 1010» and the control
+# dies at the login without looking at anything.
 USER_AGENT = "ERPlora-play-reviewer-preflight/1.0 (+https://erplora.com)"
 
 SAAS_URL = os.environ.get("PLAY_REVIEWER_SAAS_URL", "https://erplora.com").rstrip("/")
-# `{slug}` is filled from PLAY_REVIEWER_HUB: hub-next serves every hub at its own subdomain.
+# `{slug}` is filled from PLAY_REVIEWER_HUB: the hub serves every business at its own subdomain.
 HUB_URL = os.environ.get("PLAY_REVIEWER_HUB_URL", "https://{slug}.erplora.com")
 
 TIMEOUT = 30
 
 REQUIRED = ("PLAY_REVIEWER_EMAIL", "PLAY_REVIEWER_PASSWORD", "PLAY_REVIEWER_HUB")
 
-# saas-next's addresses (config/urls.py, hubs/api.py, accounts/handoff.py).
+# The SaaS's addresses (config/urls.py, hubs/api.py, accounts/handoff.py).
 CONFIG_PATH = "/_allauth/browser/v1/config"
 LOGIN_PATH = "/_allauth/browser/v1/auth/login"
 BUSINESSES_PATH = "/api/hubs/businesses"
 HUB_LOGIN_PATH = "/hub-login/"
-# hub-next's addresses (config/urls.py, base/auth_views.py, base/api.py).
+# The hub's addresses (config/urls.py, base/auth_views.py, base/api.py).
 READYZ_PATH = "/readyz"
 JUMP_PATH = "/auth/login"
 ME_PATH = "/api/me"
 
-# The sign-in steps that wait for the code saas-next mails (`accounts/tests/test_sign_in_code.py`):
+# The sign-in steps that wait for the code the SaaS mails (`accounts/tests/test_sign_in_code.py`):
 # every password sign-in (`login_by_code`), and an address not yet proven (`verify_email`).
 MAILED_CODE_FLOWS = ("login_by_code", "verify_email")
 
@@ -146,7 +145,7 @@ def credentials() -> tuple[str, str, str]:
             "missing_credentials",
             f"{', '.join(missing)} missing. Set them in {env_file} (or export them) with the "
             "account Google reviews the app with and the slug of its hub. Without them this CANNOT "
-            "be checked, and sending the app to Google blind is what cost the 09/09 round.",
+            "be checked, and sending the app to Google blind can cost a whole review round.",
         )
     return (
         values["PLAY_REVIEWER_EMAIL"],
@@ -327,7 +326,7 @@ def sign_in(saas: Browser, email: str, password: str) -> None:
             f"the review account exists and its password is accepted, but {SAAS_URL} asks it for "
             f"the code it mails ({', '.join(mailed_code)}). Google's reviewer cannot read that "
             "mailbox, so the review would stop at the sign-in. The account has to be exempt from "
-            "the mailed code as a review account in the SaaS (ERPlora/saas#132).",
+            "the mailed code as a review account in the SaaS.",
         )
     meta = payload.get("meta") if isinstance(payload, dict) else None
     if (
@@ -365,7 +364,7 @@ def find_business(saas: Browser, wanted_slug: str) -> dict:
         fail(
             "no_hubs",
             "the review account has NO business: whoever signs in sees the sign-up of a business, "
-            "which is exactly what the reviewer saw on 09/09.",
+            "which is exactly what the reviewer would see.",
         )
     row = next((r for r in rows if r["slug"] == wanted_slug), None)
     if row is None:
@@ -386,7 +385,7 @@ def find_business(saas: Browser, wanted_slug: str) -> dict:
 
 def check_hub_up(hub: Browser, hub_url: str) -> None:
     # ── 3. …that is actually up ──────────────────────────────────────────────
-    # hub-next's /readyz is the service's (database + migrations), not one hub's: which hub exists
+    # The hub's /readyz is the service's (database + migrations), not one business's: which hub exists
     # and may open is the SaaS's answer above, and what is inside is step 5.
     answer = hub.send(f"{hub_url}{READYZ_PATH}")
     if answer.status == 0:
@@ -473,7 +472,7 @@ def enter_hub(saas: Browser, hub: Browser, hub_url: str, slug: str) -> None:
 
 
 def count_modules(hub: Browser, hub_url: str, slug: str) -> list[str]:
-    # ── 5. …and is not an empty shell. This is the 09/09 failure ─────────────
+    # ── 5. …and is not an empty shell ────────────────────────────────────────
     answer = hub.send(f"{hub_url}{ME_PATH}")
     if answer.status == 0:
         fail("hub_unreachable", f"{hub_url}{ME_PATH} does not answer: {answer.body}")

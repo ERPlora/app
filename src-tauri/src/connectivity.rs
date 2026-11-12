@@ -1,21 +1,19 @@
-//! What the window shows when the NETWORK dies under it (hub#1716).
+//! What the window shows when the NETWORK dies under it.
 //!
-//! The shell is a thin client (ADR-0159): everything the user sees is served by a remote origin,
-//! so a navigation that never lands is not an edge case — in a bar or a salon the line drops every
-//! few days. Until hub#1716 the app had no answer for it. The bundled fallback page existed, but
-//! `open_main_window` reached it only from the `Err(_)` arm of `initial.parse::<tauri::Url>()`, a
-//! branch whose own comment said it should not happen; every real failure landed on whatever the
-//! platform paints on a dead load — a **blank white window** on macOS (WKWebView never finishes a
-//! failed provisional navigation) and the grey `ERR_INTERNET_DISCONNECTED` page on Android. A
-//! Tauri window has no address bar and no reload button, so neither has a way out: the till is
-//! dead until somebody kills the app from the operating system.
+//! The shell is a thin client: everything the user sees is served by a remote origin, so a
+//! navigation that never lands is not an edge case — in a bar or a salon the line drops every few
+//! days. Left to the platform, a dead load paints a **blank white window** on macOS (WKWebView
+//! never finishes a failed provisional navigation) and the grey `ERR_INTERNET_DISCONNECTED` page
+//! on Android. A Tauri window has no address bar and no reload button, so neither has a way out:
+//! the till would be dead until somebody kills the app from the operating system. This module
+//! moves the window to the bundled offline page and back to the origin when the network answers.
 //!
 //! ## Why a probe and not a load-failure callback
 //!
 //! There isn't one. Tauri 2 offers `on_navigation` (fires BEFORE the load) and `on_page_load`
 //! (`Started`/`Finished`), and "finished" is not portable evidence: Android's WebView fires
 //! `onPageFinished` for its own error page, so the load looks successful on precisely the platform
-//! where the symptom was measured. What IS portable is asking the network ourselves.
+//! that shows that page. What IS portable is asking the network ourselves.
 //!
 //! The rule is deliberately about TRANSPORT, not about HTTP: any response at all — 200, 404, 502 —
 //! means the network is up and the page in the window is the origin's own business (a 404 is
@@ -80,8 +78,7 @@ pub fn next_screen(
         (ShellScreen::Target, Reachability::Offline) if consecutive_failures >= OFFLINE_STRIKES => {
             Some(ShellScreen::Offline)
         }
-        // Back on our own, the moment the network answers. This is the half the issue asks for by
-        // name: nobody should have to reload anything.
+        // Back on our own, the moment the network answers: nobody should have to reload anything.
         (ShellScreen::Offline, Reachability::Online) => Some(ShellScreen::Target),
         _ => None,
     }
@@ -274,9 +271,9 @@ pub async fn probe_and_apply<R: Runtime>(window: &WebviewWindow<R>, nav: &ShellN
 
 /// When to probe again after a probe, or `None` to sleep until something asks.
 ///
-/// Pure so the schedule is testable: a guard that stops asking is indistinguishable, from the
-/// counter, from no guard at all — which is exactly how the first version of this shipped, keyed
-/// on the screen alone, and why the window still came up blank with the guard armed.
+/// Pure so the schedule is testable: a guard that stops asking is indistinguishable from no guard
+/// at all. It reads the failures as well as the screen, because keyed on the screen alone a first
+/// failed probe leaves the window on the target with no timer and the confirming probe never comes.
 pub fn next_probe_delay(screen: ShellScreen, consecutive_failures: u32) -> Option<Duration> {
     match (screen, consecutive_failures) {
         // Still stranded: keep asking, with backoff, so the window comes back by itself.
@@ -293,8 +290,8 @@ pub fn next_probe_delay(screen: ShellScreen, consecutive_failures: u32) -> Optio
 /// Watch the connection for as long as the window lives.
 ///
 /// Sleeps on [`ShellNav::wake`] while everything is fine, so a healthy till pays nothing for this;
-/// polls with [`retry_delay`] only while the offline page is up, which is the half of the issue
-/// that asks for the app to come back on its own.
+/// polls with [`retry_delay`] only while a failure is pending or the offline page is up, so the
+/// window comes back on its own.
 pub fn spawn_connectivity_guard<R: Runtime>(window: WebviewWindow<R>, nav: Arc<ShellNav>) {
     tauri::async_runtime::spawn(async move {
         let mut next_probe_in = Some(FIRST_PROBE_DELAY);
@@ -385,11 +382,10 @@ mod tests {
 
     #[test]
     fn a_first_failure_still_schedules_the_probe_that_would_confirm_it() {
-        // MEASURED on the real app (hub#1716): with the schedule keyed on the SCREEN alone, the
-        // first failed probe left the window on `Target`, so the guard went back to sleep on the
-        // `Notify` with no timer — and the second strike, the one `OFFLINE_STRIKES` is waiting
-        // for, never came. The window stayed blank for as long as anyone watched it. The debounce
-        // has to cost a wait, not the whole feature.
+        // With the schedule keyed on the SCREEN alone, the first failed probe leaves the window on
+        // `Target`, so the guard goes back to sleep on the `Notify` with no timer — and the second
+        // strike, the one `OFFLINE_STRIKES` is waiting for, never comes. The debounce has to cost
+        // a wait, not the whole feature.
         assert_eq!(
             next_probe_delay(ShellScreen::Target, 1),
             Some(retry_delay(1)),
@@ -399,7 +395,7 @@ mod tests {
 
     #[test]
     fn a_clean_target_costs_no_timer_at_all() {
-        // The other half: a healthy till must not poll. This runs on tablets on mobile data.
+        // A healthy till must not poll: this runs on tablets on mobile data.
         assert_eq!(next_probe_delay(ShellScreen::Target, 0), None);
     }
 
@@ -580,10 +576,8 @@ mod tests {
 
     #[test]
     fn the_guard_takes_the_window_off_a_dead_origin_by_itself_and_brings_it_back_by_itself() {
-        // Every assertion above is on a pure function, and pure functions were ALL GREEN through
-        // the version of this guard that shipped broken (hub#1716): `next_screen` was right,
-        // `next_probe_delay` was right, and the app still came up blank because the loop asked
-        // them the wrong question and then slept forever. The loop is the seam that rots silently,
+        // Every assertion above is on a pure function, and they all stay green when the loop asks
+        // them the wrong question and then sleeps forever. The loop is the seam that rots silently,
         // so it is the seam that has to be driven — against a real socket, because "the network
         // came back and nobody reloaded anything" cannot be asserted against a mock.
         //
@@ -607,7 +601,7 @@ mod tests {
             &bundled_page_url().expect("bundled page url"),
             "the guard never moved the window to ERPlora's own offline page, so the till is \
              looking at the platform's error screen — blank on macOS, grey on Android — with no \
-             way out (hub#1716)",
+             way out",
         );
 
         // The line is back. Still nobody touches anything.
@@ -616,15 +610,15 @@ mod tests {
             &window,
             &target,
             "the window never returned to the hub once the network answered again: somebody has \
-             to reload an app that has no reload button (hub#1716)",
+             to reload an app that has no reload button",
         );
         assert_eq!(nav.screen(), ShellScreen::Target);
     }
 
     #[test]
     fn a_dead_target_leaves_the_window_on_the_bundled_page_and_a_live_one_brings_it_back() {
-        // The regression in one test: this is the symptom of hub#1716 (window stuck on the
-        // platform's error page) and the fix (our page, then back on its own) as a pair.
+        // The symptom (window stuck on the platform's error page) and the fix (our page, then
+        // back on its own) as a pair.
         let window = mock_window();
         let target = Url::parse("https://panaderia.a.erplora.com/?shell=1").unwrap();
         let nav = ShellNav::new(target.clone());
@@ -641,8 +635,8 @@ mod tests {
         assert_eq!(
             window.url().unwrap().as_str(),
             bundled_page_url().expect("bundled page url").as_str(),
-            "the window did not end up on ERPlora's own offline page: this is exactly the blank \
-             macOS window / grey Android error page of hub#1716"
+            "the window did not end up on ERPlora's own offline page: the till is left on the \
+             blank macOS window or the grey Android error page"
         );
 
         // Network back: nobody reloads anything.
@@ -652,7 +646,7 @@ mod tests {
         assert_eq!(
             window.url().unwrap().as_str(),
             target.as_str(),
-            "the window never came back to the hub on its own (hub#1716)"
+            "the window never came back to the hub on its own"
         );
     }
 }

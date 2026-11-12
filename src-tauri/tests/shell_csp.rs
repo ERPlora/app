@@ -1,4 +1,4 @@
-//! Guard for the CSP of the SHELL page — the other half of the boundary in hub#334.
+//! Guard for the CSP of the SHELL page — the other half of the boundary drawn by the remote ACL.
 //!
 //! **Where this policy actually reaches** (read off tauri 2.11.5, `manager::AppManager::get_asset`
 //! → `manager::set_csp`): `app.security.csp` is applied ONLY to the assets served out of
@@ -13,9 +13,9 @@
 //!
 //! - the policy drifts open (an `'unsafe-inline'` "to make something work") and the one bundled
 //!   page in the app stops being a sealed box;
-//! - the policy stays tight but the page quietly violates it — which is exactly what was shipping
-//!   before hub#334: the only control on the page was an inline `onclick`, and CSP has no hash and
-//!   no nonce for an inline event handler, so the button did nothing at all.
+//! - the policy stays tight but the page quietly violates it — an inline `onclick` on its only
+//!   control, say: CSP has no hash and no nonce for an inline event handler, so the button would do
+//!   nothing at all.
 
 use std::collections::BTreeMap;
 
@@ -134,9 +134,9 @@ fn the_shell_page_frames_nothing_and_rebases_nowhere() {
 
 #[test]
 fn the_shell_csp_carries_no_cloud_origin() {
-    // Deliberate, and the opposite of what `architecture/hub/apps/tauri.md` used to say: this
-    // policy never reaches the pages served from erplora.com, so listing the cloud origins here
-    // would only widen the bundled page for nothing. The cloud origins live in `remote.urls`.
+    // Deliberate: this policy never reaches the pages served from erplora.com, so listing the cloud
+    // origins here would only widen the bundled page for nothing. The cloud origins live in
+    // `remote.urls`.
     for (directive, sources) in csp_directives() {
         for source in sources {
             assert!(

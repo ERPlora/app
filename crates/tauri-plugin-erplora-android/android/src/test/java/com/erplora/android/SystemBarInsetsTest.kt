@@ -4,15 +4,13 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 /**
- * How much room the window must reserve at the top so nothing paints over the system clock
- * (hub#1719).
+ * How much room the window must reserve at the top so nothing paints over the system clock.
  *
  * The activity opts into edge-to-edge, which on `targetSdk = 36` is not a choice: from Android 15
  * the framework lays every window out behind the system bars whether the app asks for it or not.
- * Edge-to-edge alone is fine; what was missing is the other half — reserving the inset — and
- * without it the WebView starts at the physical top of the screen. QA reproduced it twice on
- * 2026-09-09 (emulator `Pixel_10_Pro` / Android 16, APK 1.1.21): the back arrow of the sign-in
- * page the SaaS serves inside the app landed on top of the system clock.
+ * Edge-to-edge alone is fine; the other half is reserving the inset, and without it the WebView
+ * starts at the physical top of the screen: on the `Pixel_10_Pro` emulator (Android 16) the back
+ * arrow of the sign-in page the SaaS serves inside the app landed on top of the system clock.
  *
  * The amount is not simply the status bar. Two insets can occupy that strip and they do not always
  * agree:

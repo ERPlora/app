@@ -1,50 +1,51 @@
-//! Smoke test contra hardware REAL. `#[ignore]` a propósito: exige una impresora encendida en la
-//! LAN, así que no puede correr en CI ni en el gate — se lanza a mano cuando hay una delante.
+//! Smoke test against REAL hardware. `#[ignore]` on purpose: it needs a powered printer on the LAN,
+//! so it cannot run in CI — it is run by hand when there is one at hand.
 //!
 //! ```bash
 //! cargo test -p erplora-peripherals --test hardware_smoke -- --ignored --nocapture
 //! ```
 //!
-//! Existe porque el emulador de Android no puede dar **el descubrimiento**, y conviene ser exacto
-//! sobre por qué — medido el 2026-08-09 contra una térmica real en `192.168.100.196:9100`:
+//! It exists because the Android emulator cannot do **discovery**, and it pays to be precise about
+//! why — measured against a real thermal printer at `192.168.100.196:9100`:
 //!
-//!  - **Salir SÍ sale.** La NAT del emulador enruta la conexión TCP saliente por el host, así que
-//!    desde `10.0.2.15` se llega a una IP de la LAN: `nc -w 3 -z 192.168.100.196 9100` → OK. O sea
-//!    que **imprimir por IP a una impresora ya conocida funciona en el emulador**.
-//!  - **Encontrarla NO.** El barrido /24 saca el prefijo de la IP local, que ahí es `10.0.2` — barre
-//!    la red del emulador, no la de casa. Y el mDNS es multicast, que la NAT no cruza.
+//!  - **Getting out DOES work.** The emulator's NAT routes the outgoing TCP connection through the
+//!    host, so a LAN IP is reachable from `10.0.2.15`: `nc -w 3 -z 192.168.100.196 9100` → OK. So
+//!    **printing by IP to an already known printer works in the emulator**.
+//!  - **Finding it does NOT.** The /24 sweep takes its prefix from the local IP, which there is
+//!    `10.0.2` — it sweeps the emulator's network, not the real LAN. And mDNS is multicast, which
+//!    the NAT does not cross.
 //!
-//! Por eso el emulador vale para el camino de impresión pero no para el de descubrimiento, y la
-//! única forma de verificar ESE es una impresora de verdad delante.
+//! So the emulator is good for the print path but not for discovery, and the only way to verify
+//! THAT is a real printer at hand.
 //!
-//! Gasta papel: `smoke_imprime_pagina_de_prueba` solo imprime si se pide con
-//! `ERPLORA_SMOKE_PRINT=1`, para poder buscar la impresora sin dejar tiques por el suelo.
+//! It uses paper: `smoke_prints_a_test_page` only prints when asked with `ERPLORA_SMOKE_PRINT=1`,
+//! so the printer can be looked for without leaving tickets on the floor.
 
 use erplora_peripherals::discovery::{discover_printers, parse_printer_id, LocalNetworkAccess};
 use erplora_peripherals::escpos::render_test_page;
 use erplora_peripherals::queue::{PrintJob, PrintQueue, RetryPolicy};
 use erplora_peripherals::registry::DeviceRegistry;
 
-/// Registro en un temporal: el smoke test no debe pisar el `devices.json` real de la máquina.
-/// `nombre` lo hace único por test, que comparten proceso.
+/// Registry in a temp dir: the smoke test must not overwrite the machine's real `devices.json`.
+/// `nombre` makes it unique per test, since the tests share a process.
 fn registro_temporal(nombre: &str) -> DeviceRegistry {
     let dir = std::env::temp_dir().join(format!("erplora-smoke-{}-{nombre}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("crear temporal");
+    std::fs::create_dir_all(&dir).expect("create the temp dir");
     DeviceRegistry::load(dir.join("devices.json"))
 }
 
 #[tokio::test]
-#[ignore = "necesita una impresora de red encendida en la LAN"]
-async fn smoke_descubre_la_impresora_de_la_lan() {
+#[ignore = "needs a powered network printer on the LAN"]
+async fn smoke_discovers_the_lan_printer() {
     let registry = registro_temporal("descubre");
 
-    // Con una impresora delante el permiso está concedido por definición; si no lo estuviera, el
-    // outcome lo diría en vez de devolver una lista vacía (hub#338).
+    // With a printer at hand the permission is granted by definition; if it were not, the outcome
+    // would say so instead of returning an empty list.
     let encontradas = discover_printers(&registry, LocalNetworkAccess::Granted)
         .await
-        .expect("el descubrimiento no debe fallar")
+        .expect("discovery must not fail")
         .scanned_printers()
-        .expect("con permiso concedido el escaneo SÍ corre")
+        .expect("with the permission granted the scan DOES run")
         .to_vec();
 
     for p in &encontradas {
@@ -52,71 +53,71 @@ async fn smoke_descubre_la_impresora_de_la_lan() {
     }
     assert!(
         !encontradas.is_empty(),
-        "ninguna impresora en la LAN. Ojo: cero NO es un error del código — un firewall, una VLAN \
-         o la impresora apagada dan exactamente este resultado, sin excepción."
+        "no printer on the LAN. Mind: zero is NOT a bug in the code — a firewall, a VLAN \
+         or a printer that is off give exactly this result, with no exception."
     );
 
-    // El id ES el contrato con el frontend y con `devices.json`: si deja de ser parseable, los
-    // roles (cocina/barra/caja) dejan de poder asignarse.
+    // The id IS the contract with the frontend and with `devices.json`: if it stops being
+    // parseable, roles (kitchen/bar/till) can no longer be assigned.
     for p in &encontradas {
-        parse_printer_id(&p.id).unwrap_or_else(|e| panic!("id no parseable {}: {e}", p.id));
+        parse_printer_id(&p.id).unwrap_or_else(|e| panic!("unparseable id {}: {e}", p.id));
     }
 }
 
 #[tokio::test]
-#[ignore = "necesita una impresora de red encendida en la LAN"]
-async fn smoke_el_descubrimiento_registra_los_dispositivos() {
-    // El bug que arregló `device_key`: si el descubrimiento no registra, `devices.json` queda
-    // vacío, `erplora_get_devices` devuelve [] y NO se pueden asignar roles — con el módulo de
-    // impresión inservible y sin un solo error que lo explique.
+#[ignore = "needs a powered network printer on the LAN"]
+async fn smoke_discovery_registers_the_devices() {
+    // If discovery does not register, `devices.json` stays empty, `erplora_get_devices` returns []
+    // and roles CANNOT be assigned — the printing module is useless and not a single error says
+    // why.
     let registry = registro_temporal("registra");
 
     let encontradas = discover_printers(&registry, LocalNetworkAccess::Granted)
         .await
-        .expect("descubrimiento")
+        .expect("discovery")
         .scanned_printers()
-        .expect("con permiso concedido el escaneo SÍ corre")
+        .expect("with the permission granted the scan DOES run")
         .to_vec();
-    assert!(!encontradas.is_empty(), "sin impresora no se puede comprobar el registro");
+    assert!(!encontradas.is_empty(), "without a printer the registry cannot be checked");
 
     let registrados = registry.get_all();
     assert!(
         !registrados.is_empty(),
-        "descubrió {} impresora(s) pero registró 0: los roles no se podrían asignar",
+        "discovered {} printer(s) but registered 0: roles could not be assigned",
         encontradas.len()
     );
     for d in &registrados {
         println!("  · key={} mac={:?} ip={}", d.key, d.mac, d.ip);
-        assert!(!d.key.is_empty(), "un dispositivo sin key no se puede direccionar");
+        assert!(!d.key.is_empty(), "a device without a key cannot be addressed");
     }
 }
 
 #[tokio::test]
-#[ignore = "IMPRIME EN PAPEL: exige ERPLORA_SMOKE_PRINT=1"]
-async fn smoke_imprime_pagina_de_prueba() {
+#[ignore = "PRINTS ON PAPER: needs ERPLORA_SMOKE_PRINT=1"]
+async fn smoke_prints_a_test_page() {
     if std::env::var("ERPLORA_SMOKE_PRINT").ok().as_deref() != Some("1") {
-        println!("saltado: exporta ERPLORA_SMOKE_PRINT=1 para gastar papel de verdad");
+        println!("skipped: export ERPLORA_SMOKE_PRINT=1 to use real paper");
         return;
     }
     let registry = registro_temporal("imprime");
     let encontradas = discover_printers(&registry, LocalNetworkAccess::Granted)
         .await
-        .expect("descubrimiento")
+        .expect("discovery")
         .scanned_printers()
-        .expect("con permiso concedido el escaneo SÍ corre")
+        .expect("with the permission granted the scan DOES run")
         .to_vec();
     let destino = encontradas
         .iter()
-        // Una A4 de oficina también escucha en el 9100 pero habla PCL/PostScript: mandarle ESC/POS
-        // escupe folios de basura. Solo se imprime a lo que NO se ha identificado como A4.
+        // An office A4 printer listens on 9100 too but speaks PCL/PostScript: sending it ESC/POS
+        // spits out pages of garbage. Only what has NOT been identified as A4 is printed to.
         .find(|p| p.category != "a4")
-        .expect("ninguna impresora térmica encontrada");
+        .expect("no thermal printer found");
 
-    println!("imprimiendo en {} ({})", destino.id, destino.name);
-    let target = parse_printer_id(&destino.id).expect("id parseable");
+    println!("printing to {} ({})", destino.id, destino.name);
+    let target = parse_printer_id(&destino.id).expect("parseable id");
     let bytes = render_test_page(&destino.id, &serde_json::json!({}));
-    // Por la MISMA vía que la app instalable: `erplora_print` encola y el worker de `PrintQueue`
-    // envía. Aquí no hace falta el worker — `send_once` es el envío que ese worker hace.
+    // Through the SAME path as the installable app: `erplora_print` queues and the `PrintQueue`
+    // worker sends. The worker is not needed here — `send_once` is the send that worker does.
     PrintQueue::new(RetryPolicy::default())
         .send_once(&PrintJob {
             job_id: None,
@@ -125,6 +126,6 @@ async fn smoke_imprime_pagina_de_prueba() {
             attempts: 0,
         })
         .await
-        .expect("la impresión debe llegar a la impresora");
-    println!("enviados {} bytes de ESC/POS", bytes.len());
+        .expect("the print job must reach the printer");
+    println!("sent {} bytes of ESC/POS", bytes.len());
 }

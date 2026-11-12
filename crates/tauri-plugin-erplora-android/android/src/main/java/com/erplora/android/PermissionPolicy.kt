@@ -3,22 +3,22 @@ package com.erplora.android
 import android.os.Build
 
 /**
- * Qué permisos hay que PEDIR en runtime según la versión de Android.
+ * Which permissions have to be ASKED for at runtime, by Android version.
  *
- * Declararlos en el manifest no basta: desde Android 6 los peligrosos se conceden en runtime, y
- * los dos que necesita el TPV llegaron tarde y fallan **en silencio**:
+ * Declaring them in the manifest is not enough: since Android 6 the dangerous ones are granted at
+ * runtime, and the two the till needs came late and fail **silently**:
  *
- *  - `POST_NOTIFICATIONS` (API 33): sin él la notificación no aparece. No hay excepción ni error —
- *    la comanda entra en cocina y nadie se entera.
- *  - `ACCESS_LOCAL_NETWORK` (API 37): bloquea **todo** el tráfico a la LAN, y por debajo de la API
- *    (alcanza a los sockets crudos, no solo a mDNS). Sin él, el barrido del puerto 9100 son 254
- *    **timeouts**, no errores: indistinguible de «este local no tiene impresoras». Verificado en el
- *    emulador API 37 — `discover_printers` devolvía `[]` sin la menor queja.
+ *  - `POST_NOTIFICATIONS` (API 33): without it the notification does not show. No exception, no
+ *    error — the order reaches the kitchen and nobody notices.
+ *  - `ACCESS_LOCAL_NETWORK` (API 37): blocks **all** traffic to the LAN, below the API (it reaches
+ *    raw sockets, not only mDNS). Without it, the sweep of port 9100 is 254 **timeouts**, not
+ *    errors: impossible to tell from «this venue has no printers». Verified on the API 37 emulator
+ *    — `discover_printers` returned `[]` without the slightest complaint.
  *
- * Pedir un permiso que la versión no conoce es peor que no pedirlo: en algunos fabricantes deja el
- * diálogo colgado. Por eso la lista se CALCULA y no se escribe fija.
+ * Asking for a permission the version does not know is worse than not asking: on some
+ * manufacturers it leaves the dialog hanging. That is why the list is COMPUTED, not written out.
  *
- * Lógica pura salvo la constante de versión, para poder probarla en la JVM sin emulador.
+ * Pure logic except for the version constant, so it can be tested on the JVM without an emulator.
  */
 object PermissionPolicy {
 
@@ -26,29 +26,29 @@ object PermissionPolicy {
     const val ACCESS_LOCAL_NETWORK = "android.permission.ACCESS_LOCAL_NETWORK"
     const val BLUETOOTH_CONNECT = "android.permission.BLUETOOTH_CONNECT"
 
-    /** Android 13 — antes, las notificaciones van concedidas de fábrica. */
+    /** Android 13 — before it, notifications are granted out of the box. */
     const val SDK_NOTIFICATIONS = 33
 
-    /** Android 17 — antes, la red local va implícita en `INTERNET`. */
+    /** Android 17 — before it, the local network comes with `INTERNET`. */
     const val SDK_LOCAL_NETWORK = 37
 
     /**
      * Android 12 — before, talking to bonded devices rides the install-time `BLUETOOTH`
      * permission. From API 31 on, listing or connecting to a bonded RFCOMM printer without
      * `BLUETOOTH_CONNECT` fails the same silent way as the other two: an empty bonded list and a
-     * till that reports no bluetooth printers (ADR-0204, hub#388).
+     * till that reports no bluetooth printers.
      */
     const val SDK_BLUETOOTH_CONNECT = 31
 
     /**
-     * Permisos a solicitar en un dispositivo con nivel de API [sdkInt].
+     * Permissions to ask for on a device at API level [sdkInt].
      *
-     * El orden es estable —notificaciones, red local, bluetooth— porque es el orden en que el
-     * usuario ve los diálogos, y que cambie entre versiones desconcierta.
+     * The order is stable — notifications, local network, bluetooth — because it is the order in
+     * which the user sees the dialogs, and having it change between versions is confusing.
      *
-     * @param notifications si la app va a mostrar notificaciones del sistema.
-     * @param localNetwork si la app va a hablar con dispositivos de la red local (impresoras).
-     * @param bluetooth si la app va a hablar con impresoras Bluetooth SPP emparejadas (ADR-0204).
+     * @param notifications whether the app will show system notifications.
+     * @param localNetwork whether the app will talk to devices on the local network (printers).
+     * @param bluetooth whether the app will talk to bonded Bluetooth SPP printers.
      */
     @JvmStatic
     @JvmOverloads

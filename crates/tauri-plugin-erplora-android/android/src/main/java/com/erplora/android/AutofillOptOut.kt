@@ -5,9 +5,9 @@ package com.erplora.android
  *
  * Every page the window shows is either a business's hub — customers' names, e-mails, phones and
  * notes, health data included — or erplora.com, its sign-in among them. Handed to the system, the
- * hub's forms come back as «Save password to Google Password Manager?» with a
- * customer's e-mail as the user and their notes as the password (QA, 2026-10-30, Android 16 with
- * Google Password Manager). So the window hands out no `AutofillManager` at all.
+ * hub's forms come back as «Save password to Google Password Manager?» with a customer's e-mail as
+ * the user and their notes as the password (seen on Android 16 with Google Password Manager). So
+ * the window hands out no `AutofillManager` at all.
  *
  * Why the activity, and not the page or the WebView:
  *
@@ -24,8 +24,8 @@ package com.erplora.android
  *
  * It is the whole window, the SaaS sign-in included: Chromium takes the manager once per WebView
  * and keeps it, so it cannot be switched on and off by page. So no password manager fills that
- * sign-in: the password is typed or pasted each time the account is asked for — the first start
- * (`HUB_APP-F02`), after signing out, and once erplora.com's session has ended too.
+ * sign-in: the password is typed or pasted each time the account is asked for — the first start,
+ * after signing out, and once erplora.com's session has ended too.
  */
 object AutofillOptOut {
 

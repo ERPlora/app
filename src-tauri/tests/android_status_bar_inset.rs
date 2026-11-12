@@ -1,22 +1,20 @@
-//! Guard on the Android window reserving the top system inset (hub#1719).
+//! Guard on the Android window reserving the top system inset.
 //!
 //! `MainActivity` opts into edge-to-edge, which on `targetSdk = 36` is not really a choice: from
 //! Android 15 the framework lays every window out behind the system bars whether the app asks for
-//! it or not. Opting in is half the contract; the other half is reserving the inset, and that half
-//! was missing. The WebView therefore started at the physical top of the screen, so **any** page
-//! loaded inside it — the sign-in page the SaaS serves, the till, a module — painted over the
-//! clock. QA reproduced it twice on 2026-09-09 (emulator `Pixel_10_Pro` / Android 16, APK 1.1.21):
-//! the back arrow of the sign-in page landed on top of the system clock, and the search layer of
-//! `/m/sales/pos` blacked the status bar out entirely.
+//! it or not. Opting in is half the contract; the other half is reserving the inset. Without it the
+//! WebView starts at the physical top of the screen, so **any** page loaded inside it — the sign-in
+//! page the SaaS serves, the till, a module — paints over the clock: the back arrow of the sign-in
+//! page lands on top of the system clock, and the search layer of `/m/sales/pos` blacks the status
+//! bar out entirely.
 //!
 //! The reserving itself lives in `SystemBarInsets` (plugin module), where the Kotlin unit tests
 //! reach it on every PR. What no unit test can reach is the wiring: `MainActivity` belongs to
 //! `:app`, and `:app` cannot even be configured without files that `cargo tauri android build`
 //! writes, so nothing compiles it until the release job. Dropping the call would therefore be
-//! silent — green PR, green tags, and an APK painting under the clock again — which is exactly the
-//! shape of regression this file exists to stop.
+//! silent — green PR, green tags, and an APK painting under the clock again.
 //!
-//! The same goes for the COLOUR of the reserved strip (hub#1903): it is the window background the
+//! The same goes for the COLOUR of the reserved strip: it is the window background the
 //! app theme declares, and it has to be the header colour of the hub shell in light and in dark,
 //! or a band of another colour sits between the clock and the header.
 
@@ -54,7 +52,7 @@ const INSETS_HELPER: &str =
 
 /// The activity must actually reserve the strip.
 ///
-/// This is the whole user-visible promise of hub#1719: open the app on a phone and nothing paints
+/// This is the whole user-visible promise: open the app on a phone and nothing paints
 /// over the system clock. It holds for every page because it is applied to the window, not to a
 /// template.
 #[test]
@@ -65,7 +63,7 @@ fn the_activity_reserves_the_top_system_inset() {
         activity.contains("SystemBarInsets.applyTopSystemBarPadding"),
         "{MAIN_ACTIVITY} no longer reserves the top system inset: with edge-to-edge on, the \
          WebView goes back to starting at the physical top of the screen and every page it loads \
-         paints over the clock (hub#1719)",
+         paints over the clock",
     );
 }
 
@@ -83,8 +81,7 @@ fn the_activity_still_opts_into_edge_to_edge() {
     assert!(
         activity.contains("enableEdgeToEdge()"),
         "{MAIN_ACTIVITY} stopped calling enableEdgeToEdge(): below API 35 the system would inset \
-         the window on its own and the padding would land on top of it, leaving a double margin \
-         (hub#1719)",
+         the window on its own and the padding would land on top of it, leaving a double margin",
     );
 }
 
@@ -104,30 +101,27 @@ fn the_helper_covers_the_cutout_and_keeps_the_other_insets_alive() {
 
     assert!(
         helper.contains("systemBars()"),
-        "{INSETS_HELPER} must ask for systemBars(): it is the status bar the clock lives in \
-         (hub#1719)",
+        "{INSETS_HELPER} must ask for systemBars(): it is the status bar the clock lives in",
     );
     assert!(
         helper.contains("displayCutout()"),
         "{INSETS_HELPER} must ask for displayCutout() as well: the status bar can be hidden, the \
-         notch cannot, and then nothing would reserve the strip (hub#1719)",
+         notch cannot, and then nothing would reserve the strip",
     );
     assert!(
         !helper.contains("CONSUMED"),
         "{INSETS_HELPER} must not consume every inset: that zeroes env(safe-area-inset-bottom) \
-         too, and the tabbar goes back under the gesture bar (hub#1719)",
+         too, and the tabbar goes back under the gesture bar",
     );
 }
 
 /// And the strip it just reserved must be SPENT on the way down, or it gets reserved twice.
 ///
-/// hub#1719 padded the window and handed the insets on untouched, so the WebView still reported
-/// the full `env(safe-area-inset-top)` and Ionic added it a second time on the first toolbar
-/// (`ion-header ion-toolbar:first-of-type { padding-top: var(--ion-safe-area-top) }`). QA measured
-/// the result with CDP on 2026-09-16 over the APK of `fb3b48a`: `screen.height` 952 against
-/// `innerHeight` 900 on `Pixel_10_Pro` and 800 against 776 on `Pixel_Tablet` — the window already
-/// started 52 / 24 CSS px down — while `env(safe-area-inset-top)` still reported those same 52 / 24.
-/// The header floated half a bar below the clock on every screen (hub#1895).
+/// Padding the window and handing the insets on untouched leaves the WebView reporting the full
+/// `env(safe-area-inset-top)`, and Ionic adds it a second time on the first toolbar
+/// (`ion-header ion-toolbar:first-of-type { padding-top: var(--ion-safe-area-top) }`): the window
+/// already starts 52 CSS px down on a `Pixel_10_Pro` and 24 on a `Pixel_Tablet`, the inset still
+/// reports those same 52 / 24, and the header floats half a bar below the clock on every screen.
 ///
 /// `WindowInsetsCompat.inset(0, reserved, 0, 0)` subtracts the strip from the top of every inset
 /// type — the status bar and the cutout — clamping at zero, and leaves left, right, bottom and the
@@ -141,21 +135,20 @@ fn the_helper_spends_the_strip_it_reserved_before_handing_the_insets_down() {
         helper.contains("insets.inset(0, reserved, 0, 0)"),
         "{INSETS_HELPER} hands the page the insets it already spent on padding: the WebView \
          reports the full env(safe-area-inset-top) and Ionic reserves the status bar a second \
-         time, leaving an empty strip under the clock on every screen (hub#1895)",
+         time, leaving an empty strip under the clock on every screen",
     );
     assert!(
         helper.contains("topInset(bars.top, cutout.top)"),
         "{INSETS_HELPER} must spend the strip THIS device reports — 52 CSS px on a Pixel 10 Pro, \
-         24 on a Pixel Tablet. A fixed number fits one of the two and breaks the other (hub#1895)",
+         24 on a Pixel Tablet. A fixed number fits one of the two and breaks the other",
     );
 }
 
-// ── The colour of the strip (hub#1903) ──────────────────────────────────────────────────────────
+// ── The colour of the strip ─────────────────────────────────────────────────────────────────────
 
-// The comparison against the hub shell's header colour (`apps/web/src/theme/variables.css`) did
-// not move with the app: that theme stayed in ERPlora/hub (README.md, «Tests retirados»). What is
-// still checked here is the Android half: the theme paints the strip with an opaque colour of its
-// own, in light and in dark.
+// The hub shell's header colour lives in the hub's own web theme, outside this repo, so what is
+// checked here is the Android half: the theme paints the strip with an opaque colour of its own,
+// in light and in dark.
 const ANDROID_RES: &str = "src-tauri/gen/android/app/src/main/res";
 const APP_THEME: &str = "Theme.erplora_tauri";
 
@@ -215,7 +208,7 @@ fn strip_colour(qualifier: &str) -> String {
         panic!(
             "{themes_file} leaves android:windowBackground to the parent theme: the strip under \
              the clock is then MaterialComponents' own white (#121212 in dark), not the header \
-             colour (hub#1903)"
+             colour"
         )
     });
     let colour_name = background.trim().strip_prefix("@color/").unwrap_or_else(|| {
@@ -243,21 +236,19 @@ fn strip_colour(qualifier: &str) -> String {
 
 /// In light mode the strip under the clock wears the header colour, so the header reaches the edge.
 ///
-/// Measured by the driver on 2026-09-18 over v1.1.26 on `Pixel_10_Pro` (`adb exec-out screencap`):
-/// the strip was `(255, 255, 255)` — MaterialComponents' `DayNight` window background — and the
-/// «Inicio» header right below it `(246, 247, 249)`, a white band sitting on a grey bar. Every
+/// Left to the parent theme, the strip is MaterialComponents' `DayNight` window background,
+/// `(255, 255, 255)`, a white band sitting on the `(246, 247, 249)` header right below it. Every
 /// native app carries the top bar's colour up to the edge and rests the clock on it.
 #[test]
 fn the_strip_under_the_clock_is_an_opaque_theme_colour_in_light_mode() {
     // `strip_colour` panics unless the theme declares `android:windowBackground` as an opaque
-    // `@color/` resource. The `assert_eq!` against the header colour of the web theme is retired.
+    // `@color/` resource.
     strip_colour("values");
 }
 
 /// And in dark mode, where the parent theme would paint `#121212` over a `#0b0c0e` header.
 #[test]
 fn the_strip_under_the_clock_is_an_opaque_theme_colour_in_dark_mode() {
-    // Same as the light mode test: the Android half only (README.md, «Tests retirados»).
     strip_colour("values-night");
 }
 
@@ -274,8 +265,7 @@ fn the_strip_is_painted_by_the_window_and_by_nothing_else() {
             assert!(
                 !code.contains(painter),
                 "{file} paints a background (`{painter}`) on the way to the WebView: the strip \
-                 under the clock stops showing the window background, which is the header colour \
-                 (hub#1903)",
+                 under the clock stops showing the window background, which is the header colour",
             );
         }
     }
@@ -318,13 +308,10 @@ fn the_android_resources_keep_double_hyphens_out_of_their_comments() {
             assert!(
                 !after[..close].contains("--"),
                 "{}: `--` inside an XML comment is not well-formed and aapt2 refuses the file; \
-                 the release job is the first to compile it (hub#1903)",
+                 the release job is the first to compile it",
                 path.display(),
             );
             rest = &after[close + 3..];
         }
     }
 }
-
-// `the_colour_tests_run_when_the_header_colour_changes` checked that `test-shell.yml` triggers on
-// `apps/web/src/theme/variables.css`; that file is not in this repo (README.md, «Tests retirados»).

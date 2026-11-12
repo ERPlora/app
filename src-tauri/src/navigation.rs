@@ -1,12 +1,11 @@
-//! Which pages of the SaaS the main window follows (hub#1915).
+//! Which pages of the SaaS the main window follows.
 //!
 //! The app boots on the SaaS (`/shell/`) and shows its sign-in, sign-up and account pages inside
-//! its own window. For as long as `on_navigation` answered `true` without looking, that window could
-//! walk to ANY page of erplora.com: the home page with the plan prices, the public marketplace, the
-//! panel with Billing. In the Google Play copy each of those is a door to paying outside Play
-//! billing — a rejection reason — and one round of the Android QA found six, every one closed by
-//! hand in its template. The templates cannot be the only barrier: the next link somebody adds to
-//! the web opens the next door.
+//! its own window. If `on_navigation` answered `true` without looking, that window could walk to
+//! ANY page of erplora.com: the home page with the plan prices, the public marketplace, the panel
+//! with Billing. In the Google Play copy each of those is a door to paying outside Play billing — a
+//! rejection reason. The templates cannot be the only barrier: the next link somebody adds to the
+//! web opens the next door.
 //!
 //! So the APP decides. In the Play copy the SaaS gets a short list of pages the window follows —
 //! sign in, sign up, the way into a hub, the account alone — and everything else of the SaaS is
@@ -19,8 +18,8 @@
 //! through the SaaS.
 //!
 //! This governs the WINDOW. What leaves for the system browser (`open_external_url`) and the
-//! panel's in-page navigation (its own router, without a full load) never reach `on_navigation`;
-//! both are hub#1918.
+//! panel's in-page navigation (its own router, without a full load) never reach `on_navigation`,
+//! so neither is judged here.
 
 use tauri::Url;
 
@@ -39,16 +38,16 @@ pub enum NavigationVerdict {
 const PLAY: &str = "play";
 
 /// Every host the production SaaS answers on, apex included. `www` and `pre` have to be named: both
-/// serve the full site (`/pricing/` answers 200 on each, measured 18/09) and both have the shape of
+/// serve the full site (`/pricing/` answers 200 on each) and both have the shape of
 /// a hub (`<label>.erplora.com`), which is what everything else under `erplora.com` is.
 const SAAS_HOSTS: &[&str] = &["erplora.com", "www.erplora.com", "pre.erplora.com"];
 
-/// The query mark that paints the account WITHOUT the panel (saas#2084, hub#1900).
+/// The query mark that paints the account WITHOUT the panel.
 const ACCOUNT_SURFACE: (&str, &str) = ("surface", "account");
 
 /// The account pages, which the Play copy opens only as the account surface, as path prefixes:
-/// Account under the panel (saas#123), and the old addresses the SaaS sends there for good keeping
-/// the query — the old panel's profile and `/account/`, where Account lived before the move.
+/// Account under the panel, and the old addresses the SaaS sends there for good keeping the query —
+/// the old panel's profile and `/account/`.
 /// Deleting the account ends on the SaaS home page, which is the app's start (`Home`).
 const ACCOUNT_PAGES: &[&str] = &["/dashboard/account/", "/dashboard/profile/", "/account/"];
 
@@ -75,7 +74,7 @@ const PLAY_SAAS_PAGES: &[&str] = &[
     // Google's way back.
     "/_allauth/browser/v1/auth/provider/redirect/",
     "/auth/google/callback/",
-    // Choosing a business (Businesses of the panel, and its old address, saas#123), and joining
+    // Choosing a business (Businesses of the panel, and its old address), and joining
     // one: every invitation waiting, or one first.
     "/dashboard/businesses/",
     "/businesses/",
@@ -94,7 +93,7 @@ const PLAY_SAAS_PAGES: &[&str] = &[
 /// The verdict for `target` in the `distribution` copy of the app, `saas_base` being the SaaS this
 /// build boots on (`ERPLORA_SAAS_URL` or the baked default).
 ///
-/// Every copy but Play follows every link, as before: Microsoft Store allows paying outside the
+/// Every copy but Play follows every link: Microsoft Store allows paying outside the
 /// store for non-game apps, and the direct install has no store at all.
 pub fn navigation_verdict(distribution: &str, saas_base: &str, target: &Url) -> NavigationVerdict {
     if distribution != PLAY || !is_saas(saas_base, target) {

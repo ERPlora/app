@@ -1,11 +1,11 @@
-//! The release gate: what makes a green tag mean "published" (hub#895).
+//! The release gate: what makes a green tag mean "published".
 //!
 //! `tauri-release.yml` gates each publishing job behind a repository Variable, so an empty
-//! Variable turns the job `skipped` — and a skipped job does not colour a run. Three tags in a row
-//! finished GREEN having published nothing (the last one v1.0.3, hub#839): the run that shipped
-//! everything and the run that shipped nothing looked identical from the outside.
+//! Variable turns the job `skipped` — and a skipped job does not colour a run. Without a gate, the
+//! run that shipped everything and the run that shipped nothing both finish GREEN and look
+//! identical from the outside.
 //!
-//! The fix is a final `release-gate` job that reads the result of every other job and fails when a
+//! The gate is a final `release-gate` job that reads the result of every other job and fails when a
 //! channel that was expected to publish did not. The logic lives in `scripts/release-gate.sh` and
 //! is exercised by `scripts/release-gate.test.sh`; what CANNOT be tested there is the wiring, and
 //! the wiring is where this class of bug hides:
@@ -13,7 +13,7 @@
 //! * a gate without `always()` is itself skipped the moment anything upstream fails or skips —
 //!   the guard disappears exactly when it is needed;
 //! * a gate that does not `needs:` a publishing job cannot see it, so adding a fourth channel
-//!   tomorrow would silently reopen hub#895 for that channel only;
+//!   tomorrow would let that channel alone ship nothing in silence;
 //! * a job in `needs:` whose result is never handed to the script is in the dependency graph but
 //!   invisible to the decision — which reads as "checked" and is not.
 //!
@@ -121,7 +121,7 @@ fn gate_block(code: &str) -> String {
         panic!(
             "`tauri-release.yml` has no `{GATE_JOB}:` job. Without it a release whose publishing \
                  jobs were all skipped finishes GREEN and nobody learns that it shipped \
-                 nothing — which happened three times, last with v1.0.3 (hub#895/hub#839)"
+                 nothing"
         )
     })
 }
@@ -137,10 +137,10 @@ fn the_release_ends_in_a_gate_that_runs_even_when_everything_else_did_not() {
         block.contains("always()"),
         "the `{GATE_JOB}` job no longer runs with `always()`. A gate that only runs when its \
          dependencies succeeded cannot report a dependency that did not: the skipped publish jobs \
-         would skip the gate as well and the tag would go green with nothing published (hub#895)"
+         would skip the gate as well and the tag would go green with nothing published"
     );
 
-    // Only on a release (ERPlora/app: every push to `main` runs the workflow, tags no longer do).
+    // Only on a release (every push to `main` runs the workflow).
     // A push whose version is already tagged and a dispatch with `publish: false` publish nothing
     // on purpose; the `version` job is what says which runs are a release.
     assert!(
@@ -209,8 +209,8 @@ fn the_gate_sees_every_other_job_of_the_release() {
         missing.is_empty(),
         "these jobs of `tauri-release.yml` are not in the `needs:` of `{GATE_JOB}`: {missing:?}. \
          The gate is the last job of the release and has to depend on all of them — a publishing \
-         job it does not wait for is a channel that can silently ship nothing, which is hub#895 \
-         reopened for that channel alone"
+         job it does not wait for is a channel that can silently ship nothing while the run \
+         goes green"
     );
     assert!(
         unreported.is_empty(),
@@ -312,19 +312,15 @@ fn the_gate_script_is_committed_and_executable() {
     );
 }
 
-/// A tag that "published" but left the change waiting for a click published nothing (2026-08-19).
+/// A tag that "published" but left the change waiting for a click published nothing.
 ///
 /// `changesNotSentForReview: true` uploads the AAB and stops: the release sits in Play Console's
-/// *Changes not yet submitted for review* until a human presses the button. That is not a
-/// theoretical risk — it is how the very first listing spent five days. On 2026-08-19 the console
-/// held **14 changes** saved since the 14th, `Submission activity` was empty, and the app was
-/// still `Draft` under the temporary name `com.erplora.app (unreviewed)`. Nobody had rejected
-/// anything; nobody had sent anything either.
+/// *Changes not yet submitted for review* until a human presses the button. Nobody rejects
+/// anything; nobody sends anything either.
 ///
 /// A channel whose last step needs a human is not automated, and worse, it looks automated: the
 /// job goes green, the gate goes green, and the release is parked. So the flag has to stay
-/// `false` — and if someone ever needs the old behaviour back, this test is where they have to
-/// come and say why.
+/// `false`.
 #[test]
 fn the_play_upload_actually_sends_the_release_for_review() {
     let code = workflow_code();

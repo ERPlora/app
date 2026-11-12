@@ -1,23 +1,21 @@
-//! Which pages of erplora.com the Google Play copy is willing to show INSIDE its own window
-//! (hub#1915).
+//! Which pages of erplora.com the Google Play copy is willing to show INSIDE its own window.
 //!
 //! The app boots on the SaaS (`/shell/`) and shows its sign-in, sign-up and account pages in the
-//! webview. Until this guard `on_navigation` returned `true` without looking, so the window could
-//! walk to ANY page of erplora.com — the home page with the plan prices, the public marketplace,
-//! the panel with Billing. One round of the Android QA found six such doors (hub#1900, hub#1910,
-//! saas#2083, saas#2084, saas#2085 and the «Log Out» + cookie banner of saas#2088), each one closed
-//! by hand in its template; the next link somebody adds to the web opens the seventh. Paying for
-//! digital goods outside Google Play billing, or being steered there, is a rejection reason.
+//! webview. If `on_navigation` returned `true` without looking, the window could walk to ANY page
+//! of erplora.com — the home page with the plan prices, the public marketplace, the panel with
+//! Billing. Closing each such door by hand in its template is not enough: the next link somebody
+//! adds to the web opens another. Paying for digital goods outside Google Play billing, or being
+//! steered there, is a rejection reason.
 //!
 //! So the APP decides: a short list of SaaS pages it follows, and everything else of the SaaS is
 //! refused in the Play copy — whatever the templates say. The other copies (direct install,
-//! Microsoft Store) keep following every link, exactly as before.
+//! Microsoft Store) keep following every link.
 //!
 //! What is deliberately NOT policed: pages that are not the SaaS. Hubs are where the app lives, the
-//! loopback is development, the bundled page is ours, and foreign hosts keep today's behaviour —
-//! the payment pages this guard exists for are reached through the SaaS, and the SaaS is what the
+//! loopback is development, the bundled page is ours, and foreign hosts keep their usual behaviour
+//! — the payment pages this guard exists for are reached through the SaaS, and the SaaS is what the
 //! list covers. And it governs the WINDOW only: the doors that leave for the system browser
-//! (hub#1900, hub#1910 go through `openExternal`) are the web's guard and hub#1918.
+//! (through `openExternal`) are the web's guard.
 
 use erplora_tauri_lib::{NavigationVerdict, navigation_verdict};
 
@@ -54,8 +52,8 @@ fn assert_all(expected: NavigationVerdict, addresses: &[&str], why: &str) {
 
 #[test]
 fn the_play_copy_refuses_the_saas_pages_that_sell() {
-    // The five the issue names, plus the rest of the public site and the panel. If `on_navigation`
-    // goes back to answering `true` without looking, this is the test that goes red.
+    // The pages that sell, plus the rest of the public site and the panel. If `on_navigation`
+    // answers `true` without looking, this is the test that goes red.
     assert_all(
         NavigationVerdict::Refuse,
         &[
@@ -67,8 +65,8 @@ fn the_play_copy_refuses_the_saas_pages_that_sell() {
             "https://erplora.com/dashboard/billing/",
             "https://erplora.com/dashboard/hubs/",
             "https://erplora.com/dashboard/marketplace/modules/pos/?hub=h1&utm_source=hub",
-            // The panel's Store and Billing where the SaaS serves them since saas#123, and their old
-            // addresses at the root, which answer 301 there.
+            // The panel's Store and Billing where the SaaS serves them, and their old addresses at
+            // the root, which answer 301 there.
             "https://erplora.com/dashboard/store",
             "https://erplora.com/dashboard/store/plans?business=7f8e1c2a-4b1d-4c3e-9f00-1a2b3c4d5e6f",
             "https://erplora.com/dashboard/store/modules",
@@ -111,7 +109,7 @@ fn the_play_copy_sends_the_saas_home_page_to_the_app_s_own_start() {
 
 #[test]
 fn the_play_copy_follows_sign_in_sign_up_and_the_way_into_a_hub() {
-    // The SaaS's entry pages as it serves them today (a single-page app since saas-next): the
+    // The SaaS's entry pages as it serves them today (a single-page app): the
     // launcher is the sign-in and sign-up, and the steps around it live at the root. None of them
     // shows a price: the launcher's «Create business» card starts on Free without a card, and
     // paying an unpaid invoice is offered on the web only.
@@ -166,7 +164,7 @@ fn the_play_copy_follows_sign_in_sign_up_and_the_way_into_a_hub() {
 
 #[test]
 fn the_entry_pages_the_saas_no_longer_serves_are_not_followed() {
-    // The old product's entry pages that saas-next does not serve: with no route they fall into the
+    // Entry pages of the old product that the SaaS does not serve: with no route they fall into the
     // single-page app's catch-all, or into Django's 404 under the prefixes the app does not own
     // (`/accounts/`, `/auth/`). A page that is not there needs no door — and the next page the SaaS
     // puts at one of those addresses is judged on its own when it exists.
@@ -195,8 +193,8 @@ fn the_entry_pages_the_saas_no_longer_serves_are_not_followed() {
 
 #[test]
 fn the_businesses_are_followed_where_the_saas_serves_them_today() {
-    // saas#123 moved the panel under `/dashboard/`: Businesses — pick, open or create one, nothing
-    // sold — lives at `/dashboard/businesses`, and its old address at the root answers 301 there,
+    // The panel lives under `/dashboard/`: Businesses — pick, open or create one, nothing sold —
+    // lives at `/dashboard/businesses`, and its old address at the root answers 301 there,
     // so the old one is followed too (bookmarks, the Hub's links, the mails already sent) and its
     // redirect is not refused halfway.
     assert_all(
@@ -273,11 +271,11 @@ fn open_walks_from_businesses_into_the_hub() {
 
 #[test]
 fn the_account_page_opens_only_as_the_account_surface() {
-    // hub#1900 / saas#2084: `?surface=account` paints the person's account WITHOUT the panel that
-    // sells. Play requires an in-app way to delete the account, and it lives there. Since saas#123
-    // Account lives at `/dashboard/account/…`; its old addresses — `/dashboard/profile/…` of the old
-    // panel and `/account/…`, where it lived before the move — answer 301 there keeping the query,
-    // so each is followed WITH the mark too, and only with it.
+    // `?surface=account` paints the person's account WITHOUT the panel that sells. Play requires an
+    // in-app way to delete the account, and it lives there. Account lives at
+    // `/dashboard/account/…`; its old addresses — `/dashboard/profile/…` of the old panel and
+    // `/account/…` — answer 301 there keeping the query, so each is followed WITH the mark too, and
+    // only with it.
     assert_all(
         NavigationVerdict::Allow,
         &[
@@ -309,8 +307,8 @@ fn the_account_page_opens_only_as_the_account_surface() {
             "https://erplora.com/dashboard/profile/sessions/",
             "https://erplora.com/dashboard/profile/?surface=account&surface=panel",
             "https://erplora.com/account/profile",
-            // `/account/` is no longer the sign-in (that is the app's start, `/shell/`): its old
-            // sign-in address is a page of the panel now, followed only as the account surface.
+            // `/account/` is not the sign-in (that is the app's start, `/shell/`): its old sign-in
+            // address is a page of the panel, followed only as the account surface.
             "https://erplora.com/account/login/?next=/shell/",
             // The mark opens the account pages, not the rest of the panel.
             "https://erplora.com/dashboard/billing/?surface=account",
@@ -327,7 +325,7 @@ fn the_account_page_opens_only_as_the_account_surface() {
 
 #[test]
 fn the_account_is_deleted_from_inside_the_play_copy_and_ends_at_the_app_s_start() {
-    // hub#2451: Google Play requires deleting the account from inside the app. «Delete your
+    // Google Play requires deleting the account from inside the app. «Delete your
     // account» is a card of Account → Profile, shown on every surface; once deleted, the page leaves
     // for the SaaS home page with a full load (`AFTER_DELETION = '/'` of the SaaS), which takes the
     // window to the app's own start. The old panel's «account deleted» page is not served any more:
@@ -392,7 +390,7 @@ fn dot_segments_cannot_walk_out_of_an_allowed_page() {
 
 #[test]
 fn every_address_the_saas_answers_on_is_policed() {
-    // `www` and `pre` serve the same site — measured on 18/09: `/pricing/` answers 200 on both —
+    // `www` and `pre` serve the same site — `/pricing/` answers 200 on both —
     // and both look like a hub to the hub-domain predicate (`<label>.erplora.com`), so they have to
     // be named. The rest are spellings of the same host.
     assert_all(
@@ -469,33 +467,32 @@ fn main_window_navigation_handler() -> String {
 
 #[test]
 fn the_main_window_asks_the_verdict_before_it_follows_a_page() {
-    // A correct `navigation_verdict` that nobody consults is `true` without looking all over again —
-    // the state this issue was opened against.
+    // A correct `navigation_verdict` that nobody consults is `true` without looking all over again.
     let handler = main_window_navigation_handler();
 
     let asks = handler
         .find("navigation_verdict(distribution_channel(),")
-        .expect("the `on_navigation` handler does not ask `navigation_verdict` for THIS copy (hub#1915)");
+        .expect("the `on_navigation` handler does not ask `navigation_verdict` for THIS copy");
     // ONLY `Allow` is followed: `Home` is a refusal too — the SaaS home page carries the plan prices,
     // and the window is sent to the app's start instead of loading it.
     let only_allow = handler[asks..]
         .find("if verdict != NavigationVerdict::Allow {")
         .map(|at| asks + at)
-        .expect("the handler must refuse every verdict but `Allow` (hub#1915)");
+        .expect("the handler must refuse every verdict but `Allow`");
     let refuses = handler[only_allow..]
         .find("return false")
         .map(|at| only_allow + at)
-        .expect("the `on_navigation` handler never refuses a page (hub#1915)");
+        .expect("the `on_navigation` handler never refuses a page");
     // …and a refusal is ANSWERED. Refusing in silence leaves «Log Out» (which lands on the SaaS home
     // page) on a stale page, and a refused link looking like a dead button.
     assert!(
         handler[only_allow..refuses].contains("refuse_navigation("),
-        "the handler refuses a page without answering it: no notice, no way back to the start (hub#1915)"
+        "the handler refuses a page without answering it: no notice, no way back to the start"
     );
 
     // A refused page must not be remembered as this till's hub, nor become the page the connectivity
     // guard brings the window back to — the guard navigates by program, which no handler sees. The
-    // capture goes through the linked-hub state since hub#2504 (`HubLink::follow`).
+    // capture goes through the linked-hub state (`HubLink::follow`).
     for later in [".follow(nav)", "set_target("] {
         let at = handler
             .find(later)
@@ -503,7 +500,7 @@ fn the_main_window_asks_the_verdict_before_it_follows_a_page() {
         assert!(
             refuses < at,
             "`{later}` runs before the verdict refuses the page: a refused page would still be \
-             remembered or watched (hub#1915)"
+             remembered or watched"
         );
     }
 }
@@ -515,10 +512,10 @@ fn a_refused_page_is_answered_on_the_window_and_off_the_handler() {
     let refuse = shell_function("refuse_navigation");
     let off_the_handler = refuse
         .find("async_runtime::spawn(")
-        .expect("`refuse_navigation` answers inside the handler: on Android that is the webview client's own callback (hub#1915)");
+        .expect("`refuse_navigation` answers inside the handler: on Android that is the webview client's own callback");
     assert!(
         refuse[off_the_handler..].contains("answer_refusal(&window, verdict,"),
-        "`refuse_navigation` records the refused page but never answers it on the window (hub#1915)"
+        "`refuse_navigation` records the refused page but never answers it on the window"
     );
 }
 

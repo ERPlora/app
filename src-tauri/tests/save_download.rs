@@ -1,11 +1,10 @@
 //! The boundary of `save_download`: where a file the page hands us is allowed to land, and on
-//! which platforms landing there means the user can actually find it (hub#480).
+//! which platforms landing there means the user can actually find it.
 //!
-//! [ADR-0255](hub#475) gave the installed app a way OUT to the system browser and left three
-//! `window.open` calls behind, all of them about **saving a file**. Saving is not navigating: the
-//! bytes of a `/files` download, of a backup export and of an invoice PDF are fetched by the page
-//! with the hub session attached, so no browser — ours or the user's — can be sent to fetch them
-//! again. The page has the bytes; what it lacks is somewhere to put them.
+//! The installed app can send the user OUT to the system browser, but **saving a file** is not
+//! navigating: the bytes of a `/files` download, of a backup export and of an invoice PDF are
+//! fetched by the page with the hub session attached, so no browser — ours or the user's — can be
+//! sent to fetch them again. The page has the bytes; what it lacks is somewhere to put them.
 //!
 //! In a browser that somewhere is the download manager (`<a download>`). Inside the installed app
 //! there is none: wry registers no `DownloadListener` on Android at all, and on the desktop its
@@ -20,7 +19,7 @@
 //! 2. **A file the user cannot reach is not saved.** On Android `download_dir()` is
 //!    `getExternalFilesDir(DIRECTORY_DOWNLOADS)` — app-scoped storage that, since Android 11, the
 //!    system Files app and every file manager refuse to browse. Writing there and reporting success
-//!    would be hub#475 again in a nicer costume.
+//!    would lose the file behind a success message.
 
 use std::path::{Path, PathBuf};
 
@@ -100,20 +99,20 @@ fn a_desktop_with_no_downloads_folder_is_a_plain_failure_not_a_phone() {
     assert!(matches!(missing, Err(ShellError::Io(_))));
 }
 
-// ── WHERE the bytes go, decided per platform (hub#499) ───────────────────────────────────────────
+// ── WHERE the bytes go, decided per platform ─────────────────────────────────────────────────────
 //
 // `reachable_downloads_dir` above answers one question — *is the folder Tauri resolved one the user
-// can open?* — and on Android the answer is still no. What changed is that a folder is no longer
-// the only way to save: Android has a public **Downloads collection**, published through
-// `MediaStore`, which is not a path at all. `save_target` is the whole decision, so the platform
+// can open?* — and on Android the answer is no. But a folder is not the only way to save: Android
+// has a public **Downloads collection**, published through `MediaStore`, which is not a path at
+// all. `save_target` is the whole decision, so the platform
 // that gets a folder, the platform that gets the collection and the platform that gets nothing are
 // decided in one readable place instead of being spread across the command.
 
 #[test]
 fn android_publishes_into_the_public_downloads_collection() {
-    // hub#499. Refusing was right while there was nowhere to put the file; there is now, and it is
-    // not a folder: `MediaStore.Downloads` is a content collection the Files app browses and every
-    // file manager lists. A tablet till can finally take its own backup off the device.
+    // The file goes to `MediaStore.Downloads`, which is not a folder: it is a content collection
+    // the Files app browses and every file manager lists, so a tablet till can take its own backup
+    // off the device.
     assert_eq!(
         save_target("android", None).unwrap(),
         SaveTarget::AndroidDownloads
@@ -148,9 +147,10 @@ fn the_desktop_still_writes_into_the_users_own_folder() {
 
 #[test]
 fn ios_is_still_refused_because_nobody_has_written_that_path_yet() {
-    // The same hole hub#499 closed on Android is still open on iOS, and it needs its own native
-    // work (`UIDocumentPickerViewController` or the share sheet). Until that exists the honest
-    // answer is the refusal the user can act on — not a file saved somewhere nobody can browse.
+    // On iOS the folder Tauri resolves is not one the user can browse either, and saving needs its
+    // own native work (`UIDocumentPickerViewController` or the share sheet). Until that exists the
+    // honest answer is the refusal the user can act on — not a file saved somewhere nobody can
+    // browse.
     assert!(matches!(
         save_target("ios", Some(PathBuf::from("/var/mobile/.../Downloads"))),
         Err(ShellError::DownloadsUnreachable)
@@ -350,18 +350,18 @@ fn the_save_command_checks_the_platform_and_the_name_before_it_writes() {
         .find("fn save_download")
         .map(|at| &source[at..])
         .and_then(|rest| rest.find("\n}").map(|end| &rest[..end]))
-        .expect("src/lib.rs no longer defines `save_download` (hub#480)");
+        .expect("src/lib.rs no longer defines `save_download`");
 
     assert!(
         command.contains("save_target"),
         "`save_download` no longer asks WHERE this platform saves: on Android the folder Tauri \
-         resolves is app-scoped storage no file manager opens, and reporting a path there is \
-         hub#475 with a success message on top (hub#480, ADR-0259, hub#499)."
+         resolves is app-scoped storage no file manager opens, and reporting a path there loses \
+         the file behind a success message."
     );
     assert!(
         command.contains("download_file_name"),
         "`save_download` no longer reduces what the page sent to a single file name: the page gets \
-         to choose a path on the till's disk (hub#480, ADR-0259)."
+         to choose a path on the till's disk."
     );
 }
 
@@ -370,7 +370,7 @@ fn the_android_branch_still_goes_through_the_native_publisher() {
     // The Android half cannot be reached from a unit test — it needs a device with a `MediaStore` —
     // and its disappearance is not a type error either: delete the call and the `#[cfg]` block
     // simply stops publishing, `save_target` keeps answering `AndroidDownloads`, and every test
-    // above stays green while the tablet is back to not saving anything (hub#499).
+    // above stays green while the tablet saves nothing.
     let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
         .expect("src/lib.rs");
 
@@ -378,6 +378,6 @@ fn the_android_branch_still_goes_through_the_native_publisher() {
         source.contains("save_to_downloads"),
         "nothing in the shell calls the plugin's `save_to_downloads` any more: on Android there is \
          no other way to reach the public Downloads collection, so the till silently loses its \
-         backup, its invoices and its `/files` downloads (hub#499)."
+         backup, its invoices and its `/files` downloads."
     );
 }

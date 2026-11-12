@@ -1,31 +1,23 @@
 #!/usr/bin/env bash
-# Contract test for ERPlora/hub#1881 — no workflow may lean on the DEFAULT package list of
+# Contract test: no workflow may lean on the DEFAULT package list of
 # `android-actions/setup-android`, and none may ask for the retired `tools` package.
 #
-# WHAT HAPPENED. On 2026-09-16 every open PR of the hub went red, including one that only
-# touched `.md`. The step `Setup Android SDK` of `test-shell.yml` used the action bare:
-#
-#     - name: Setup Android SDK
-#       uses: android-actions/setup-android@v3
-#
-# With no `with:`, the action applies its own default — `packages: tools platform-tools`, read
-# straight off the `action.yml` of the v3 tag — and after accepting licences it runs
-# `sdkmanager tools platform-tools`. Google had just removed the legacy `tools` package from its
-# remote repository, so:
+# Used bare, with no `with:`, the action applies its own default (`packages: tools
+# platform-tools`, from the `action.yml` of the v3 tag) and after accepting licences runs
+# `sdkmanager tools platform-tools`. Google removed the legacy `tools` package from its remote
+# repository, so that step fails every run, even on a PR that only touches `.md`:
 #
 #     [command]/home/runner/.android/sdk/cmdline-tools/16.0/bin/sdkmanager tools
 #     Warning: Failed to find package 'tools'
 #     Error: The process '.../sdkmanager' failed with exit code 1
 #
-# Nothing in this repository ever used `tools`: the very next step installs what the Kotlin tests
-# need, explicitly (`sdkmanager --install "platforms;android-36" "build-tools;36.0.0"`). The whole
-# fleet was blocked by a package nobody asked for, arriving through a default nobody read.
+# Nothing in this repository uses `tools`: the very next step installs what the Kotlin tests need,
+# explicitly (`sdkmanager --install "platforms;android-36" "build-tools;36.0.0"`).
 #
 # WHY A TEST AND NOT JUST THE FIX. The fix is two `with:` blocks, and two `with:` blocks are
 # memory: the next workflow that needs Android is written by copying one of these files, and the
-# copy that loses the `with:` is green everywhere except on the day the release runs. The failure
-# mode is the one this repo keeps meeting — `tauri-release.yml` carries the SAME bare step, and it
-# fires on a tag, so its red would have landed in the middle of a release instead of in a PR.
+# copy that loses the `with:` is green everywhere except on the day the release runs, because
+# `tauri-release.yml` fires on a release.
 #
 # WHAT IT CHECKS. Three rules, deliberately narrow, all read off the PARSED YAML — never grepped,
 # so a comment discussing the incident can never trip them:
@@ -41,7 +33,7 @@
 #
 # The scan is DISCOVERY-BASED — every workflow and every composite action, not a fixed list — so a
 # workflow added tomorrow cannot opt out by not being named here. `KNOWN_USES` is not the scan: it
-# is the proof the scan still SEES something, the false green hub#1327 already hit one level up.
+# is the proof the scan still SEES something, so a scan that finds nothing cannot pass as green.
 # The fixtures at the end are the other half of the same proof: they show the detector catching
 # the positive, and leaving alone the shapes it must not fire on.
 #
@@ -148,9 +140,8 @@ def sdkmanager_findings(run):
 files = sorted(
     set(glob.glob(os.path.join(repo_root, ".github/workflows/*.yml")))
     | set(glob.glob(os.path.join(repo_root, ".github/workflows/*.yaml")))
-    # The other place a `run:` or a `uses:` can live in this repo (hub#1327 made the same point
-    # for the alert-issue guard): a step moved into a composite action would otherwise walk
-    # straight out of this guard one level down.
+    # The other place a `run:` or a `uses:` can live in this repo: a step moved into a composite
+    # action would otherwise walk straight out of this guard one level down.
     | set(glob.glob(os.path.join(repo_root, ".github/actions/**/action.yml"), recursive=True))
     | set(glob.glob(os.path.join(repo_root, ".github/actions/**/action.yaml"), recursive=True))
 )
@@ -211,16 +202,15 @@ for rel_path, step_names in sorted(KNOWN_USES.items()):
             f"{rel_path}: the scan still finds its «{step_name}» step",
             step_name in discovered.get(rel_path, []),
             "no step matched — either it was removed without updating KNOWN_USES, or the "
-            "discovery itself is broken and this guard is protecting nothing (hub#1327)",
+            "discovery itself is broken and this guard is protecting nothing",
         )
 
 # ── Fixtures · the detector fires on the shape it exists for, and only on it ─────────────
-# Same reason `service-container-ports.test.sh` and `ci-prose-matches-triggers.test.sh` carry
-# theirs: a detector nobody proves is a detector that can quietly stop detecting, and the whole
-# point of hub#1881 is that a silent default went unread for months.
+# A detector nobody proves is a detector that can quietly stop detecting, and the whole point of
+# this test is that a silent default can go unread for months.
 PACKAGE_FIXTURES = [
     (
-        "the hub#1881 shape: the action used bare, inheriting `tools platform-tools`",
+        "the action used bare, inheriting `tools platform-tools`",
         {"uses": "android-actions/setup-android@v3"},
         1,
     ),
@@ -284,10 +274,10 @@ for label, run, want in SDKMANAGER_FIXTURES:
     )
 
 if failures:
-    print(f"FAIL: {len(failures)} contract case(s) on the Android SDK setup (hub#1881)")
+    print(f"FAIL: {len(failures)} contract case(s) on the Android SDK setup")
     for f in failures:
         print(f"  - {f}")
     sys.exit(1)
 
-print(f"OK: {passed} contract case(s) on the Android SDK setup (hub#1881)")
+print(f"OK: {passed} contract case(s) on the Android SDK setup")
 PY

@@ -5,7 +5,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 /**
- * Which screen each notice the app showed leads to (hub#1039).
+ * Which screen each notice the app showed leads to.
  *
  * The notification plugin never stores the notice on the intent of its tap (`sourceJson` is never
  * set, tauri-apps/plugins-workspace#3550): the tap comes back with the notice's number and nothing

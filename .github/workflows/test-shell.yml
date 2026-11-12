@@ -1,34 +1,31 @@
 # ==============================================================================
-# ERPlora Shell (ERPlora/app, formerly ERPlora/hub `apps/tauri`) — tests of the thin client (ADR-0159)
+# ERPlora Shell (ERPlora/app) — tests of the thin client
 # ==============================================================================
 #
 # This workflow runs `cargo test -p erplora-tauri -p tauri-plugin-erplora-android
 # -p erplora-peripherals` (the three crates of this repo's workspace), only when the app changes.
 #
-# On the three desktop systems the app ships to (hub#2705, ERPlora/pm#655 J3): Linux, Windows and
-# macOS. Until then Windows and macOS were compiled only by `tauri-release.yml`, on a `vX.Y.Z` tag,
-# so a change that broke them was found while cutting the release. Windows and macOS need no system
-# packages (WebView2 / WKWebView ship with the OS image, same as the release job): only the
-# toolchain and the cache.
+# On the three desktop systems the app ships to: Linux, Windows and macOS, so a change that breaks
+# one of them is found on its pull request and not while cutting a release. Windows and macOS need
+# no system packages (WebView2 / WKWebView ship with the OS image, same as the release job): only
+# the toolchain and the cache.
 #
-# It also runs the KOTLIN unit tests of the Android plugin (hub#933) — on Linux only: they are JVM
-# tests, the runner's OS adds nothing. The permission policy and the SPP transport are Kotlin, and
-# until hub#933 their tests only ran when a tag was published. They run against the minimal root
-# `crates/tauri-plugin-erplora-android/android-tests/`, without `:app` and therefore without NDK or
-# tauri-cli: seconds, not the release job.
+# It also runs the KOTLIN unit tests of the Android plugin, on Linux only: they are JVM tests, the
+# runner's OS adds nothing. The permission policy and the SPP transport are Kotlin. They run
+# against the minimal root `crates/tauri-plugin-erplora-android/android-tests/`, without `:app` and
+# therefore without NDK or tauri-cli: seconds, not the release job.
 #
 # It also fires on a change to ANY workflow (`.github/workflows/*.yml`): `release_runner_assumptions.rs`
-# reads every one of them, so a guard added to another workflow can turn this suite red. On 08/10 it
-# did — a `save-if` written differently in `test-hub.yml` — and `develop` stayed red in the shell
-# without a single run saying so, because nothing that runs this suite had been triggered.
+# reads every one of them, so a guard added to another workflow can turn this suite red, and only a
+# run of this workflow would say so.
 #
 # It is also CALLED by `tauri-release.yml` (`workflow_call`): the release builds nothing until these
 # tests are green, so nothing is ever published on red.
 #
 # Its `scripts` job runs `actionlint` over every workflow and EVERY `scripts/*.test.sh` and
-# `scripts/tests/*.test.sh` — this workflow's own contract, the rules of both release gates, the MSIX
-# packaging, the apt lock, the Android SDK setup and the Play reviewer preflight. In ERPlora/hub five
-# of them ran only in `actionlint.yml`, which did not move with the app.
+# `scripts/tests/*.test.sh`: this workflow's own contract, the rules of both release gates, the
+# MSIX packaging, the apt lock, the Android SDK setup, the Play reviewer preflight and the check
+# that the code cites nothing its reader does not have.
 #
 # Contract: `scripts/tests/test-shell-workflow.test.sh`, run by the `scripts` job below.
 # ==============================================================================
@@ -39,8 +36,8 @@ on:
   push:
     branches: [main]
     paths:
-      # The app is the whole repo (it was `apps/tauri/**` in ERPlora/hub): its crate, the bundled
-      # page, the workspace manifests and both library crates it compiles against.
+      # The app is the whole repo: its crate, the bundled page, the workspace manifests and both
+      # library crates it compiles against.
       - "src-tauri/**"
       - "shell-dist/**"
       - "package.json"
@@ -51,11 +48,11 @@ on:
       - "crates/peripherals/**"
       - "crates/tauri-plugin-erplora-android/**"
       - ".github/workflows/test-shell.yml"
-      # Its contract (hub#2705): a PR that only touches the test must run it.
+      # Its contract: a PR that only touches the test must run it.
       - "scripts/tests/test-shell-workflow.test.sh"
       # `release_runner_assumptions.rs` reads EVERY workflow (see the header), and the `scripts`
       # job lints them all: any of them can turn this suite red. That includes `tauri-release.yml`,
-      # whose APK permission check `android_local_network.rs` guards (hub#337).
+      # whose APK permission check `android_local_network.rs` guards.
       - ".github/workflows/*.yml"
       # Every script and its test: the `scripts` job runs all of them (both release gates, the
       # MSIX packer, the apt wrapper, the Play preflight…) and the `test` job the Kotlin runner.
@@ -63,8 +60,8 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      # The app is the whole repo (it was `apps/tauri/**` in ERPlora/hub): its crate, the bundled
-      # page, the workspace manifests and both library crates it compiles against.
+      # The app is the whole repo: its crate, the bundled page, the workspace manifests and both
+      # library crates it compiles against.
       - "src-tauri/**"
       - "shell-dist/**"
       - "package.json"
@@ -75,11 +72,11 @@ on:
       - "crates/peripherals/**"
       - "crates/tauri-plugin-erplora-android/**"
       - ".github/workflows/test-shell.yml"
-      # Its contract (hub#2705): a PR that only touches the test must run it.
+      # Its contract: a PR that only touches the test must run it.
       - "scripts/tests/test-shell-workflow.test.sh"
       # `release_runner_assumptions.rs` reads EVERY workflow (see the header), and the `scripts`
       # job lints them all: any of them can turn this suite red. That includes `tauri-release.yml`,
-      # whose APK permission check `android_local_network.rs` guards (hub#337).
+      # whose APK permission check `android_local_network.rs` guards.
       - ".github/workflows/*.yml"
       # Every script and its test: the `scripts` job runs all of them (both release gates, the
       # MSIX packer, the apt wrapper, the Play preflight…) and the `test` job the Kotlin runner.
@@ -93,16 +90,16 @@ concurrency:
   # the release's call and the push's own run share one group, and a third push would cancel the
   # release's pending tests (one pending run per group).
   group: test-shell-${{ github.workflow }}-${{ github.ref }}
-  # hub#2689 — a PR's newer head cancels its older run; a push always finishes.
+  # A PR's newer head cancels its older run; a push always finishes.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 env:
-  # `setup-android` baja las command line tools de `dl.google.com`, y desde `ci-runner-1` ese host
-  # contesta **404 por IPv6**, que Node prefiere. Es de la máquina, no del paso: le pasa a
-  # cualquier acción JS que descargue de Google (hub#878, vivido en `v1.1.0`).
+  # `setup-android` downloads the command line tools from `dl.google.com`, and that host can answer
+  # **404 over IPv6**, which Node prefers. It is the machine, not the step: it happens to any JS
+  # action that downloads from Google.
   NODE_OPTIONS: --dns-result-order=ipv4first
 
 jobs:
@@ -121,8 +118,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Pinned version + official downloader (a static Go binary, no package manager), as
-      # `actionlint.yml` did in ERPlora/hub. Bump the version deliberately, not via a moving tag.
+      # Pinned version + official downloader (a static Go binary, no package manager). Bump the
+      # version deliberately, not via a moving tag.
       - name: Install actionlint
         env:
           ACTIONLINT_VERSION: 1.7.12
@@ -157,8 +154,8 @@ jobs:
 
   test:
     # Draft = no CI. PRs are born as drafts: they are reviewed and fixed WITHOUT runs in flight and
-    # the suite runs ONCE, when they are marked ready (ready_for_review). Measured on 29/08: half
-    # the runner minutes went to runs cancelled by the reviewer's re-push.
+    # the suite runs ONCE, when they are marked ready (ready_for_review), instead of once per
+    # re-push during the review.
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: cargo test -p erplora-tauri (${{ matrix.label }})
     runs-on: ${{ matrix.os }}
@@ -189,7 +186,7 @@ jobs:
     steps:
       # Windows runners check out with `core.autocrlf=true`. Several tests read this repo's own
       # sources (`include_str!("lib.rs")`, the workflows, the Gradle files) and split them on "\n",
-      # so they would test CRLF bytes that Linux, macOS and the repository never hold (hub#2705).
+      # so they would test CRLF bytes that Linux, macOS and the repository never hold.
       - name: Check out with LF on Windows
         if: matrix.label == 'windows'
         run: git config --global core.autocrlf false
@@ -198,9 +195,9 @@ jobs:
         uses: actions/checkout@v4
 
       # Tauri v2 system deps on Linux (webview + GTK). No appindicator/librsvg: the shell uses no
-      # tray and nothing is bundled here. Through the apt-lock wrapper: another job on the shared
-      # runner may be holding apt's lock (infra#313). The condition reads the LABEL, not
-      # `matrix.os`: on the self-hosted runner `matrix.os` is not `ubuntu-latest` (#848).
+      # tray and nothing is bundled here. Through the apt-lock wrapper: another job on a shared
+      # runner may be holding apt's lock. The condition reads the LABEL, not `matrix.os`: on a
+      # self-hosted runner `matrix.os` is not `ubuntu-latest`.
       - name: System deps (webkit2gtk + GTK)
         if: matrix.label == 'linux'
         run: |
@@ -208,9 +205,9 @@ jobs:
           bash scripts/ci/apt-lock-retry.sh sudo apt-get install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev libgtk-3-dev pkg-config
 
-      # `rustup` ships with GitHub's images, but on `ci-runner-1` it is one more file that
-      # something can delete — and something did (see `cache-bin: false` below). `shell: bash`:
-      # Windows runs `run:` under PowerShell by default.
+      # `rustup` ships with GitHub's images, but on a self-hosted runner it is one more file that
+      # something can delete (see `cache-bin: false` below). `shell: bash`: Windows runs `run:`
+      # under PowerShell by default.
       - name: Toolchain (rust-toolchain.toml)
         shell: bash
         run: |
@@ -227,14 +224,14 @@ jobs:
       # 🔴 `cache-bin: false` is NOT an optimisation. By default this action caches
       # `$CARGO_HOME/bin`, and its `Post` step CLEANS it («... Cleaning cargo/bin ...»), deleting
       # the `rustup` binary and leaving the 13 shims (`cargo`, `rustc`, …) pointing at nothing.
-      # On a GitHub runner it does not matter: the machine is thrown away with the job. On
-      # `ci-runner-1` it persists, so the NEXT job — any job, any repo — dies with
-      # `rustup: command not found` in 12 s. Lived on 2026-08-11 at 20:48 UTC.
+      # On a GitHub runner it does not matter: the machine is thrown away with the job. On a
+      # self-hosted runner it persists, so the NEXT job — any job, any repo — dies with
+      # `rustup: command not found`.
       #
-      # 🔴 `save-if` off on our own runner, and it is not an optimisation either. The same `Post`
-      # also runs `cleanRegistry`, which `rmRF`s every non-`-sys` directory under
-      # `~/.cargo/registry/src`. The two slots of `ci-runner-1` share ONE `$HOME`, so that delete
-      # lands on whatever the OTHER slot is compiling (hub#886). `save-if: false` returns BEFORE
+      # 🔴 `save-if` off on a self-hosted runner, and it is not an optimisation either. The same
+      # `Post` also runs `cleanRegistry`, which `rmRF`s every non-`-sys` directory under
+      # `~/.cargo/registry/src`. Two slots of one runner share ONE `$HOME`, so that delete lands on
+      # whatever the OTHER slot is compiling. `save-if: false` returns BEFORE
       # cleaning anything (rust-cache `save.ts`), so the restore still works and hosted runners —
       # which die with the job — still save. The cache key carries the OS, so the three systems
       # never share an entry.
@@ -246,19 +243,18 @@ jobs:
 
       # `--no-fail-fast`: every test binary reports, not only the first red one — on a matrix of
       # three systems, one red per round trip is how a Windows-only failure takes an afternoon.
-      # `erplora-peripherals` was tested by `test-hub.yml` in ERPlora/hub; here this is its only run.
+      # This is the only place the tests of `erplora-peripherals` run.
       - name: cargo test -p erplora-tauri
         run: cargo test --no-fail-fast -p erplora-tauri -p tauri-plugin-erplora-android -p erplora-peripherals
 
-      # ── Kotlin tests of the Android plugin (hub#933) — Linux only ─────────────────────────
+      # ── Kotlin tests of the Android plugin — Linux only ───────────────────────────────────
       #
       # The `cargo test` above is RUST. Which permission is requested at each API level and how an
-      # SPP printer is spoken to live in KOTLIN — and until hub#933 the ONLY place they ran was the
-      # `build-android` job of `tauri-release.yml`, on a tag or by hand. The SPP change
-      # (`48f2b0e1`) left a stale expectation and `develop` stayed red for a whole day unseen.
+      # SPP printer is spoken to live in KOTLIN, and the only other place these tests run is the
+      # `build-android` job of `tauri-release.yml`, on a release.
       #
       # No Android build is paid for: `android-tests/` is a minimal Gradle root without `:app`, so
-      # no NDK, no tauri-cli and no Rust for four triples. Measured: 22 s cold, 1 s warm.
+      # no NDK, no tauri-cli and no Rust for four triples.
       - name: Setup JDK 17
         if: matrix.label == 'linux'
         uses: actions/setup-java@v4
@@ -267,8 +263,8 @@ jobs:
           java-version: 17
 
       # Only `platform-tools`: the action's default is `tools platform-tools`, and Google
-      # retired the legacy `tools` package on 2026-09-16 — `sdkmanager` exits 1 on it and
-      # takes the job down with it (hub#1881). Nothing here ever used `tools`.
+      # retired the legacy `tools` package — `sdkmanager` exits 1 on it and takes the job down
+      # with it. Nothing here uses `tools`.
       - name: Setup Android SDK
         if: matrix.label == 'linux'
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
@@ -277,12 +273,12 @@ jobs:
 
       # Only the platform and the build-tools: the NDK is for compiling Rust to Android and no
       # Rust is compiled for Android here.
-      - name: Android platform 36 (sin NDK)
+      - name: Android platform 36 (no NDK)
         if: matrix.label == 'linux'
         run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
 
       # After `cargo test`: the script takes `tauri`'s Kotlin SDK from the crate already UNPACKED
       # in the registry, and the build above is what unpacks it.
-      - name: Kotlin unit tests (plugin de permisos + SPP)
+      - name: Kotlin unit tests (permissions plugin + SPP)
         if: matrix.label == 'linux'
         run: ./scripts/kotlin-plugin-tests.sh

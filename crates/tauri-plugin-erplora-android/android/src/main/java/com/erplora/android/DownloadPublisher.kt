@@ -11,13 +11,12 @@ import java.io.File
 import java.io.IOException
 
 /**
- * Puts a file where the person holding the tablet can find it (hub#499).
+ * Puts a file where the person holding the tablet can find it.
  *
  * On Android, saving a file is **not** writing to a path. The folder Tauri calls Downloads is
  * `getExternalFilesDir(DIRECTORY_DOWNLOADS)` — `/storage/emulated/0/Android/data/com.erplora.app/
  * files/Download` — and Android 11 closed `Android/data` to the system Files app and to every
- * third-party file manager. A file written there exists and cannot be reached, which is why the
- * shell used to refuse instead of pretending (hub#480, ADR-0259).
+ * third-party file manager. A file written there exists and cannot be reached.
  *
  * The way in is the **public Downloads collection**: an insert into
  * `MediaStore.Downloads.EXTERNAL_CONTENT_URI` gives back a `content://` URI, the bytes go out

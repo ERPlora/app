@@ -4,7 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 /**
- * The A4 document through Android's own print service (hub#2008).
+ * The A4 document through Android's own print service.
  *
  * `PrintManager` and the WebView cannot run without a device, so what is pinned here is what the
  * printer DECIDES: the name of the print job, which is also the file name «Save as PDF» proposes.

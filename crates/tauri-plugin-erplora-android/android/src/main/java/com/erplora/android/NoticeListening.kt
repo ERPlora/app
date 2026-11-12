@@ -19,12 +19,11 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 
 /**
- * HUB_APP-F26 (hub#836; the old hub's hub#2307) — the pure decisions behind keeping the app
- * listening for notices with the screen off.
+ * The pure decisions behind keeping the app listening for notices with the screen off.
  *
  * Every notice of the shell is born in the page — the bell polls its counters, the kitchen and the
  * diary listen to the event socket — so they only arrive while Android keeps the app running. With
- * the screen off, in the background or under Doze it did not: a foreground service is what keeps
+ * the screen off, in the background or under Doze it does not: a foreground service is what keeps
  * the process (and the network, which Doze cuts for everything else) alive, the way order-taking
  * apps for merchants do. Android shows it with an ongoing notification whose words come from the
  * page, in the app's language.
@@ -34,8 +33,8 @@ object NoticeListening {
     const val CHANNEL_ID = "erplora_notice_listening"
 
     /**
-     * Negative on purpose: the shell's own notices take their ids from the clock (hub#2305), always
-     * positive, and one of them landing on this id would replace the ongoing notification.
+     * Negative on purpose: the shell's own notices take their ids from the clock, always positive,
+     * and one of them landing on this id would replace the ongoing notification.
      */
     const val NOTIFICATION_ID = -2307
 

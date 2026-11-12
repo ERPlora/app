@@ -1,10 +1,7 @@
-//! Registro persistente de dispositivos (JSON) + resolución MAC vía ARP + watchdog de
-//! auto-recuperación.
+//! Persistent device registry (JSON), MAC resolution through ARP and a self-healing watchdog.
 //!
-//! Porta:
-//!   - `hardware/network.py` → `DeviceRegistry` + `get_mac_for_ip` + `_normalize_mac`.
-//!   - `hardware/watchdog.py` → `Watchdog` (health-check periódico + recovery scan por MAC
-//!     cuando la IP cambia por DHCP).
+//! The watchdog checks the known devices periodically and sweeps the network for the offline ones,
+//! to find them by MAC when DHCP has moved them to a new IP.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -16,22 +13,21 @@ use crate::discovery::{local_subnet_prefixes, sweep_targets};
 use crate::protocol::Device;
 use crate::{Result, ESCPOS_NETWORK_PORT};
 
-/// Resuelve la MAC de una IP usando la tabla ARP del sistema (ping para poblar caché + `arp`).
-/// Porta `get_mac_for_ip`. Nunca lanza: devuelve `None` ante fallo. Multiplataforma.
+/// Resolves the MAC of an IP from the system's ARP table (a ping to fill the cache, then `arp`).
+/// Never fails: it returns `None` on any error. Cross-platform.
 pub fn get_mac_for_ip(ip: &str) -> Option<String> {
     let is_windows = std::env::consts::OS == "windows";
 
-    // Ping para poblar la caché ARP (un paquete). Ignoramos cualquier fallo (espejo del try/except).
+    // One ping to fill the ARP cache. A failure here is logged and the lookup goes on.
     let ping = if is_windows {
         Command::new("ping").args(["-n", "1", "-w", "1000", ip]).output()
     } else {
         Command::new("ping").args(["-c", "1", "-W", "1", ip]).output()
     };
     if let Err(exc) = ping {
-        tracing::warn!("ping a {ip} falló: {exc}");
+        tracing::warn!("ping to {ip} failed: {exc}");
     }
 
-    // Leer la tabla ARP.
     let arp = if is_windows {
         Command::new("arp").args(["-a", ip]).output()
     } else {
@@ -41,14 +37,14 @@ pub fn get_mac_for_ip(ip: &str) -> Option<String> {
     let output = match arp {
         Ok(o) => o,
         Err(exc) => {
-            tracing::warn!("comando arp para {ip} falló: {exc}");
+            tracing::warn!("arp command for {ip} failed: {exc}");
             return None;
         }
     };
 
     if !output.status.success() {
         tracing::warn!(
-            "consulta ARP para {ip} falló (rc={:?}): {}",
+            "ARP lookup for {ip} failed (rc={:?}): {}",
             output.status.code(),
             String::from_utf8_lossy(&output.stderr).trim()
         );
@@ -59,16 +55,15 @@ pub fn get_mac_for_ip(ip: &str) -> Option<String> {
     match find_mac(&stdout) {
         Some(mac) => Some(normalize_mac(&mac)),
         None => {
-            tracing::warn!("no se encontró MAC en la salida ARP para {ip}: {}", stdout.trim());
+            tracing::warn!("no MAC in the ARP output for {ip}: {}", stdout.trim());
             None
         }
     }
 }
 
-/// Busca un token con forma de MAC (6 grupos hex separados por `:` o `-`) en un texto arbitrario.
-/// Sustituye al regex `_MAC_RE` de Python (este crate no tiene `regex`).
+/// Finds a MAC-shaped token (6 hex groups separated by `:` or `-`) in arbitrary text.
 fn find_mac(text: &str) -> Option<String> {
-    // La salida de `arp` separa columnas por espacios; la MAC es un token completo.
+    // `arp` separates its columns with whitespace; the MAC is a whole token.
     for token in text.split(|c: char| c.is_whitespace()) {
         if is_mac_token(token) {
             return Some(token.to_string());
@@ -77,11 +72,10 @@ fn find_mac(text: &str) -> Option<String> {
     None
 }
 
-/// `true` si `token` tiene forma de MAC: 6 grupos de 1-2 dígitos hex separados consistentemente
-/// por `:` o `-`.
-/// `true` if `token` is a well-formed MAC address. Public face of [`is_mac_token`] for the
-/// `bluetooth:{mac}` printer_id variant (ADR-0204): the contract validates the MAC at the parsing
-/// edge, with the same rule the registry itself uses to recognise one.
+/// `true` if `token` is a well-formed MAC address: 6 groups of 1–2 hex digits, separated
+/// consistently by `:` or `-`. Public face of [`is_mac_token`] for the `bluetooth:{mac}`
+/// printer_id variant: the contract validates the MAC at the parsing edge, with the same rule the
+/// registry itself uses to recognise one.
 pub fn is_mac(token: &str) -> bool {
     is_mac_token(token)
 }
@@ -104,7 +98,7 @@ fn is_mac_token(token: &str) -> bool {
         .all(|g| (1..=2).contains(&g.len()) && g.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
-/// Normaliza una MAC a mayúsculas separada por `:` con octetos de 2 dígitos. Porta `_normalize_mac`.
+/// Normalizes a MAC to upper case, separated by `:`, with 2-digit octets.
 pub fn normalize_mac(mac: &str) -> String {
     let unified = mac.replace(['-', '.'], ":").to_uppercase();
     unified
@@ -114,23 +108,23 @@ pub fn normalize_mac(mac: &str) -> String {
         .join(":")
 }
 
-/// Transporte de una cola de impresión del SO en el registro (`Device::kind`).
+/// Transport of an OS print queue in the registry (`Device::kind`).
 ///
-/// El mismo esquema que su `printer_id` (`usb:{queue}`), en un campo aparte para que una pantalla
-/// pueda agrupar por cable sin parsear el id — igual que `"network"` y `"bluetooth"`.
+/// The same scheme as its `printer_id` (`usb:{queue}`), in a field of its own so a screen can group
+/// by cable without parsing the id — like `"network"` and `"bluetooth"`.
 pub const KIND_USB: &str = "usb";
 
-/// Identidad estable de un dispositivo **con socket**: red y Bluetooth.
+/// Stable identity of a device **with a socket**: network and Bluetooth.
 ///
-/// La MAC normalizada cuando el sistema pudo resolverla por ARP; si no, el `printer_id`
-/// (`network:{ip}:{port}`). Sin este fallback, un dispositivo sin MAC no llegaba a registrarse y
-/// por tanto **no se le podía asignar un rol** (cocina/barra/caja) — que es justo lo que el módulo
-/// `printing` necesita. Ocurre siempre en Android y con VPN/contenedores/firewall en escritorio.
+/// The normalized MAC when the system could resolve it through ARP; otherwise the `printer_id`
+/// (`network:{ip}:{port}`). Without this fallback a device with no MAC could not be registered and
+/// so **could not take a role** (kitchen/bar/till) — which is exactly what the `printing` module
+/// needs. It always happens on Android, and with a VPN, containers or a firewall on the desktop.
 ///
-/// **No sirve para una cola del SO** (`usb:{queue}`, hub#1083): no tiene MAC que resolver ni
-/// `ip:port` al que caer, así que esta función le daría `network::0` a **todas** y la segunda cola
-/// registrada pisaría a la primera, con el rol que su dueño le hubiera puesto (hub#1536). Esa
-/// identidad la da [`DeviceRegistry::register_queue`], que usa el `printer_id` entero.
+/// **Not for an OS queue** (`usb:{queue}`): it has no MAC to resolve and no `ip:port` to fall back
+/// on, so this function would give `network::0` to **every** queue and the second one registered
+/// would overwrite the first, together with the role its owner gave it. That identity comes from
+/// [`DeviceRegistry::register_queue`], which uses the whole `printer_id`.
 pub fn device_key(mac: Option<&str>, ip: &str, port: u16) -> String {
     match mac {
         Some(m) if !m.trim().is_empty() => normalize_mac(m.trim()),
@@ -138,38 +132,37 @@ pub fn device_key(mac: Option<&str>, ip: &str, port: u16) -> String {
     }
 }
 
-/// Marca de tiempo ISO con resolución de segundos. Espejo de `datetime.now().isoformat(timespec='seconds')`.
+/// Local ISO timestamp, to the second.
 fn now_iso() -> String {
     chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string()
 }
 
-/// Registro persistente clave → dispositivo, respaldado por `devices.json` en el dir de config.
-/// Porta `DeviceRegistry`. (Persistencia con `RwLock` síncrono + escritura al disco.)
+/// Persistent key → device registry, backed by `devices.json` in the config directory.
 ///
-/// La clave es [`device_key`]: la MAC normalizada cuando se conoce y el `printer_id`
-/// (`network:{ip}:{port}`) cuando no. Antes se indexaba solo por MAC, así que las impresoras sin
-/// ARP resoluble —todas en Android— no llegaban a entrar y no admitían rol.
+/// The key is [`device_key`]: the normalized MAC when it is known and the `printer_id`
+/// (`network:{ip}:{port}`) when it is not, so printers whose MAC ARP cannot resolve — all of them
+/// on Android — still get in and can take a role.
 pub struct DeviceRegistry {
     path: PathBuf,
-    /// Mapa en memoria clave → dispositivo. `RwLock` síncrono: las operaciones son rápidas y no
-    /// se mantiene el lock a través de un `await`.
+    /// In-memory key → device map. A synchronous `RwLock`: the operations are quick and the lock
+    /// is never held across an `await`.
     devices: RwLock<HashMap<String, Device>>,
 }
 
 impl DeviceRegistry {
-    /// Carga el registro desde `path` (vacío si no existe o está corrupto). Porta `__init__`/`load`.
+    /// Loads the registry from `path` (empty if the file is missing or corrupt).
     pub fn load(path: PathBuf) -> Self {
         let devices = if path.exists() {
             match std::fs::read_to_string(&path) {
                 Ok(text) => match serde_json::from_str::<DevicesFile>(&text) {
                     Ok(file) => Self::backfill_keys(file.devices),
                     Err(exc) => {
-                        tracing::warn!("fallo al parsear el registro de dispositivos {path:?}: {exc}");
+                        tracing::warn!("could not parse the device registry {path:?}: {exc}");
                         HashMap::new()
                     }
                 },
                 Err(exc) => {
-                    tracing::warn!("fallo al leer el registro de dispositivos {path:?}: {exc}");
+                    tracing::warn!("could not read the device registry {path:?}: {exc}");
                     HashMap::new()
                 }
             }
@@ -180,9 +173,9 @@ impl DeviceRegistry {
         Self { path, devices: RwLock::new(devices) }
     }
 
-    /// Rellena `key` en los ficheros escritos antes de que el campo existiera (estaban indexados
-    /// por MAC, así que la clave del mapa **es** la identidad). `devices.json` es dato de usuario:
-    /// un cliente con roles ya asignados no puede perderlos al actualizar.
+    /// Fills in `key` for files written before the field existed (they were keyed by MAC, so the
+    /// map key **is** the identity). `devices.json` is user data: a customer with roles already
+    /// assigned must not lose them on an update.
     fn backfill_keys(devices: HashMap<String, Device>) -> HashMap<String, Device> {
         devices
             .into_iter()
@@ -195,10 +188,9 @@ impl DeviceRegistry {
             .collect()
     }
 
-    /// Persiste a disco. Porta `save`.
     pub fn save(&self) -> Result<()> {
         let payload = {
-            let map = self.devices.read().expect("registry lock envenenado");
+            let map = self.devices.read().expect("registry lock poisoned");
             serde_json::to_string_pretty(&serde_json::json!({ "devices": &*map }))?
         };
 
@@ -209,13 +201,13 @@ impl DeviceRegistry {
         Ok(())
     }
 
-    /// Alta/actualización de un dispositivo **con socket** (red, Bluetooth) por [`device_key`];
-    /// preserva `first_seen` y `role`. Porta `register`.
+    /// Adds or updates a device **with a socket** (network, Bluetooth) under [`device_key`];
+    /// keeps `first_seen` and `role`.
     ///
-    /// `mac` es `Option` a propósito: cuando ARP no la resuelve el dispositivo **igualmente se
-    /// registra**, identificado por su `printer_id`. Antes se salía sin registrar nada.
+    /// `mac` is an `Option` on purpose: when ARP cannot resolve it the device **is registered
+    /// anyway**, identified by its `printer_id`.
     ///
-    /// Una cola del SO no entra por aquí: su puerta es [`Self::register_queue`] (hub#1536).
+    /// An OS queue does not come in through here: its door is [`Self::register_queue`].
     pub fn register(
         &self,
         mac: Option<&str>,
@@ -230,7 +222,7 @@ impl DeviceRegistry {
             .map(normalize_mac);
         // Neither a MAC nor a host: [`device_key`] answers `network::0` — the SAME key for every
         // caller in that state, so the next one silently overwrites this entry and inherits the
-        // role its owner had assigned (hub#1536). A transport with no socket has its own door,
+        // role its owner had assigned. A transport with no socket has its own door,
         // [`Self::register_queue`]; anything else arriving here is a discovery that failed
         // upstream, and it must say so instead of writing a shared ghost.
         if mac.is_none() && ip.trim().is_empty() {
@@ -242,20 +234,20 @@ impl DeviceRegistry {
         self.upsert(device_key(mac.as_deref(), ip, port), mac, ip, port, name, kind, false)
     }
 
-    /// Alta/actualización de una **cola de impresión del SO** (`usb:{queue}`, hub#1083),
-    /// identificada por su `printer_id` entero (hub#1536).
+    /// Adds or updates an **OS print queue** (`usb:{queue}`), identified by its whole
+    /// `printer_id`.
     ///
-    /// Una cola no tiene MAC que resolver por ARP ni `ip:port` al que caer, así que [`device_key`]
-    /// le daría `network::0` a todas y la segunda pisaría a la primera. Su `printer_id` **ya** es
-    /// único en la máquina —el nombre de destino de CUPS lo es— así que ES su identidad, y con ella
-    /// la cola entra en el registro como cualquier otra impresora: sale en `get_devices` y admite
-    /// rol (cocina/barra/caja), que es lo que el dueño espera poder decir de la impresora del
-    /// mostrador aunque esté por cable.
+    /// A queue has no MAC to resolve through ARP and no `ip:port` to fall back on, so
+    /// [`device_key`] would give `network::0` to all of them and the second would overwrite the
+    /// first. Its `printer_id` is **already** unique on the machine — a CUPS destination name is —
+    /// so it IS its identity, and with it the queue enters the registry like any other printer: it
+    /// shows up in `get_devices` and takes a role (kitchen/bar/till), which is what the owner
+    /// expects to be able to say about the counter printer even when it is on a cable.
     ///
-    /// El `printer_id` se valida con el MISMO parser que el camino de impresión
-    /// ([`crate::discovery::parse_print_target`]): un id sin cola detrás —o de otro transporte, que
-    /// tiene su propia identidad— crearía una entrada fantasma que la siguiente cola heredaría,
-    /// rol incluido.
+    /// The `printer_id` is validated with the SAME parser as the print path
+    /// ([`crate::discovery::parse_print_target`]): an id with no queue behind it — or one of
+    /// another transport, which has its own identity — would create a ghost entry the next queue
+    /// would inherit, role included.
     pub fn register_queue(&self, printer_id: &str, name: &str) -> Result<Device> {
         let printer_id = printer_id.trim();
         match crate::discovery::parse_print_target(printer_id) {
@@ -271,9 +263,8 @@ impl DeviceRegistry {
         self.upsert(printer_id.to_string(), None, "", 0, name, KIND_USB, false)
     }
 
-    /// Alta de una impresora de red cuya dirección ha TECLEADO el dueño (hub#1924): la misma
-    /// entrada que dejaría el escaneo, marcada [`Device::manual`] para que el siguiente
-    /// descubrimiento la siga listando aunque no la vea.
+    /// Adds a network printer whose address the owner TYPED: the same entry a scan would leave,
+    /// marked [`Device::manual`] so the next discovery keeps listing it even when it cannot see it.
     pub fn register_manual(&self, ip: &str, port: u16, name: &str) -> Result<Device> {
         if ip.trim().is_empty() {
             return Err(crate::PeripheralError::InvalidPrinterId(format!(
@@ -283,8 +274,8 @@ impl DeviceRegistry {
         self.upsert(device_key(None, ip, port), None, ip, port, name, "network", true)
     }
 
-    /// El alta en sí, una vez resuelta la identidad. Preserva `first_seen`, `role` y la marca
-    /// [`Device::manual`]: un escaneo que ve una impresora tecleada no la degrada a escaneada.
+    /// The write itself, once the identity is settled. Keeps `first_seen`, `role` and the
+    /// [`Device::manual`] mark: a scan that sees a typed printer does not demote it to scanned.
     #[allow(clippy::too_many_arguments)]
     fn upsert(
         &self,
@@ -299,7 +290,7 @@ impl DeviceRegistry {
         let now = now_iso();
 
         let device = {
-            let mut map = self.devices.write().expect("registry lock envenenado");
+            let mut map = self.devices.write().expect("registry lock poisoned");
             match map.get_mut(&key) {
                 Some(existing) => {
                     existing.ip = ip.to_string();
@@ -308,8 +299,8 @@ impl DeviceRegistry {
                     existing.kind = kind.to_string();
                     existing.last_seen = now;
                     existing.manual |= manual;
-                    // Una MAC que aparece más tarde (p. ej. el ARP responde en el 2º escaneo)
-                    // enriquece la entrada, pero nunca la borra si ya se conocía.
+                    // A MAC that shows up later (e.g. ARP answers on the second scan) enriches
+                    // the entry, but a known one is never erased.
                     if mac.is_some() {
                         existing.mac = mac;
                     }
@@ -339,13 +330,13 @@ impl DeviceRegistry {
         Ok(device)
     }
 
-    /// Resuelve una entrada a partir de su clave **o** de su MAC.
+    /// Resolves an entry from its key **or** its MAC.
     ///
-    /// El protocolo JSON llama `mac` a este parámetro (`SetDeviceRole { mac }`) y los llamadores
-    /// existentes le pasan lo que tengan a mano, así que se aceptan las dos formas: primero tal
-    /// cual (será un `printer_id`), luego normalizada como MAC.
+    /// The JSON protocol calls this parameter `mac` (`SetDeviceRole { mac }`) and callers pass
+    /// whichever they have at hand, so both forms are accepted: first as is (a `printer_id`), then
+    /// normalized as a MAC.
     fn resolve_key(&self, key_or_mac: &str) -> Option<String> {
-        let map = self.devices.read().expect("registry lock envenenado");
+        let map = self.devices.read().expect("registry lock poisoned");
         if map.contains_key(key_or_mac) {
             return Some(key_or_mac.to_string());
         }
@@ -353,37 +344,36 @@ impl DeviceRegistry {
         map.contains_key(&normalized).then_some(normalized)
     }
 
-    /// Dispositivo por clave o MAC.
     pub fn get(&self, key_or_mac: &str) -> Option<Device> {
         let key = self.resolve_key(key_or_mac)?;
-        let map = self.devices.read().expect("registry lock envenenado");
+        let map = self.devices.read().expect("registry lock poisoned");
         map.get(&key).cloned()
     }
 
-    /// Alias histórico de [`Self::get`]; acepta igualmente clave o MAC.
+    /// Same as [`Self::get`]: it takes a key or a MAC too.
     pub fn get_by_mac(&self, mac: &str) -> Option<Device> {
         self.get(mac)
     }
 
     pub fn get_by_ip(&self, ip: &str) -> Option<Device> {
-        let map = self.devices.read().expect("registry lock envenenado");
+        let map = self.devices.read().expect("registry lock poisoned");
         map.values().find(|d| d.ip == ip).cloned()
     }
 
-    /// Todos los dispositivos, ordenados por `last_seen` desc. Porta `get_all`.
+    /// Every device, most recently seen first.
     pub fn get_all(&self) -> Vec<Device> {
-        let map = self.devices.read().expect("registry lock envenenado");
+        let map = self.devices.read().expect("registry lock poisoned");
         let mut devices: Vec<Device> = map.values().cloned().collect();
         devices.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
         devices
     }
 
-    /// Asigna el rol (`receipt`/`kitchen`/`bar`…). Acepta clave o MAC.
+    /// Assigns the role (`receipt`/`kitchen`/`bar`…). Takes a key or a MAC.
     ///
-    /// A key the registry does not hold is an ERROR, not a no-op (hub#1083): the only way to get
-    /// here is a registration that failed upstream, and "your click did nothing" must not be how
-    /// the user finds out. Since hub#1536 a `usb:{queue}` is no longer among those keys — a
-    /// discovered queue is registered like any other printer and takes its role the same way.
+    /// A key the registry does not hold is an ERROR, not a no-op: the only way to get here is a
+    /// registration that failed upstream, and "your click did nothing" must not be how the user
+    /// finds out. A discovered `usb:{queue}` is registered like any other printer and takes its
+    /// role the same way.
     pub fn set_role(&self, key_or_mac: &str, role: &str) -> Result<()> {
         let Some(key) = self.resolve_key(key_or_mac) else {
             return Err(crate::PeripheralError::InvalidPrinterId(format!(
@@ -391,7 +381,7 @@ impl DeviceRegistry {
             )));
         };
         let mutated = {
-            let mut map = self.devices.write().expect("registry lock envenenado");
+            let mut map = self.devices.write().expect("registry lock poisoned");
             match map.get_mut(&key) {
                 Some(device) => {
                     device.role = Some(role.to_string());
@@ -406,13 +396,13 @@ impl DeviceRegistry {
         Ok(())
     }
 
-    /// Marca online/offline. Acepta clave o MAC.
+    /// Marks the device online or offline. Takes a key or a MAC.
     pub fn set_status(&self, key_or_mac: &str, status: &str) -> Result<()> {
         let Some(key) = self.resolve_key(key_or_mac) else {
             return Ok(());
         };
         let mutated = {
-            let mut map = self.devices.write().expect("registry lock envenenado");
+            let mut map = self.devices.write().expect("registry lock poisoned");
             match map.get_mut(&key) {
                 Some(device) => {
                     device.status = status.to_string();
@@ -427,13 +417,13 @@ impl DeviceRegistry {
         Ok(())
     }
 
-    /// Renombra el dispositivo. Acepta clave o MAC.
+    /// Renames the device. Takes a key or a MAC.
     pub fn set_name(&self, key_or_mac: &str, name: &str) -> Result<()> {
         let Some(key) = self.resolve_key(key_or_mac) else {
             return Ok(());
         };
         let mutated = {
-            let mut map = self.devices.write().expect("registry lock envenenado");
+            let mut map = self.devices.write().expect("registry lock poisoned");
             match map.get_mut(&key) {
                 Some(device) => {
                     device.name = name.to_string();
@@ -448,15 +438,15 @@ impl DeviceRegistry {
         Ok(())
     }
 
-    /// Actualiza la IP (auto-recuperación tras cambio DHCP). Porta `update_ip`.
-    /// Acepta clave o MAC — pero solo tiene sentido con MAC: sin ella no se puede reconocer al
-    /// dispositivo en una IP nueva (y la clave, que ES la IP, ya no valdría).
+    /// Updates the IP (self-healing after a DHCP change).
+    /// Takes a key or a MAC — but it only makes sense with a MAC: without one the device cannot be
+    /// recognised at a new IP (and the key, which IS the IP, would no longer hold).
     pub fn update_ip(&self, key_or_mac: &str, new_ip: &str) -> Result<()> {
         let Some(key) = self.resolve_key(key_or_mac) else {
             return Ok(());
         };
         let mutated = {
-            let mut map = self.devices.write().expect("registry lock envenenado");
+            let mut map = self.devices.write().expect("registry lock poisoned");
             match map.get_mut(&key) {
                 Some(device) => {
                     device.ip = new_ip.to_string();
@@ -472,13 +462,13 @@ impl DeviceRegistry {
         Ok(())
     }
 
-    /// Borra el dispositivo del registro. Acepta clave o MAC.
+    /// Removes the device from the registry. Takes a key or a MAC.
     pub fn remove(&self, key_or_mac: &str) -> Result<()> {
         let Some(key) = self.resolve_key(key_or_mac) else {
             return Ok(());
         };
         let mutated = {
-            let mut map = self.devices.write().expect("registry lock envenenado");
+            let mut map = self.devices.write().expect("registry lock poisoned");
             map.remove(&key).is_some()
         };
         if mutated {
@@ -488,21 +478,21 @@ impl DeviceRegistry {
     }
 }
 
-/// Envoltorio para (de)serializar el fichero `{ "devices": { MAC: Device } }`.
+/// The `{ "devices": { key: Device } }` file, as read from disk.
 #[derive(serde::Deserialize)]
 struct DevicesFile {
     #[serde(default)]
     devices: HashMap<String, Device>,
 }
 
-/// Eventos que el watchdog comunica al consumidor (mapean a `device_recovered`/`device_lost`).
+/// Events the watchdog reports to its consumer (they map to `device_recovered`/`device_lost`).
 #[derive(Debug, Clone)]
 pub enum WatchdogEvent {
     Recovered(Device),
     Lost(Device),
 }
 
-/// Intervalos del watchdog (porta las constantes de `watchdog.py`).
+/// Watchdog intervals.
 #[derive(Debug, Clone, Copy)]
 pub struct WatchdogConfig {
     pub check_interval_s: u64,
@@ -516,12 +506,12 @@ impl Default for WatchdogConfig {
     }
 }
 
-/// Watchdog en segundo plano: comprueba salud de los dispositivos conocidos y, para los offline,
-/// re-escanea la red para localizarlos por MAC en una IP nueva. Porta `DeviceWatchdog`.
+/// Background watchdog: checks the health of the known devices and, for the offline ones, sweeps
+/// the network to find them by MAC at a new IP.
 pub struct Watchdog {
     config: WatchdogConfig,
-    /// Canal opcional hacia el consumidor (bridge#8): los `WatchdogEvent` se publican aquí
-    /// además de por `tracing`. Sin canal, el comportamiento es solo-log como antes.
+    /// Optional channel to the consumer: every `WatchdogEvent` is published here as well as
+    /// through `tracing`. With no channel the watchdog only logs.
     events: Option<tokio::sync::mpsc::UnboundedSender<WatchdogEvent>>,
 }
 
@@ -530,27 +520,25 @@ impl Watchdog {
         Self { config, events: None }
     }
 
-    /// Cablea el canal de eventos hacia el consumidor (estilo builder; la firma de `run`
-    /// permanece intacta).
+    /// Wires the event channel to the consumer.
     pub fn with_events(mut self, events: tokio::sync::mpsc::UnboundedSender<WatchdogEvent>) -> Self {
         self.events = Some(events);
         self
     }
 
-    /// Publica un evento al consumidor si hay canal cableado.
     fn emit(&self, event: WatchdogEvent) {
         if let Some(tx) = &self.events {
             let _ = tx.send(event);
         }
     }
 
-    /// Bucle principal: `check_devices` cada `check_interval`, `recovery_scan` cada
-    /// `recovery_interval`. Porta `_run`.
+    /// Main loop: `check_devices` every `check_interval`, `recovery_scan` every
+    /// `recovery_interval`.
     pub async fn run(&self, registry: &DeviceRegistry) {
         let check_interval = Duration::from_secs(self.config.check_interval_s);
         let recovery_interval = Duration::from_secs(self.config.recovery_interval_s);
 
-        // Espera inicial para dejar estabilizar el sistema (espejo de `_stop_event.wait(5)`).
+        // Give the system a moment to settle before the first check.
         tokio::time::sleep(Duration::from_secs(5)).await;
 
         let mut last_recovery = Instant::now() - recovery_interval;
@@ -567,26 +555,26 @@ impl Watchdog {
         }
     }
 
-    /// Does the watchdog watch over this device at all? (ADR-0204, hub#388)
+    /// Does the watchdog watch over this device at all?
     ///
     /// Only NETWORK devices: the whole toolbox here is IP-shaped — a TCP probe for health, an ARP
     /// sweep for recovery. A Bluetooth SPP printer has neither an IP to probe nor a subnet to be
     /// found on, so "monitoring" it could only mark it offline forever, and the recovery sweep —
     /// which hunts by MAC, the one thing a BT printer always has — would happily "recover" it
-    /// onto some LAN device's IP. Phase 1 gives BT devices no health path on purpose.
+    /// onto some LAN device's IP. BT devices get no health path on purpose.
     pub fn monitors(device: &Device) -> bool {
         device.kind == "network"
     }
 
-    /// Comprueba la alcanzabilidad de todos los dispositivos conocidos. Porta `_check_devices`.
+    /// Checks whether every known device is reachable.
     async fn check_devices(&self, registry: &DeviceRegistry) {
         for device in registry.get_all() {
             if !Self::monitors(&device) {
                 continue;
             }
-            // El chequeo de salud solo necesita IP: se hace por `key`, así que las impresoras sin
-            // MAC (todas en Android) también se vigilan. La MAC solo hace falta para el recovery
-            // scan, más abajo.
+            // The health check only needs the IP and goes by `key`, so printers without a MAC (all
+            // of them on Android) are watched too. The MAC is only needed by the recovery scan
+            // below.
             if device.ip.is_empty() {
                 continue;
             }
@@ -596,10 +584,10 @@ impl Watchdog {
 
             if reachable && device.status != "online" {
                 if let Err(e) = registry.set_status(&device.key, "online") {
-                    tracing::warn!("no se pudo persistir status online de {}: {e}", device.key);
+                    tracing::warn!("could not save the online status of {}: {e}", device.key);
                 }
                 tracing::info!(
-                    "dispositivo {} ({}) de nuevo online en {}:{}",
+                    "device {} ({}) back online at {}:{}",
                     device.name,
                     device.key,
                     device.ip,
@@ -609,10 +597,10 @@ impl Watchdog {
                 self.emit(WatchdogEvent::Recovered(recovered));
             } else if !reachable && device.status == "online" {
                 if let Err(e) = registry.set_status(&device.key, "offline") {
-                    tracing::warn!("no se pudo persistir status offline de {}: {e}", device.key);
+                    tracing::warn!("could not save the offline status of {}: {e}", device.key);
                 }
                 tracing::warn!(
-                    "dispositivo {} ({}) pasó a offline en {}:{}",
+                    "device {} ({}) went offline at {}:{}",
                     device.name,
                     device.key,
                     device.ip,
@@ -624,13 +612,13 @@ impl Watchdog {
         }
     }
 
-    /// Escaneo de recuperación completo: por cada dispositivo offline, barre la subred buscándolo
-    /// por MAC en una IP nueva. Porta `_recovery_scan`.
+    /// Full recovery scan: for every offline device, sweeps the subnet looking for its MAC at a
+    /// new IP.
     async fn recovery_scan(&self, registry: &DeviceRegistry) {
-        // Solo entran los que TIENEN MAC: reconocer una impresora en una IP nueva exige una
-        // identidad que no dependa de la IP, y la clave de las que no tienen MAC *es* la IP.
-        // Sin ARP no hay recuperación posible tras un cambio de DHCP — es un límite real, no una
-        // omisión: en Android el usuario tendrá que volver a descubrir la impresora.
+        // Only devices WITH a MAC take part: recognising a printer at a new IP needs an identity
+        // that does not depend on the IP, and the key of those without a MAC *is* the IP. Without
+        // ARP there is no recovery after a DHCP change — a real limit, not an omission: on Android
+        // the user has to discover the printer again.
         let mut mac_lookup: HashMap<String, Device> = registry
             .get_all()
             .into_iter()
@@ -645,7 +633,7 @@ impl Watchdog {
             return;
         }
 
-        tracing::info!("recovery scan: buscando {} dispositivo(s) offline", mac_lookup.len());
+        tracing::info!("recovery scan: looking for {} offline device(s)", mac_lookup.len());
 
         let prefixes = local_subnet_prefixes();
         if prefixes.is_empty() {
@@ -658,12 +646,11 @@ impl Watchdog {
                 break; // Every offline device recovered.
             }
 
-            // Comprobación TCP rápida en el puerto 9100.
             if !tcp_check(&ip, ESCPOS_NETWORK_PORT, self.config.connect_timeout_ms).await {
                 continue;
             }
 
-            // Algo responde en 9100: resolver su MAC.
+            // Something answers on 9100: resolve its MAC.
             let mac = match get_mac_for_ip(&ip) {
                 Some(m) => m,
                 None => continue,
@@ -671,17 +658,17 @@ impl Watchdog {
 
             if let Some(device) = mac_lookup.remove(&mac) {
                 tracing::info!(
-                    "RECUPERADO dispositivo {} ({}): {} -> {}",
+                    "RECOVERED device {} ({}): {} -> {}",
                     device.name,
                     mac,
                     device.ip,
                     ip
                 );
                 if let Err(e) = registry.update_ip(&mac, &ip) {
-                    tracing::warn!("no se pudo actualizar IP de {mac}: {e}");
+                    tracing::warn!("could not update the IP of {mac}: {e}");
                 }
                 if let Err(e) = registry.set_status(&mac, "online") {
-                    tracing::warn!("no se pudo marcar online {mac}: {e}");
+                    tracing::warn!("could not mark {mac} online: {e}");
                 }
                 let recovered = registry.get_by_mac(&mac).unwrap_or(device);
                 self.emit(WatchdogEvent::Recovered(recovered));
@@ -690,12 +677,12 @@ impl Watchdog {
 
         let still_offline = mac_lookup.len();
         if still_offline > 0 {
-            tracing::info!("recovery scan completo: {still_offline} dispositivo(s) siguen offline");
+            tracing::info!("recovery scan done: {still_offline} device(s) still offline");
         }
     }
 }
 
-/// Comprueba si un puerto TCP está abierto. Porta `_tcp_check`.
+/// Whether a TCP port answers within `timeout_ms`.
 pub async fn tcp_check(host: &str, port: u16, timeout_ms: u64) -> bool {
     matches!(
         tokio::time::timeout(
@@ -711,7 +698,7 @@ pub async fn tcp_check(host: &str, port: u16, timeout_ms: u64) -> bool {
 mod tests {
     use super::*;
 
-    /// Ruta aislada por test bajo el temp del sistema (el registro escribe a disco).
+    /// A path of its own per test under the system temp dir (the registry writes to disk).
     fn temp_registry(name: &str) -> (DeviceRegistry, PathBuf) {
         let dir = std::env::temp_dir().join(format!("erplora-registry-test-{name}"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -719,48 +706,48 @@ mod tests {
         (DeviceRegistry::load(path.clone()), path)
     }
 
-    // ── tcp_check: la sonda de alcanzabilidad del watchdog ──────────────────────────────────────
+    // ── tcp_check: the watchdog's reachability probe ────────────────────────────────────────────
 
-    /// **La sonda distingue viva de apagada, y es lo único que lo hace.** El watchdog marca
-    /// `offline` y dispara el barrido de recuperación a partir de esta respuesta: si dijera
-    /// siempre `true`, una impresora que cambió de IP por DHCP se quedaría marcada online para
-    /// siempre y los tiques se irían a una dirección que ya no es suya.
+    /// **The probe tells a live printer from a dead one, and it is the only thing that does.** The
+    /// watchdog marks `offline` and triggers the recovery sweep from this answer: if it always said
+    /// `true`, a printer DHCP moved to another IP would stay online forever and the tickets would
+    /// go to an address that is no longer its own.
     #[tokio::test]
     async fn the_probe_says_reachable_only_while_something_is_listening() {
         let mock = crate::test_support::MockPrinter::start().await;
         assert!(
             tcp_check(&mock.target.host, mock.target.port, 500).await,
-            "con un listener arriba la sonda tiene que ver la impresora"
+            "with a listener up the probe has to see the printer"
         );
 
         let dead = crate::test_support::unreachable_target();
         assert!(
             !tcp_check(&dead.host, dead.port, 500).await,
-            "un puerto cerrado es una impresora apagada, no una viva"
+            "a closed port is a printer that is off, not a live one"
         );
     }
 
-    /// Un destino que ni siquiera resuelve/enruta no puede colgar la sonda: el watchdog barre 254
-    /// direcciones en serie, así que una sola espera sin techo congela la recuperación entera.
+    /// A destination that does not even route cannot hang the probe: the watchdog sweeps 254
+    /// addresses one after the other, so a single wait with no ceiling freezes the whole recovery.
     #[tokio::test]
     async fn the_probe_gives_up_within_its_timeout() {
-        // `192.0.2.0/24` es TEST-NET-1 (RFC 5737): no se enruta, así que el connect no responde.
+        // `192.0.2.0/24` is TEST-NET-1 (RFC 5737): it is not routed, so the connect never answers.
         let started = Instant::now();
         assert!(!tcp_check("192.0.2.1", ESCPOS_NETWORK_PORT, 120).await);
         assert!(
             started.elapsed() < Duration::from_millis(2_000),
-            "la sonda debe rendirse con su timeout, no con el del SO (tardó {:?})",
+            "the probe must give up on its own timeout, not the OS's (took {:?})",
             started.elapsed()
         );
     }
 
-    // ── ADR-0204 / hub#388: the watchdog is a NETWORK mechanism, and says so ───────────────────
+    // ── The watchdog is a NETWORK mechanism, and says so ───────────────────────────────────────
     //
     // Its whole toolbox is IP-shaped: a TCP probe to decide alive/dead and an ARP sweep to find a
     // printer that DHCP moved. A Bluetooth SPP printer has neither an IP to probe nor a subnet to
     // be found on — running either against it can only produce noise (a permanent "offline") or a
-    // false recovery onto some LAN device that happens to share the MAC. Phase 1 of ADR-0204 gives
-    // BT devices NO health path on purpose; this predicate is where that decision lives.
+    // false recovery onto some LAN device that happens to share the MAC. BT devices get NO health
+    // path on purpose; this predicate is where that decision lives.
 
     fn device_of_kind(kind: &str, ip: &str) -> Device {
         Device {
@@ -801,51 +788,51 @@ mod tests {
         assert!(!Watchdog::monitors(&bt));
     }
 
-    // ── device_key: la identidad estable ────────────────────────────────────────────────────────
+    // ── device_key: the stable identity ──────────────────────────────────────────────────────────
 
     #[test]
-    fn la_clave_es_la_mac_normalizada_cuando_se_conoce() {
+    fn the_key_is_the_normalized_mac_when_known() {
         assert_eq!(device_key(Some("aa-bb-cc-dd-ee-f1"), "10.0.0.5", 9100), "AA:BB:CC:DD:EE:F1");
     }
 
     #[test]
-    fn la_clave_cae_al_printer_id_cuando_no_hay_mac() {
-        // En Android NUNCA hay MAC (no existe el binario `arp` y /proc/net/arp está restringido
-        // desde Android 10), y en escritorio falla con VPN, contenedores o firewall.
+    fn the_key_falls_back_to_the_printer_id_without_a_mac() {
+        // Android NEVER has a MAC (there is no `arp` binary and /proc/net/arp is restricted since
+        // Android 10), and on the desktop it fails with a VPN, containers or a firewall.
         assert_eq!(device_key(None, "10.0.0.5", 9100), "network:10.0.0.5:9100");
         assert_eq!(device_key(Some("   "), "10.0.0.5", 9100), "network:10.0.0.5:9100");
     }
 
-    // ── El bug: sin MAC no se podía registrar ni asignar rol ────────────────────────────────────
+    // ── A printer without a MAC is registered and takes a role ──────────────────────────────────
 
     #[test]
-    fn registra_una_impresora_sin_mac() {
+    fn registers_a_printer_without_a_mac() {
         let (registry, _) = temp_registry("registra-sin-mac");
         let device = registry.register(None, "10.0.0.5", 9100, "Caja", "network").unwrap();
 
         assert_eq!(device.key, "network:10.0.0.5:9100");
-        assert_eq!(device.mac, None, "sin ARP no se inventa una MAC");
-        assert_eq!(registry.get_all().len(), 1, "la impresora DEBE entrar en el registro");
+        assert_eq!(device.mac, None, "without ARP no MAC is made up");
+        assert_eq!(registry.get_all().len(), 1, "the printer MUST enter the registry");
     }
 
     #[test]
-    fn asigna_rol_a_una_impresora_sin_mac() {
-        // Este es el defecto que bloqueaba el módulo `printing` en Android: sin MAC el
-        // dispositivo no llegaba a `devices.json`, `get_devices` devolvía [] y no se podía
-        // marcar ninguna impresora como cocina/barra/caja.
+    fn assigns_a_role_to_a_printer_without_a_mac() {
+        // Without a MAC the device would not reach `devices.json`, `get_devices` would return []
+        // and no printer could be marked kitchen/bar/till: the `printing` module would be blocked
+        // on Android.
         let (registry, _) = temp_registry("rol-sin-mac");
         let device = registry.register(None, "10.0.0.7", 9100, "Cocina", "network").unwrap();
 
         registry.set_role(&device.key, "kitchen").unwrap();
 
-        let stored = registry.get(&device.key).expect("el dispositivo sigue en el registro");
+        let stored = registry.get(&device.key).expect("the device is still in the registry");
         assert_eq!(stored.role.as_deref(), Some("kitchen"));
     }
 
-    // ── Compatibilidad hacia atrás: con MAC todo sigue igual ────────────────────────────────────
+    // ── With a MAC, the MAC stays the key ────────────────────────────────────────────────────────
 
     #[test]
-    fn con_mac_la_clave_sigue_siendo_la_mac_normalizada() {
+    fn with_a_mac_the_key_is_still_the_normalized_mac() {
         let (registry, _) = temp_registry("clave-es-mac");
         let device = registry
             .register(Some("aa-bb-cc-dd-ee-f2"), "10.0.0.8", 9100, "Barra", "network")
@@ -856,9 +843,9 @@ mod tests {
     }
 
     #[test]
-    fn las_mutaciones_aceptan_indistintamente_la_mac_o_la_clave() {
-        // El protocolo JSON llama `mac` a este parámetro (`SetDeviceRole { mac }`) y los
-        // llamadores existentes (apps/tauri) le pasan lo que tengan a mano.
+    fn mutations_accept_either_the_mac_or_the_key() {
+        // The JSON protocol calls this parameter `mac` (`SetDeviceRole { mac }`) and callers pass
+        // whichever they have at hand.
         let (registry, _) = temp_registry("mac-o-clave");
         registry
             .register(Some("AA:BB:CC:DD:EE:F3"), "10.0.0.9", 9100, "Caja", "network")
@@ -868,7 +855,7 @@ mod tests {
         assert_eq!(
             registry.get("AA:BB:CC:DD:EE:F3").unwrap().role.as_deref(),
             Some("receipt"),
-            "una MAC sin normalizar debe resolver al mismo dispositivo"
+            "an unnormalized MAC must resolve to the same device"
         );
 
         registry.set_name("AA:BB:CC:DD:EE:F3", "Caja principal").unwrap();
@@ -876,29 +863,26 @@ mod tests {
     }
 
     #[test]
-    fn re_registrar_preserva_first_seen_y_el_rol() {
+    fn re_registering_keeps_first_seen_and_the_role() {
         let (registry, _) = temp_registry("preserva");
         let first = registry.register(None, "10.0.0.10", 9100, "Caja", "network").unwrap();
         registry.set_role(&first.key, "receipt").unwrap();
 
         let again = registry.register(None, "10.0.0.10", 9100, "Caja renombrada", "network").unwrap();
 
-        assert_eq!(again.first_seen, first.first_seen, "first_seen no se pisa");
-        assert_eq!(again.role.as_deref(), Some("receipt"), "el rol asignado sobrevive");
-        assert_eq!(registry.get_all().len(), 1, "no se duplica la entrada");
+        assert_eq!(again.first_seen, first.first_seen, "first_seen is not overwritten");
+        assert_eq!(again.role.as_deref(), Some("receipt"), "the assigned role survives");
+        assert_eq!(registry.get_all().len(), 1, "the entry is not duplicated");
     }
 
-    // ── Datos ya persistidos en casa de clientes ────────────────────────────────────────────────
-
-    // ── hub#1083: a role on a printer the registry does not hold is an ERROR, not a no-op ──────
+    // ── A role on a printer the registry does not hold is an ERROR, not a no-op ────────────────
     //
-    // A USB queue is discovered and prints, but never enters the registry (its identity is
-    // hub#1536). The printing settings screen still offers the role control and sends
-    // `usb:{queue}` as the key: answering `Ok` there is a click that does nothing, with no message —
-    // the silent failure the production-ready rule forbids.
+    // The printing settings screen offers the role control for a USB queue and sends
+    // `usb:{queue}` as the key. If that queue never made it into the registry, answering `Ok` is a
+    // click that does nothing, with no message — a silent failure.
 
     #[test]
-    fn hub1083_a_role_on_a_usb_queue_is_refused_instead_of_silently_dropped() {
+    fn a_role_on_an_unregistered_usb_queue_is_refused_instead_of_silently_dropped() {
         let (registry, _) = temp_registry("rol-cola-usb");
 
         let err = registry
@@ -925,7 +909,7 @@ mod tests {
         assert_eq!(registry.get_all()[0].role, None, "and it did not receive the role by mistake");
     }
 
-    // ── hub#1536: una cola del SO entra en el registro con identidad PROPIA ─────────────────────
+    // ── An OS queue enters the registry with an identity of its OWN ─────────────────────────────
     //
     // A USB queue has neither a MAC to resolve by ARP nor an `ip:port` to fall back on, so
     // `device_key` answers `network::0` for EVERY one of them: the second queue registered would
@@ -933,7 +917,7 @@ mod tests {
     // `printer_id` (`usb:{queue}`) IS its identity — a CUPS destination name is unique per machine.
 
     #[test]
-    fn hub1536_two_usb_queues_are_two_devices_and_not_one() {
+    fn two_usb_queues_are_two_devices_and_not_one() {
         let (registry, _) = temp_registry("dos-colas-usb");
 
         let star = registry
@@ -955,8 +939,8 @@ mod tests {
     }
 
     #[test]
-    fn hub1536_a_registered_usb_queue_takes_a_role_like_any_other_printer() {
-        // The point of the whole issue: "this one is the kitchen's" has to work over a cable.
+    fn a_registered_usb_queue_takes_a_role_like_any_other_printer() {
+        // "This one is the kitchen's" has to work over a cable too.
         let (registry, _) = temp_registry("rol-cola-usb-registrada");
         registry
             .register_queue("usb:Star_TSP143", "Star TSP143")
@@ -971,7 +955,7 @@ mod tests {
     }
 
     #[test]
-    fn hub1536_re_registering_a_queue_keeps_its_role_and_its_first_seen() {
+    fn re_registering_a_queue_keeps_its_role_and_its_first_seen() {
         // Every discovery re-registers what it finds. A queue that loses its role on the next scan
         // is a role the owner has to set again every time they open the screen.
         let (registry, _) = temp_registry("re-registra-cola-usb");
@@ -984,14 +968,14 @@ mod tests {
             .register_queue("usb:Star_TSP143", "Star TSP143 (barra)")
             .unwrap();
 
-        assert_eq!(again.first_seen, first.first_seen, "first_seen no se pisa");
+        assert_eq!(again.first_seen, first.first_seen, "first_seen is not overwritten");
         assert_eq!(again.role.as_deref(), Some("kitchen"), "the role survives");
         assert_eq!(again.name, "Star TSP143 (barra)", "the name does refresh");
-        assert_eq!(registry.get_all().len(), 1, "no se duplica la entrada");
+        assert_eq!(registry.get_all().len(), 1, "the entry is not duplicated");
     }
 
     #[test]
-    fn hub1536_a_printer_id_that_is_not_a_usable_queue_is_refused() {
+    fn a_printer_id_that_is_not_a_usable_queue_is_refused() {
         // Anything without a queue name behind `usb:` would be the collapsing key all over again:
         // one ghost entry that every later queue inherits, roles included. Another transport's id
         // is refused at this door too — it has its own, with its own identity.
@@ -1018,11 +1002,11 @@ mod tests {
     }
 
     #[test]
-    fn hub1536_a_device_with_neither_mac_nor_socket_is_refused_by_the_network_door() {
+    fn a_device_with_neither_mac_nor_socket_is_refused_by_the_network_door() {
         // `register(None, "", 0, …)` is what registering a queue through the NETWORK door looks
         // like, and `device_key` answers `network::0` for every caller that does it. Refusing it
-        // is the guard that keeps the collision from coming back through another route — a silent
-        // overwrite of somebody else's role is the failure this issue is made of.
+        // is the guard that keeps the collision from coming back through another route: a silent
+        // overwrite of somebody else's role.
         let (registry, _) = temp_registry("clave-colapsada");
 
         let err = registry
@@ -1037,9 +1021,9 @@ mod tests {
     }
 
     #[test]
-    fn hub1536_a_bluetooth_printer_still_registers_with_no_ip_at_all() {
-        // The guard above must not catch the bonded-SPP path (ADR-0204), which registers with an
-        // empty ip on purpose: its MAC is its identity and the watchdog knows to leave it alone.
+    fn a_bluetooth_printer_still_registers_with_no_ip_at_all() {
+        // The guard above must not catch the bonded-SPP path, which registers with an empty ip on
+        // purpose: its MAC is its identity and the watchdog knows to leave it alone.
         let (registry, _) = temp_registry("bluetooth-sin-ip");
 
         let bt = registry
@@ -1051,7 +1035,7 @@ mod tests {
     }
 
     #[test]
-    fn hub1536_the_keys_already_on_disk_do_not_move_when_a_queue_is_added() {
+    fn the_keys_already_on_disk_do_not_move_when_a_queue_is_added() {
         // `devices.json` is user data. An entry whose key changed would lose the role its owner
         // assigned — the migration of the old entries is that they DO NOT MOVE.
         let (_, path) = temp_registry("claves-existentes");
@@ -1083,9 +1067,9 @@ mod tests {
     }
 
     #[test]
-    fn carga_un_devices_json_antiguo_sin_campo_key() {
-        // `devices.json` es dato de usuario: los ficheros escritos antes de esta versión están
-        // indexados por MAC y no traen `key`. Deben seguir cargando y quedar operativos.
+    fn loads_an_old_devices_json_without_a_key_field() {
+        // `devices.json` is user data: files written before the `key` field existed are keyed by
+        // MAC and carry no `key`. They must still load and keep working.
         let (_, path) = temp_registry("legacy");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(
@@ -1098,13 +1082,13 @@ mod tests {
         .unwrap();
 
         let registry = DeviceRegistry::load(path);
-        let device = registry.get("AA:BB:CC:DD:EE:F4").expect("el dispositivo legacy carga");
+        let device = registry.get("AA:BB:CC:DD:EE:F4").expect("the old device loads");
 
-        assert_eq!(device.key, "AA:BB:CC:DD:EE:F4", "la clave se rellena desde la MAC");
-        assert_eq!(device.role.as_deref(), Some("kitchen"), "el rol asignado no se pierde");
+        assert_eq!(device.key, "AA:BB:CC:DD:EE:F4", "the key is filled in from the MAC");
+        assert_eq!(device.role.as_deref(), Some("kitchen"), "the assigned role is not lost");
     }
 
-    // ── hub#1924: a printer typed by address is remembered as such ───────────────────────────────
+    // ── A printer typed by address is remembered as such ─────────────────────────────────────────
 
     #[test]
     fn a_rescan_that_finds_a_typed_printer_keeps_it_manual_and_keeps_its_role() {

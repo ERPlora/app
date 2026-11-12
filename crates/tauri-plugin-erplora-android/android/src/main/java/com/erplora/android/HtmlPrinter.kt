@@ -17,14 +17,13 @@ import android.webkit.WebViewClient
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * An A4 document through Android's own print service (hub#2008).
+ * An A4 document through Android's own print service.
  *
  * Inside the app's WebView `window.print()` prints nothing and wry has no `print` on Android, so an
  * invoice could only leave the tablet on the till roll. Android prints a WebView natively:
  * [WebView.createPrintDocumentAdapter] handed to [PrintManager.print] opens the system print
  * screen, with every printer the device knows and «Save as PDF». That is what this does, with a
- * WebView of its own whose ONLY content is the document — the desktop print window of hub#2006,
- * Android's way.
+ * WebView of its own whose ONLY content is the document — the desktop print window, Android's way.
  *
  * The html comes from a remote page, so the WebView that renders it runs no script, exposes no
  * bridge, reads no files and never navigates: a link inside the invoice must not turn it into a

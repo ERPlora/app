@@ -7,9 +7,10 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
-    <!-- The strip reserved under the status bar shows the window background (hub#1903), so it
-         wears the header colour of the hub shell: the ion-toolbar-background custom property in
-         apps/web/src/theme/variables.css. Kept in step by tests/android_status_bar_inset.rs.
+    <!-- The strip reserved under the status bar shows the window background, so it wears the
+         header colour of the hub shell: the ion-toolbar-background custom property of the hub's
+         web theme, which lives outside this repo. src-tauri/tests/android_status_bar_inset.rs
+         checks that the strip is an opaque colour, not that it matches the hub's value.
          XML comments cannot hold a double hyphen, hence the property named without one. -->
     <color name="status_bar_strip">#FFF6F7F9</color>
 </resources>

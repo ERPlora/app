@@ -8,8 +8,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 /**
- * HUB_APP-F26 (hub#836; the old hub's hub#2307) — the decisions behind keeping the app listening
- * for notices while the screen is off.
+ * The decisions behind keeping the app listening for notices while the screen is off.
  *
  * The service itself is Android glue; what can go wrong without anyone noticing lives here, pure:
  * the service type Android 14 demands (without it `startForeground` throws and nothing listens),
@@ -54,7 +53,7 @@ class NoticeListeningTest {
 
     @Test
     fun `the notification does not reuse an id the notices of the shell could take`() {
-        // The shell's notices use ids from the clock (hub#2305), always positive and under 1e9.
+        // The shell's notices use ids from the clock, always positive and under 1e9.
         assertEquals(true, NoticeListening.NOTIFICATION_ID < 0)
     }
 

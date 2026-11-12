@@ -6,12 +6,13 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 /**
- * The tap on a notice that STARTED the app (hub#2360).
+ * The tap on a notice that STARTED the app.
  *
  * The notification plugin reports it as `actionPerformed` while it is still loading, before the page
- * has a listener, and Tauri drops an event nobody listens to — so the tap opened the app on its first
- * screen instead of the booking it announced. This plugin keeps it for the page to claim; what is
- * decided here is WHICH launches are such a tap, from the extras the notification plugin puts on it.
+ * has a listener, and Tauri drops an event nobody listens to — so the tap would open the app on its
+ * first screen instead of the booking it announced. This plugin keeps it for the page to claim;
+ * what is decided here is WHICH launches are such a tap, from the extras the notification plugin
+ * puts on it.
  */
 class NoticeLaunchTest {
 

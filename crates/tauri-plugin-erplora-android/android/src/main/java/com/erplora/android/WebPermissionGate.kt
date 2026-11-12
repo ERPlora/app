@@ -19,7 +19,7 @@ import java.net.URI
 import java.util.Locale
 
 /**
- * Which pages may use the device's microphone and position (hub#247, hub#2552).
+ * Which pages may use the device's microphone and position.
  *
  * wry's `RustWebChromeClient` answers `getUserMedia` and `navigator.geolocation` for WHATEVER page
  * asks: it asks Android once, for the whole app, and from then on hands the capture to every

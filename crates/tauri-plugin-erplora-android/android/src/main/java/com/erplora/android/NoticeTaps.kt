@@ -4,10 +4,10 @@ import android.content.Context
 import android.content.Intent
 
 /**
- * The process's one [NoticeTapBox] (hub#2360), fed from the two places a tap reaches the app — the
- * plugin's `load` and `MainActivity.onNewIntent`. The tap the task was born from is remembered in the
- * app's preferences, so a process the system brings back does not keep it again. So is the screen
- * each notice leads to ([NoticeTargets], hub#1039): the tap brings back the notice's number only.
+ * The process's one [NoticeTapBox], fed from the two places a tap reaches the app — the plugin's
+ * `load` and `MainActivity.onNewIntent`. The tap the task was born from is remembered in the app's
+ * preferences, so a process the system brings back does not keep it again. So is the screen each
+ * notice leads to ([NoticeTargets]): the tap brings back the notice's number only.
  */
 object NoticeTaps {
     private const val PREFS = "com.erplora.notice_taps"

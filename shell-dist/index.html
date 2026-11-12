@@ -1,14 +1,14 @@
 <!doctype html>
-<!-- Página DEGRADADA del shell (ADR-0159): la que ve el usuario cuando la ventana no puede cargar
-     el hub o el SaaS. Desde hub#1716 NO es solo la del primer arranque: el guardia de conectividad
-     (`src/connectivity.rs`) trae aquí la ventana ante cualquier carga que no aterrice, y se la
-     lleva de vuelta sola en cuanto la red contesta. Antes de eso el usuario se quedaba en la
-     pantalla de error de la webview —blanca en macOS, gris en Android— sin barra de direcciones ni
-     botón de recarga: la caja muerta hasta matar la app desde el sistema.
+<!-- The shell's DEGRADED page: what the user sees when the window cannot load the hub or the
+     SaaS. Not only on the first start: the connectivity guard (`src/connectivity.rs`) brings the
+     window here on any load that does not land, and takes it back on its own as soon as the
+     network answers. Without it the user would be left on the webview's error screen — white on
+     macOS, grey on Android — with no address bar and no reload button: a dead till until the app
+     is killed from the system.
 
-     El shell es un cliente fino: el contenido real vive en https://erplora.com (onboarding) y en
-     la PWA del hub. Esta página se empaqueta ENTERA dentro de la app —marca incluida— porque es
-     justo la que se pinta cuando no hay red para pedir nada. -->
+     The shell is a thin client: the real content lives at https://erplora.com (onboarding) and in
+     the hub's PWA. This page is packed WHOLE inside the app, brand included, because it is the one
+     painted when there is no network to ask for anything. -->
 <html lang="es">
   <head>
     <meta charset="utf-8" />
@@ -39,8 +39,8 @@
   </head>
   <body>
     <main>
-      <!-- La MARCA va empaquetada (no es un asset remoto): es la única forma de que la pantalla
-           siga siendo reconociblemente ERPlora justo cuando no hay red. -->
+      <!-- The BRAND is packed in (not a remote asset): it is the only way the screen stays
+           recognisably ERPlora exactly when there is no network. -->
       <img class="mark" src="erplora-mark.png" alt="ERPlora" />
       <p class="brand">ERPlora</p>
       <h1 id="title">Sin conexión a internet</h1>
@@ -51,13 +51,13 @@
     </main>
     <!-- Wired from a script, not from an `onclick=`: this page is served under the app's CSP
          (`script-src 'self'`), and CSP has neither a hash nor a nonce for an inline event handler,
-         so the button used to be pure decoration — the browser dropped the handler without a word.
+         so the button would be pure decoration — the browser drops the handler without a word.
          `__TAURI_SCRIPT_NONCE__` is the token Tauri swaps for a fresh nonce when it serves the
          asset, adding `'nonce-…'` to script-src (`tauri_utils::assets::SCRIPT_NONCE_TOKEN`).
          Remove the attribute and the script is blocked, just as silently. Pinned by
          `src-tauri/tests/shell_csp.rs`. -->
     <script nonce="__TAURI_SCRIPT_NONCE__">
-      // ADR-0055/0199: visible text ships as an English SOURCE chain plus its `es` translation.
+      // Visible text ships as an English SOURCE string plus its `es` translation.
       // This page has no i18n runtime to lean on — it is what you get when there is no network at
       // all — so it carries both catalogues itself. `es` is the default, like the hub's own shell
       // (`apps/web/src/i18n/index.ts`); English is served only when the device is explicitly not
@@ -93,8 +93,8 @@
       retry.textContent = text.retry;
 
       // The button asks the SHELL, which is the only side that can probe the network and move the
-      // window (hub#1716). It used to be `location.reload()` — on this page that reloads THIS page,
-      // so the one control on the only screen the user could reach led straight back to itself.
+      // window. `location.reload()` would reload THIS page, so the one control on the only screen
+      // the user can reach would lead straight back to itself.
       // The shell keeps retrying on its own too; this is the way to say "now".
       retry.addEventListener("click", function () {
         var bridge = window.__TAURI__ && window.__TAURI__.core;

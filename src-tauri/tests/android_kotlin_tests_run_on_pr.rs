@@ -1,24 +1,22 @@
 //! Guard on WHERE the plugin's Kotlin unit tests run, and on the standalone project that lets
-//! them (hub#933).
+//! them.
 //!
 //! The Kotlin side of the Android plugin — `PermissionPolicy`, `statusOf`, `requestScope`,
-//! `BluetoothSpp` — is where the decisions live, and it has 34 unit tests. Until hub#933 the only
-//! place they ran was the `build-android` job of `tauri-release.yml`, which fires on a `v*` tag or
-//! by hand. So the tests guarded nothing on a PR: `48f2b0e1` (Bluetooth SPP, hub#388) added a
-//! permission to the policy, left one expectation stale, and `develop` stayed red for a day
-//! without a single check going amber. The next tag would have found it — in the middle of a
-//! release, which is the worst possible place to learn about a one-line test expectation.
+//! `BluetoothSpp` — is where the decisions live, and it has its own unit tests. Run only in the
+//! `build-android` job of `tauri-release.yml`, which fires on a `v*` tag or by hand, they would
+//! guard nothing on a PR: a stale expectation would wait for the next tag and turn up in the
+//! middle of a release, which is the worst possible place to learn about a one-line test
+//! expectation.
 //!
-//! They ran only there for a concrete reason, not by neglect: the Gradle project under
-//! `gen/android` cannot be configured without `tauri.settings.gradle` and `app/tauri.build.gradle.kts`,
-//! and BOTH are written by `cargo tauri android build`. Running the tests therefore meant paying
-//! for the whole Android release build (NDK, four Rust target triples, ~60 min) to reach a step
-//! that takes 12 seconds.
+//! The Gradle project under `gen/android` cannot be configured without `tauri.settings.gradle` and
+//! `app/tauri.build.gradle.kts`, and BOTH are written by `cargo tauri android build`. Running the
+//! tests there means paying for the whole Android release build (NDK, four Rust target triples,
+//! ~60 min) to reach a step that takes seconds.
 //!
 //! `crates/tauri-plugin-erplora-android/android-tests/` breaks that coupling: a tiny standalone
 //! Gradle root that includes ONLY the plugin library and the `tauri-android` SDK it compiles
-//! against, with no `:app` and therefore nothing generated. Measured on this tree: 22 s from cold,
-//! 1 s warm, with a JDK and the Android SDK and no NDK or Rust at all.
+//! against, with no `:app` and therefore nothing generated. It needs a JDK and the Android SDK,
+//! and no NDK or Rust at all.
 //!
 //! What this file defends is the wiring itself, because both halves fail silently:
 //!
@@ -73,12 +71,12 @@ fn the_kotlin_unit_tests_run_in_the_pull_request_workflow() {
 
     assert!(
         workflow.contains("pull_request"),
-        "{SHELL_WORKFLOW} must run on pull_request — a check that only runs on a tag protects nothing (hub#933)",
+        "{SHELL_WORKFLOW} must run on pull_request — a check that only runs on a tag protects nothing",
     );
     assert!(
         workflow.contains(RUNNER_SCRIPT),
-        "{SHELL_WORKFLOW} no longer invokes {RUNNER_SCRIPT}: the plugin's 34 Kotlin tests would go \
-         back to running only in the release job, where a stale expectation waits for a tag (hub#933)",
+        "{SHELL_WORKFLOW} no longer invokes {RUNNER_SCRIPT}: the plugin's Kotlin tests would go \
+         back to running only in the release job, where a stale expectation waits for a tag",
     );
 }
 
@@ -93,7 +91,7 @@ fn the_workflow_still_watches_the_plugin_tree() {
     assert!(
         workflow.contains("crates/tauri-plugin-erplora-android/**"),
         "{SHELL_WORKFLOW} stopped watching the plugin tree: the Kotlin tests would be wired but \
-         never triggered by the PRs that change them (hub#933)",
+         never triggered by the PRs that change them",
     );
 }
 
@@ -147,7 +145,7 @@ fn the_standalone_project_pins_the_same_agp_and_kotlin_as_the_release() {
             expected, actual,
             "{artifact}: the release builds the plugin with {expected} and the PR check with \
              {actual}. The check would go green on a compiler the APK never sees — align \
-             {STANDALONE_BUILD} with {GENERATED_ROOT_BUILD} (hub#933)",
+             {STANDALONE_BUILD} with {GENERATED_ROOT_BUILD}",
         );
     }
 }

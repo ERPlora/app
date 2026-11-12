@@ -6,7 +6,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 /**
- * Where the taps the page was not there to hear wait for it (hub#2360), across the two ways a tap
+ * Where the taps the page was not there to hear wait for it, across the two ways a tap
  * reaches a dead app: the intent the activity is created with, and `onNewIntent` when the system
  * killed the process but kept the task — the activity comes back with its old launcher intent and
  * the tap arrives afterwards, before any plugin is loaded.
@@ -26,7 +26,7 @@ class NoticeTapBoxTest {
     private val launcher = NoticeLaunch.Launch(Intent.ACTION_MAIN, 0x10000000, NoticeLaunch.NO_ID, null, null)
 
     /**
-     * What the notification plugin really puts on the intent of a tap (hub#1039): the notice's
+     * What the notification plugin really puts on the intent of a tap: the notice's
      * number, and no notice — it never fills `sourceJson` (tauri-apps/plugins-workspace#3550).
      */
     private fun bare(id: Int) = NoticeLaunch.Launch(Intent.ACTION_MAIN, 0x24000000, id, "tap", null)
@@ -138,7 +138,7 @@ class NoticeTapBoxTest {
     @Test
     fun `a tap through onNewIntent does not take the place of the tap the task was born from`() {
         // Android delivers a new intent once, and hands the intent the task was born from back at
-        // every return of the process (rv-2411, measured): only the latter has to be remembered.
+        // every return of the process (measured): only the latter has to be remembered.
         val memory = Memory()
         NoticeTapBox(memory).pageLoading(tap(7, "/m/appointments"))
         NoticeTapBox(memory).newIntent(tap(8, "/m/kitchen"))
