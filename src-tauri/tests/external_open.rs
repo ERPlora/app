@@ -1,27 +1,27 @@
 //! The boundary of `open_external_url`: which addresses the app is willing to hand to the SYSTEM
-//! browser (hub#475).
+//! browser.
 //!
-//! The web app has one door out of the till — `openExternal` — and inside the installed app it was
-//! a **no-op**: no `shell`/`opener` plugin is exposed to the page and the webview spawns no window,
-//! so `window.open` did nothing at all. The eight buttons behind it are the ones that CHARGE: the
-//! module checkout ADR-0114 §4 deliberately took out of the app for Google Play, the plans page,
-//! the billing portal, the plan-limit upsell.
+//! The web app has one door out of the till — `openExternal` — and inside the installed app
+//! `window.open` is a **no-op**: no `shell`/`opener` plugin is exposed to the page and the webview
+//! spawns no window. The buttons behind that door are the ones that CHARGE: the module checkout,
+//! which lives on the SaaS website because Google Play does not allow paying for digital goods
+//! inside the app, the plans page, the billing portal, the plan-limit upsell.
 //!
 //! Making that work means the page can ask the app to launch the user's browser, and that is a new
 //! frontier: an unchecked opener turns the till into a launcher for any address — a phishing page
 //! wearing the OS trust of an installed app, a `file://` path, or a custom scheme that starts
-//! another program. So the destination is CHECKED, in Rust, the way ADR-0221 checks who may drive
-//! the hardware and ADR-0225 checks what a deep link may open.
+//! another program. So the destination is CHECKED, in Rust, just as the hardware capability checks
+//! who may drive the hardware and `resolve_deep_link` checks what a deep link may open.
 //!
 //! Note what is deliberately DIFFERENT here: the apex `erplora.com` is **allowed**, while
 //! `hub_url_for_host`/`trusted_hub_origin` refuse it on purpose. Those two answer "may this page
 //! drive the cash drawer / become this till's home?"; this one answers "may the user's browser be
-//! sent here?". The apex is the SaaS — it is where every one of the eight destinations lives — and
+//! sent here?". The apex is the SaaS — it is where every one of those destinations lives — and
 //! opening it in a browser grants nothing but a visit.
 
 use erplora_tauri_lib::external_browser_url;
 
-/// The destination `openExternal` builds for a module purchase (ADR-0114 §4).
+/// The destination `openExternal` builds for a module purchase.
 const CHECKOUT: &str = "https://erplora.com/dashboard/marketplace/modules/pos/?hub=h1&utm_source=hub";
 
 #[test]
@@ -43,10 +43,10 @@ fn opens_a_hub_of_ours_whatever_its_aura() {
     }
 }
 
-/// The assistant's paid upgrade is its own Stripe subscription (ADR-0033), and the SaaS answers
-/// its checkout with Stripe's hosted page — there is no erplora.com page in between. Without this
-/// the assistant's «See plans» could only fail inside the installed app, so it navigated the till
-/// window itself and left the owner stranded on a payment page with no way back (hub#1914).
+/// The assistant's paid upgrade is its own Stripe subscription, and the SaaS answers its checkout
+/// with Stripe's hosted page — there is no erplora.com page in between. Without this the
+/// assistant's «See plans» could only fail inside the installed app, or navigate the till window
+/// itself and leave the owner stranded on a payment page with no way back.
 #[test]
 fn opens_stripe_hosted_checkout_for_the_assistant_upgrade() {
     const STRIPE: &str = "https://checkout.stripe.com/c/pay/cs_live_a1B2c3#fidkdWxOYHwnPyd1blpxYHZxWjA0";

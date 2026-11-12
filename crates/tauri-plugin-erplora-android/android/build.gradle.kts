@@ -1,8 +1,6 @@
-// Módulo Android del plugin. Lo incluye el `settings.gradle` que genera
-// `cargo tauri android init` en `apps/tauri/src-tauri/gen/android`.
-//
-// `PermissionPolicy` es lógica PURA a propósito (solo lee `Build.VERSION.SDK_INT` por defecto),
-// así que sus tests corren en la JVM con `testDebugUnitTest` — sin emulador y en segundos.
+// The plugin's Android module, included by the app's generated Gradle build and by the standalone
+// test root in `android-tests/`. The policy classes are pure on purpose, so their tests run on the
+// JVM with `testDebugUnitTest`: no emulator, seconds.
 
 plugins {
     id("com.android.library")
@@ -14,8 +12,8 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        // El shell apunta a Android 7+; los permisos que este plugin gestiona son de API 33 y 37,
-        // y `PermissionPolicy` ya calcula cuáles aplican en cada nivel.
+        // The app runs on Android 7+; the permissions this plugin manages arrived in API 33 and 37,
+        // and `PermissionPolicy` works out which ones apply at each level.
         minSdk = 24
     }
 
@@ -30,8 +28,8 @@ android {
 
     testOptions {
         unitTests {
-            // `Build.VERSION.SDK_INT` vale 0 en la JVM; los tests pasan el nivel explícitamente,
-            // así que no hace falta Robolectric — pero sí que las clases stub no revienten.
+            // `Build.VERSION.SDK_INT` is 0 on the JVM and the tests pass the level explicitly, so no
+            // Robolectric is needed, only stub classes that return defaults instead of throwing.
             isReturnDefaultValues = true
         }
     }
@@ -39,15 +37,13 @@ android {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
-    // `AppCompatActivity` in `Plugin.onDestroy(activity)`, where the listening service stops
-    // (HUB_APP-F26) and the system voice shuts down (round 2026-11-04a); `PageKeeper` hears the
-    // activity's lifecycle through it too. The same version the Tauri SDK already puts in the app,
-    // so the APK carries nothing new.
+    // `AppCompatActivity` in `Plugin.onDestroy(activity)`, where the listening service stops and
+    // the system voice shuts down; `PageKeeper` hears the activity's lifecycle through it too. The
+    // same version the Tauri SDK already puts in the app, so the APK carries nothing new.
     implementation("androidx.appcompat:appcompat:1.6.0")
     // `WebViewCompat.getWebChromeClient` (WebPermissionGate): the platform getter is API 26, the
     // app starts at 24. Same version the app module already ships, so nothing new reaches the APK.
     implementation("androidx.webkit:webkit:1.14.0")
-    // El SDK del plugin de Tauri: `Plugin`, `@TauriPlugin`, `@Command`, `Invoke`.
     implementation(project(":tauri-android"))
 
     testImplementation(kotlin("test"))

@@ -1,36 +1,28 @@
-//! Render ESC/POS: convierte un `document_type` + `data` (JSON del Hub) en bytes para enviar
-//! por el socket TCP de la impresora.
-//!
-//! Porta:
-//!   - los comandos crudos de `_RawNetworkPrinter` (`discovery.py`): align/bold/size/cut.
-//!   - los renderizadores de documento de `printer.py` (`_print_receipt`, `_print_kitchen_order`,
-//!     `_print_invoice`, `_print_delivery_note`, `_print_barcode_label`, `_print_cash_report`,
-//!     `_print_generic`) y `test_print`.
+//! ESC/POS rendering: turns a `document_type` plus its `data` (the Hub's JSON) into the bytes
+//! sent to the printer.
 
 use crate::Result;
 use oem_cp::{Cp437, StrExt};
 use serde::{Deserialize, Serialize};
 
-/// Ancho de papel estándar en columnas (80mm ≈ 32 chars). Espejo del `padding = 32 - …` de Python.
+/// Standard paper width in columns (80 mm ≈ 32 characters).
 pub const LINE_WIDTH: usize = 32;
 
 /// **The name this crate signs paper with when the document does not bring the business's own.**
 ///
 /// A constant and not a literal per renderer because it is the name of a PRODUCT, and products get
-/// retired: the test page spent a month signed «ERPlora Bridge» after ADR-0196 retired the daemon
-/// and hub#340 deleted it from the tree (hub#1735), while the receipt beside it already fell back
-/// to the right one. Paper cannot be corrected after it is cut, so the two must not be able to
-/// drift apart again.
+/// renamed or retired: with one literal per renderer, the test page and the receipt beside it end
+/// up signed with different names. Paper cannot be corrected after it is cut, so the two must not
+/// be able to drift apart.
 pub const PRODUCT_NAME: &str = "ERPlora";
 
 /// Module size, in dots, of a QR on the paper (fiscal and «pide tu factura»).
 const QR_MODULE_DOTS: u8 = 4;
 
-/// The promotional QR (hub#2009) at 3 dots — 75 % of the fiscal one, the nearest whole dot to the
+/// The promotional QR at 3 dots — 75 % of the fiscal one, the nearest whole dot to the
 /// 70 % `<ok-receipt>` draws on screen.
 const PROMO_QR_MODULE_DOTS: u8 = 3;
 
-/// Tipos de documento soportados (espejo del `if document_type == …` de `PrinterManager`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DocumentType {
@@ -40,8 +32,8 @@ pub enum DocumentType {
     DeliveryNote,
     BarcodeLabel,
     CashSessionReport,
-    /// **The bill taken to the table before charging** (ADR-0141, hub#748). Deliberately a document
-    /// of its own and not a `Receipt`: it is the same list of lines, but it must NOT carry a series
+    /// **The bill taken to the table before charging.** Deliberately a document of its own and
+    /// not a `Receipt`: it is the same list of lines, but it must NOT carry a series
     /// number, a payment method or a VeriFactu QR — the numbering is consumed on payment and there
     /// is no billing record yet — and it must carry the printed notice that it is not an invoice.
     /// Handing a customer paper that passes for an invoice is a legal problem, not a cosmetic one.
@@ -50,15 +42,13 @@ pub enum DocumentType {
 }
 
 impl DocumentType {
-    /// Maps the protocol string, **refusing what it does not know** (hub#501). The only door.
+    /// Maps the protocol string, **refusing what it does not know**. The only door.
     ///
-    /// It used to have a lenient twin (`from_wire`, unknown → `Generic`, mirroring Python's
-    /// `else`), and that leniency is the most expensive kind of failure: a `Kitchen` or a `kitchn`
-    /// rendered as `Generic` — a nameless dump of key/value pairs — so the kitchen got a piece of
-    /// paper that was not an order and **nobody found out until the plate was missing**. A ticket
-    /// that fails loudly is cheaper than one that fails quietly, so the caller gets a `None` it has
-    /// to deal with. The twin's only caller was the standalone Bridge, deleted by hub#340; hub#578
-    /// removed the door with it, so no route can degrade to `Generic` in silence any more.
+    /// A lenient mapping (unknown → `Generic`) is the most expensive kind of failure: a `Kitchen`
+    /// or a `kitchn` rendered as `Generic` — a nameless dump of key/value pairs — gives the kitchen
+    /// a piece of paper that is not an order, and **nobody finds out until the plate is missing**.
+    /// A ticket that fails loudly is cheaper than one that fails quietly, so the caller gets a
+    /// `None` it has to deal with, and no route can degrade to `Generic` in silence.
     ///
     /// It is deliberately the same vocabulary the hub's queue accepts
     /// (`erplora_runtime::print_queue::DOCUMENT_TYPES`) — two guards, two layers, different
@@ -78,7 +68,7 @@ impl DocumentType {
     }
 }
 
-/// Alineación horizontal (ESC a n).
+/// Horizontal alignment (`ESC a n`).
 #[derive(Debug, Clone, Copy)]
 pub enum Align {
     Left,
@@ -86,11 +76,10 @@ pub enum Align {
     Right,
 }
 
-/// Constructor de un buffer ESC/POS. Cada método empuja bytes al buffer interno.
-/// Porta `_RawNetworkPrinter.{set,text,cut,barcode}` (codificación cp437).
+/// Builds an ESC/POS buffer: every method pushes bytes onto it. Text is encoded in cp437.
 pub struct EscposBuilder {
     buf: Vec<u8>,
-    /// Decimals every amount is printed with: the scale of the document's currency (hub#2129).
+    /// Decimals every amount is printed with: the scale of the document's currency.
     decimals: usize,
 }
 
@@ -103,19 +92,18 @@ impl Default for EscposBuilder {
     }
 }
 
-/// The scale a document without `decimals` is printed in: the euro's, which is what every paper
-/// printed before hub#2129.
+/// The scale a document without `decimals` is printed in: the euro's.
 const DEFAULT_MONEY_DECIMALS: usize = 2;
 
 /// The widest scale ISO 4217 defines (CLF, UYW). A document asking for more is not trusted.
 const MAX_MONEY_DECIMALS: u64 = 4;
 
-/// The currency scale a document declares in `decimals` (hub#2129): JPY 0, EUR 2, KWD 3.
+/// The currency scale a document declares in `decimals`: JPY 0, EUR 2, KWD 3.
 ///
 /// The amounts reach the paper as major-unit floats that the producer (`sales`) already divided by
 /// that scale, so the paper only needs to know how many digits to show. Anything that is not a
-/// whole number in `0..=4` falls back to two decimals — the paper of every document that predates
-/// the field — rather than printing a ticket with nine.
+/// whole number in `0..=4` falls back to two decimals — what a document without the field prints —
+/// rather than printing a ticket with nine.
 fn money_decimals(data: &serde_json::Value) -> usize {
     data.get("decimals")
         .and_then(|v| v.as_u64())
@@ -128,7 +116,7 @@ impl EscposBuilder {
         Self::default()
     }
 
-    /// Prints every amount with `decimals` digits (the currency's scale, hub#2129).
+    /// Prints every amount with `decimals` digits (the currency's scale).
     pub fn with_money_decimals(mut self, decimals: usize) -> Self {
         self.decimals = decimals;
         self
@@ -140,8 +128,7 @@ impl EscposBuilder {
         format!("{amount:.prec$}", prec = self.decimals)
     }
 
-    /// Estado de impresión: alineación + negrita + doble alto/ancho (`ESC a`, `ESC E`, `GS !`).
-    /// Espejo exacto de `_RawNetworkPrinter.set`.
+    /// Print state: alignment + bold + double height/width (`ESC a`, `ESC E`, `GS !`).
     pub fn set(&mut self, align: Align, bold: bool, double_h: bool, double_w: bool) -> &mut Self {
         // ESC a n  (align: left=0, center=1, right=2)
         let a = match align {
@@ -165,9 +152,9 @@ impl EscposBuilder {
         self
     }
 
-    /// Texto (cp437, reemplazando lo no representable por '?'). Porta `_RawNetworkPrinter.text`
-    /// (`txt.encode('cp437', errors='replace')`), con la transliteración de [`to_printable`]
-    /// delante: sin ella la puntuación tipográfica de un texto traducido llega al papel como `?`.
+    /// Text in cp437, with whatever it cannot represent replaced by `?`. [`to_printable`]
+    /// transliterates first: without it the typographic punctuation of a translated text reaches
+    /// the paper as `?`.
     pub fn text(&mut self, txt: &str) -> &mut Self {
         for cp in to_printable(txt).to_cp_lossy::<Cp437>() {
             self.buf.push(cp.0);
@@ -175,43 +162,43 @@ impl EscposBuilder {
         self
     }
 
-    /// Corte de papel (`GS V`). Porta `_RawNetworkPrinter.cut`: `\n\n\n` + GS V 1.
+    /// Paper cut: `\n\n\n` + `GS V 1`.
     pub fn cut(&mut self) -> &mut Self {
         self.buf.extend_from_slice(b"\n\n\n");
         self.buf.extend_from_slice(&[0x1d, 0x56, 0x01]);
         self
     }
 
-    /// Código de barras **nativo** (`GS k`, función B). Sustituye al antiguo fallback de texto
-    /// `[code]` del Bridge Python (bridge#1):
-    ///   - 12-13 dígitos → **EAN13** (m=67).
-    ///   - resto → **CODE128** (m=73) en code set B (prefijo `{B`); lo no-ASCII-imprimible → `?`.
+    /// **Native** barcode (`GS k`, function B):
+    ///   - 12-13 digits → **EAN13** (m=67).
+    ///   - anything else → **CODE128** (m=73) in code set B (`{B` prefix); anything that is not
+    ///     printable ASCII → `?`.
     ///
-    /// Configura altura (`GS h`), ancho de módulo (`GS w`) y HRI debajo (`GS H 2`, fuente A
-    /// `GS f 0`) antes de emitir el símbolo. Si el código está vacío o excede el límite del
-    /// comando (255 bytes) cae al fallback de texto `[code]` para no enviar bytes inválidos.
+    /// Sets the height (`GS h`), the module width (`GS w`) and the HRI below (`GS H 2`, font A
+    /// `GS f 0`) before emitting the symbol. An empty code, or one over the command's limit
+    /// (255 bytes), falls back to the text `[code]` so no invalid bytes are sent.
     pub fn barcode(&mut self, code: &str) -> &mut Self {
         if code.is_empty() || code.len() > 250 {
             self.text(&format!("[{code}]\n"));
             return self;
         }
 
-        // GS h n — altura del símbolo (puntos).
+        // GS h n — symbol height (dots).
         self.buf.extend_from_slice(&[0x1d, 0x68, 80]);
-        // GS w n — ancho de módulo.
+        // GS w n — module width.
         self.buf.extend_from_slice(&[0x1d, 0x77, 2]);
-        // GS H n — HRI debajo del símbolo (2).
+        // GS H n — HRI below the symbol (2).
         self.buf.extend_from_slice(&[0x1d, 0x48, 2]);
-        // GS f n — fuente A para el HRI.
+        // GS f n — font A for the HRI.
         self.buf.extend_from_slice(&[0x1d, 0x66, 0]);
 
         let all_digits = code.chars().all(|c| c.is_ascii_digit());
         if all_digits && (code.len() == 12 || code.len() == 13) {
-            // EAN13, función B: GS k 67 n d1..dn (con 12 dígitos la impresora calcula el checksum).
+            // EAN13, function B: GS k 67 n d1..dn (given 12 digits, the printer adds the checksum).
             self.buf.extend_from_slice(&[0x1d, 0x6b, 67, code.len() as u8]);
             self.buf.extend_from_slice(code.as_bytes());
         } else {
-            // CODE128, función B: GS k 73 n {B d1..dk (code set B cubre ASCII 32-127).
+            // CODE128, function B: GS k 73 n {B d1..dk (code set B covers ASCII 32-127).
             let mut payload: Vec<u8> = Vec::with_capacity(code.len() + 2);
             payload.extend_from_slice(b"{B");
             payload.extend(code.bytes().map(|b| if (0x20..0x7f).contains(&b) { b } else { b'?' }));
@@ -222,9 +209,9 @@ impl EscposBuilder {
         self
     }
 
-    /// Código QR **nativo** (`GS ( k`, modelo 2) — bridge#1. Secuencia estándar Epson:
-    /// fn 165 (modelo 2) → fn 167 (tamaño de módulo) → fn 169 (corrección de errores M) →
-    /// fn 180 (almacenar datos) → fn 181 (imprimir). Datos vacíos o > límite del comando
+    /// **Native** QR code (`GS ( k`, model 2), in the standard Epson sequence:
+    /// fn 165 (model 2) → fn 167 (module size) → fn 169 (error correction M) →
+    /// fn 180 (store the data) → fn 181 (print). Empty data, or data over the command's limit
     /// (~7 KB) → no-op.
     pub fn qr(&mut self, data: &str) -> &mut Self {
         self.qr_sized(data, QR_MODULE_DOTS)
@@ -238,13 +225,13 @@ impl EscposBuilder {
             return self;
         }
 
-        // GS ( k 4 0 49 65 50 0 — fn 165: seleccionar modelo 2.
+        // GS ( k 4 0 49 65 50 0 — fn 165: select model 2.
         self.buf.extend_from_slice(&[0x1d, 0x28, 0x6b, 4, 0, 49, 65, 50, 0]);
-        // GS ( k 3 0 49 67 n — fn 167: tamaño de módulo (puntos).
+        // GS ( k 3 0 49 67 n — fn 167: module size (dots).
         self.buf.extend_from_slice(&[0x1d, 0x28, 0x6b, 3, 0, 49, 67, module_dots]);
-        // GS ( k 3 0 49 69 n — fn 169: nivel de corrección M (49).
+        // GS ( k 3 0 49 69 n — fn 169: error correction level M (49).
         self.buf.extend_from_slice(&[0x1d, 0x28, 0x6b, 3, 0, 49, 69, 49]);
-        // GS ( k pL pH 49 80 48 d1..dk — fn 180: almacenar los datos (len = k + 3).
+        // GS ( k pL pH 49 80 48 d1..dk — fn 180: store the data (len = k + 3).
         let len = bytes.len() + 3;
         self.buf.extend_from_slice(&[
             0x1d,
@@ -257,13 +244,13 @@ impl EscposBuilder {
             48,
         ]);
         self.buf.extend_from_slice(bytes);
-        // GS ( k 3 0 49 81 48 — fn 181: imprimir el símbolo almacenado.
+        // GS ( k 3 0 49 81 48 — fn 181: print the stored symbol.
         self.buf.extend_from_slice(&[0x1d, 0x28, 0x6b, 3, 0, 49, 81, 48]);
         self.buf.push(b'\n');
         self
     }
 
-    /// Línea de total alineada a la derecha: `Etiqueta        12.50`. Porta `_print_total_line`.
+    /// Right-aligned total line: `Label        12.50`.
     pub fn total_line(&mut self, label: &str, amount: f64) -> &mut Self {
         let amount_str = self.money(amount);
         let padding = (LINE_WIDTH as isize - label.len() as isize - amount_str.len() as isize).max(1)
@@ -272,16 +259,14 @@ impl EscposBuilder {
         self
     }
 
-    /// Devuelve los bytes acumulados.
     pub fn finish(self) -> Vec<u8> {
         self.buf
     }
 }
 
 /// Main render: document → ESC/POS bytes ready for the socket.
-/// Dispatches on `DocumentType` like `PrinterManager.print_document`.
 ///
-/// **A `data` that is not an object is refused** (hub#501). Every renderer below reads its fields
+/// **A `data` that is not an object is refused.** Every renderer below reads its fields
 /// by key (`data.get("items")`, `data.get("total")`); handed an array, a string or a `null` it finds
 /// none of them, takes every default and cuts a **blank ticket** without erroring. That is a silent
 /// failure at the very end of the chain — the one place where nobody is watching — so it stops here
@@ -324,7 +309,7 @@ pub fn render_document(doc: DocumentType, data: &serde_json::Value) -> Result<Ve
     let mut b = EscposBuilder::new().with_money_decimals(money_decimals(data));
     match doc {
         DocumentType::Receipt => render_receipt(&mut b, data, Fiscal::Ticket),
-        // hub#2005 — the same body as the ticket (lines, totals, QR, duplicate mark) plus what
+        // The same body as the ticket (lines, totals, QR, duplicate mark) plus what
         // makes it a FULL invoice; see [`check_full_invoice`] for the fields it reads.
         DocumentType::Invoice => render_receipt(&mut b, data, Fiscal::FullInvoice),
         // NOT an arm of `render_receipt` with a flag: what the bill must not print is precisely
@@ -340,20 +325,14 @@ pub fn render_document(doc: DocumentType, data: &serde_json::Value) -> Result<Ve
     Ok(b.finish())
 }
 
-/// Página de prueba. Porta `PrinterManager.test_print`.
+/// The test page.
 ///
-/// **Signed with [`PRODUCT_NAME`], never with the product that printed it a month ago** (hub#1735):
-/// the header used to read «ERPlora Bridge», the standalone daemon ADR-0196 retired and hub#340
-/// deleted from the tree.
+/// **It is paper like the rest of the paper.** It takes the same `data` every other renderer takes
+/// and reads the same two fields off it, so it comes out in the hub's language under the shop's
+/// own name, like the ticket printed a second later:
 ///
-/// **And it is paper like the rest of the paper** (hub#1803). This sheet used to be rendered from
-/// a printer id alone, so it was the only document in this file with no envelope: its two lines
-/// were English literals and its header was the product's name, while the ticket printed a second
-/// later came out in the hub's language under the shop's own name. It now takes the same `data`
-/// every other renderer takes and reads the same two fields off it:
-///
-/// - `locale` → [`Locale::from_document`], the catalogue of this file (hub#1159). English is the
-///   SOURCE language, never the paper's (ADR-0055/0199).
+/// - `locale` → [`Locale::from_document`], the catalogue of this file. English is the SOURCE
+///   language, never the paper's.
 /// - `business_name` → the header, falling back to [`PRODUCT_NAME`] exactly as `render_receipt`
 ///   does. A shop owner checking which printer answered recognises their own name, not ours.
 ///
@@ -379,30 +358,30 @@ pub fn render_test_page(printer_id: &str, data: &serde_json::Value) -> Vec<u8> {
     b.finish()
 }
 
-// ─── Helpers de lectura de `data` (espejo de los `.get(...)` de Python) ──────
+// ─── Readers of `data` ───────────────────────────────────────────────────────
 
-/// `%d/%m/%Y %H:%M` en hora local (como `datetime.now().strftime` de Python).
+/// `%d/%m/%Y %H:%M` in local time.
 fn now_dmy_hm() -> String {
     chrono::Local::now().format("%d/%m/%Y %H:%M").to_string()
 }
 
-/// `%Y-%m-%d %H:%M:%S` en hora local (test page).
+/// `%Y-%m-%d %H:%M:%S` in local time (test page).
 fn now_ymd_hms() -> String {
     chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
-/// `%H:%M` en hora local (kitchen order).
+/// `%H:%M` in local time (kitchen order).
 fn now_hm() -> String {
     chrono::Local::now().format("%H:%M").to_string()
 }
 
-/// Lee un campo string; ausente/no-string → `default`.
+/// Reads a string field; missing or not a string → `default`.
 fn str_field<'a>(data: &'a serde_json::Value, key: &str, default: &'a str) -> &'a str {
     data.get(key).and_then(|v| v.as_str()).unwrap_or(default)
 }
 
-/// `true` si el campo existe y es "truthy" como el `if data.get(x):` de Python
-/// (string no vacío, número != 0, bool true).
+/// `true` when the field exists and is truthy the way Python's `if data.get(x):` reads it
+/// (a non-empty string, a number other than 0, `true`).
 fn is_truthy(data: &serde_json::Value, key: &str) -> bool {
     match data.get(key) {
         Some(serde_json::Value::String(s)) => !s.is_empty(),
@@ -413,12 +392,12 @@ fn is_truthy(data: &serde_json::Value, key: &str) -> bool {
     }
 }
 
-/// Renderiza un valor JSON tal como lo haría `f"{value}"` de Python para el documento genérico.
+/// Renders a JSON value the way Python's `f"{value}"` does, for the generic document.
 fn json_to_display(v: &serde_json::Value) -> String {
     match v {
         serde_json::Value::String(s) => s.clone(),
         serde_json::Value::Bool(b) => {
-            // Python imprime True/False con mayúscula inicial.
+            // Python prints True/False capitalised.
             if *b { "True".to_string() } else { "False".to_string() }
         }
         serde_json::Value::Null => "None".to_string(),
@@ -426,7 +405,7 @@ fn json_to_display(v: &serde_json::Value) -> String {
     }
 }
 
-// ─── The paper's language (hub#1159 · ADR-0055/0199) ─────────────────────────
+// ─── The paper's language ───────────────────────────────────────────────────
 
 /// Which key of the catalogue below; the values live in [`Locale::label`].
 ///
@@ -450,7 +429,7 @@ enum Label {
     Change,
     Thanks,
     Duplicate,
-    // The full invoice (hub#2005).
+    // The full invoice.
     InvoiceTitle,
     RectifyingInvoiceTitle,
     InvoiceNumber,
@@ -473,7 +452,7 @@ enum Label {
     Number,
     Address,
     Signature,
-    // The cash-up report: neutral, partial (X) and closing (Z) titles (CASH_REGISTER-F16).
+    // The cash-up report: neutral, partial (X) and closing (Z) titles.
     CashReportTitle,
     PartialReportTitle,
     CashClosingTitle,
@@ -482,28 +461,27 @@ enum Label {
     Closing,
     // Anything else.
     GenericTitle,
-    // The test sheet (hub#1803).
+    // The test sheet.
     TestPageOk,
     TestPagePrinter,
 }
 
-/// **The language the paper is printed in** (hub#1159).
+/// **The language the paper is printed in.**
 ///
-/// Every label of this file used to be wired in Spanish: the crate was ported from `printer.py`
-/// and never had a translator. A hub running in another language therefore painted a translated
-/// KDS on screen and pushed a *Spanish* chit out of the thermal printer — and the chit and the
-/// ticket are precisely the surface the CUSTOMER and the KITCHEN read, not an admin screen.
+/// The chit and the ticket are precisely the surface the CUSTOMER and the KITCHEN read, not an
+/// admin screen, so a hub running in another language must not paint a translated KDS on screen
+/// and push a *Spanish* chit out of the thermal printer.
 ///
 /// **The catalogue lives here, and the language travels in the document** (`locale`). The
-/// alternative considered in the issue — each producer sending its ~30 labels already translated
-/// inside `data` — spreads one catalogue over N module repos, turns adding a label into an N-repo
-/// change, and buys a half-Spanish ticket from every module that forgets one. Odoo does it this
-/// way too: the report gets a `lang` and the template's own catalogue resolves the strings.
+/// alternative — each producer sending its ~30 labels already translated inside `data` — spreads
+/// one catalogue over N module repos, turns adding a label into an N-repo change, and buys a
+/// half-Spanish ticket from every module that forgets one. Odoo does it this way too: the report
+/// gets a `lang` and the template's own catalogue resolves the strings.
 ///
-/// 🔴 **English is the source and `es` is a translation** (ADR-0055/0199), but the FALLBACK is
-/// `es`: a document without `locale` — which is every `erplora-app` deployed today — must print
-/// the paper of today, byte for byte. The device contract grows; it never moves under a fleet
-/// that cannot be updated as fast as a module can.
+/// 🔴 **English is the source and `es` is a translation**, but the FALLBACK is `es`: a document
+/// without `locale` — which is every `erplora-app` deployed today — must print the paper of today,
+/// byte for byte. The device contract grows; it never moves under a fleet that cannot be updated
+/// as fast as a module can.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Locale {
     En,
@@ -536,7 +514,7 @@ impl Locale {
 
     /// The catalogue, one `(en, es)` pair per key.
     ///
-    /// The `es` column is, literal for literal, what this file printed before hub#1159 — the
+    /// The `es` column is, literal for literal, the Spanish paper every venue already prints — the
     /// characterisation test holds it there, because moving one of these strings moves the paper
     /// in every kitchen of the fleet at once.
     fn label(self, key: Label) -> &'static str {
@@ -558,7 +536,7 @@ impl Locale {
             // RD 1619/2012 art. 14.4: every copy after the original says «duplicado».
             Label::Duplicate => ("DUPLICATE", "DUPLICADO"),
             Label::InvoiceTitle => ("INVOICE", "FACTURA"),
-            // hub#2381 — what the A4, Holded, Odoo and Business Central title an R1–R4.
+            // What the A4 invoice, Holded, Odoo and Business Central title an R1–R4.
             Label::RectifyingInvoiceTitle => ("CORRECTIVE INVOICE", "FACTURA RECTIFICATIVA"),
             Label::InvoiceNumber => ("Invoice: ", "Factura: "),
             // The three columns of the VAT breakdown; «Cuota» is what a Spanish invoice calls the
@@ -597,7 +575,7 @@ impl Locale {
             Label::Opening => ("Opening", "Apertura"),
             Label::Closing => ("Closing", "Cierre"),
             Label::GenericTitle => ("Document", "Documento"),
-            // The two lines of the test sheet (hub#1803). Unaccented like every other `es` entry
+            // The two lines of the test sheet. Unaccented like every other `es` entry
             // above: the column is ASCII from end to end, which is also what lets the tests read
             // the paper back (`strip_escpos` decodes the cp437 bytes as UTF-8).
             Label::TestPageOk => ("Test Print OK", "Prueba de impresion correcta"),
@@ -610,18 +588,18 @@ impl Locale {
     }
 }
 
-/// **The supplements of a line, as a LIST** (hub#1138).
+/// **The supplements of a line, as a LIST.**
 ///
 /// `modifiers` arrives in two shapes and both have to reach the paper:
 ///
-/// - the **string** `kitchen` composes today (`modifiers_for_display`, joined with «, »), which is
-///   what every module currently deployed sends;
-/// - the **array** this issue asks for — plain strings or rows shaped `{name}` — which is what
-///   buys one line per supplement instead of one line that wraps and loses its indent.
+/// - the **string** `kitchen` composes (`modifiers_for_display`, joined with «, »), which is what
+///   every module currently deployed sends;
+/// - the **array** — plain strings or rows shaped `{name}` — which is what buys one line per
+///   supplement instead of one line that wraps and loses its indent.
 ///
-/// Before this, an array was *truthy* but was not a string, so `str_field` handed back `""` and
-/// the supplements vanished from the chit **without an error** — the silent drop sales#78 warns
-/// about, and the worst possible failure for paper nobody re-reads.
+/// An array is *truthy* but is not a string, so reading it with `str_field` would hand back `""`
+/// and the supplements would vanish from the chit **without an error** — the worst possible
+/// failure for paper nobody re-reads.
 ///
 /// The joined string stays ONE entry on purpose: splitting it on the comma here would guess a
 /// boundary that belongs to the module, and an option name can perfectly well carry a comma.
@@ -641,7 +619,7 @@ fn modifier_lines(item: &serde_json::Value) -> Vec<String> {
     }
 }
 
-// ─── Renderizadores de documento (porta `printer.py`) ────────────────────────
+// ─── Document renderers ──────────────────────────────────────────────────────
 
 /// Which fiscal paper [`render_receipt`] cuts: the ticket (simplified invoice) or the full invoice.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -655,14 +633,14 @@ enum Fiscal {
 const BREAKDOWN_RATE_WIDTH: usize = LINE_WIDTH - 2 * BREAKDOWN_AMOUNT_WIDTH;
 const BREAKDOWN_AMOUNT_WIDTH: usize = 12;
 
-/// **What a `invoice` must carry to be printed as a FULL invoice on the roll** (hub#2005).
+/// **What an `invoice` must carry to be printed as a FULL invoice on the roll.**
 ///
-/// `invoice` used to fall into the ticket's body, which reads neither the customer's tax id nor a
-/// per-rate breakdown: a customer who asked for their invoice took home a ticket, and nothing said
-/// so. Spanish tills (Ágora, Revo, Glop) print the full invoice on the 80 mm roll, and it is valid
-/// as long as it carries every datum RD 1619/2012 art. 6 asks for. So the document either brings
-/// them or is REFUSED here, naming the field — the print host reports the refusal instead of
-/// cutting a mute ticket. The contract (field → paper):
+/// The ticket's body reads neither the customer's tax id nor a per-rate breakdown, so a customer
+/// who asked for their invoice would take home a ticket, and nothing would say so. Spanish tills
+/// (Ágora, Revo, Glop) print the full invoice on the 80 mm roll, and it is valid as long as it
+/// carries every datum RD 1619/2012 art. 6 asks for. So the document either brings them or is
+/// REFUSED here, naming the field — the print host reports the refusal instead of cutting a mute
+/// ticket. The contract (field → paper):
 ///
 /// | Field | Required | Paper |
 /// |---|---|---|
@@ -753,12 +731,12 @@ fn render_tax_breakdown(b: &mut EscposBuilder, data: &serde_json::Value, t: Loca
     b.text("--------------------------------\n");
 }
 
-/// Porta `_print_receipt`; with [`Fiscal::FullInvoice`] it is also the full invoice (hub#2005).
+/// The receipt; with [`Fiscal::FullInvoice`] it is also the full invoice.
 fn render_receipt(b: &mut EscposBuilder, data: &serde_json::Value, kind: Fiscal) {
     let t = Locale::from_document(data);
 
-    // The fiscal QR (VeriFactu, `qr_data`) OPENS the ticket (sales#339): the AEAT's QR
-    // specification (v0.5.0 §3, per Orden HAC/1177/2024 art. 21.1) places it «at the beginning of
+    // The fiscal QR (VeriFactu, `qr_data`) OPENS the ticket: the AEAT's QR specification
+    // (v0.5.0 section 3, per Orden HAC/1177/2024 art. 21.1) places it «at the beginning of
     // the invoice, before the content generated by the invoicing system», always preceded by the
     // text «QR tributario:» above it. The producer sends that fixed legal text as `qr_heading`.
     // Heading and legend in bold so they read at least as clearly as the rest of the data.
@@ -769,7 +747,7 @@ fn render_receipt(b: &mut EscposBuilder, data: &serde_json::Value, kind: Fiscal)
         }
         b.set(Align::Center, false, false, false);
         b.qr(str_field(data, "qr_data", ""));
-        // sales#327 — the legal legend of the fiscal QR («VERI*FACTU», RD 1619/2012 art. 6.5.b),
+        // The legal legend of the fiscal QR («VERI*FACTU», RD 1619/2012 art. 6.5.b),
         // right under it (Orden HAC/1177/2024 art. 20.1.b). Only with the QR: alone it would
         // name nothing.
         if is_truthy(data, "qr_legend") {
@@ -796,7 +774,7 @@ fn render_receipt(b: &mut EscposBuilder, data: &serde_json::Value, kind: Fiscal)
         b.text(&format!("{}{}\n", t.label(Label::Phone), str_field(data, "phone", "")));
     }
 
-    // hub#1931 — only one original of an invoice may exist (RD 1619/2012 art. 14): a reprint is a
+    // Only one original of an invoice may exist (RD 1619/2012 art. 14): a reprint is a
     // duplicate and has to say so. Only an explicit `true` prints it, because the word is a legal
     // statement about the paper, not decoration a truthy string should switch on.
     if data.get("duplicate").and_then(|v| v.as_bool()) == Some(true) {
@@ -806,10 +784,10 @@ fn render_receipt(b: &mut EscposBuilder, data: &serde_json::Value, kind: Fiscal)
 
     b.text("================================\n");
 
-    // hub#2005 — the paper says what it is, before its data: the cheapest way to tell a full
+    // The paper says what it is, before its data: the cheapest way to tell a full
     // invoice from a ticket at a glance.
     if kind == Fiscal::FullInvoice {
-        // hub#2381 — a corrective invoice says so in its title. Only an explicit `true`, like
+        // A corrective invoice says so in its title. Only an explicit `true`, like
         // `duplicate`: the word is a statement about the document.
         let title = if data.get("rectifying").and_then(|v| v.as_bool()) == Some(true) {
             Label::RectifyingInvoiceTitle
@@ -837,7 +815,7 @@ fn render_receipt(b: &mut EscposBuilder, data: &serde_json::Value, kind: Fiscal)
         b.text(&format!("{}{}\n", t.label(Label::Customer), str_field(data, "customer_name", "")));
     }
 
-    // hub#2005 — the customer IDENTIFIED, right under their name. Only on the full invoice: the
+    // The customer IDENTIFIED, right under their name. Only on the full invoice: the
     // ticket's paper does not move.
     if kind == Fiscal::FullInvoice {
         b.text(&format!("{}{}\n", t.label(Label::VatNumber), str_field(data, "customer_tax_id", "")));
@@ -861,13 +839,13 @@ fn render_receipt(b: &mut EscposBuilder, data: &serde_json::Value, kind: Fiscal)
                 .max(1) as usize;
             b.text(&format!("{line}{}{total_str}\n", " ".repeat(padding)));
 
-            // hub#1165 / ADR-0396 — the MENU: `sales` (>= 2.16.10) sends `components: string[]`
-            // (labels already composed, supplement included) besides the one-line `notes`. One
-            // indented line per component, normal weight, NO amount — the header is the line that
-            // carries the money, so it is the components that step back (the opposite emphasis of
-            // the kitchen chit, ADR-0394, same indentation). While `sales` still joins the same
-            // components into `notes`, the list is preferred and the note is skipped: printing
-            // both would say everything twice. An item without the list prints exactly as today.
+            // The MENU: `sales` (>= 2.16.10) sends `components: string[]` (labels already
+            // composed, supplement included) besides the one-line `notes`. One indented line per
+            // component, normal weight, NO amount — the header is the line that carries the money,
+            // so it is the components that step back (the opposite emphasis of the kitchen chit,
+            // same indentation). `sales` also joins the same components into `notes`, so when the
+            // list is there the note is skipped: printing both would say everything twice. An item
+            // without the list prints its `notes`.
             let components: Vec<String> = item
                 .get("components")
                 .and_then(|v| v.as_array())
@@ -879,15 +857,15 @@ fn render_receipt(b: &mut EscposBuilder, data: &serde_json::Value, kind: Fiscal)
                         .collect()
                 })
                 .unwrap_or_default();
-            // hub#1138 — the SUPPLEMENTS of the line, structured. `components` says what the MENU
-            // is made of; `modifiers` says what the customer CHANGED. They are different axes, so
-            // both print, components first and the change after — the same order the kitchen chit
-            // uses. Chained into `notes` they wrapped at 32 columns and the continuation started at
-            // the margin, reading as another article; one line each, indented, fixes exactly that.
+            // The SUPPLEMENTS of the line, structured. `components` says what the MENU is made
+            // of; `modifiers` says what the customer CHANGED. They are different axes, so both
+            // print, components first and the change after — the same order the kitchen chit uses.
+            // Chained into `notes` they would wrap at 32 columns and the continuation would start
+            // at the margin, reading as another article; one line each, indented, avoids that.
             //
             // No amount of their own: in ERPlora the delta already lives inside the line's
             // `unit_price` (`authoritative_modifiers`), so the printed `line_total` includes it and
-            // a second number in that column would not add up with the rest (sales#148).
+            // a second number in that column would not add up with the rest.
             let supplements = modifier_lines(item);
             if !components.is_empty() || !supplements.is_empty() {
                 b.set(Align::Left, false, false, false);
@@ -948,14 +926,16 @@ fn render_receipt(b: &mut EscposBuilder, data: &serde_json::Value, kind: Fiscal)
         }
     }
 
-    // **El SEGUNDO QR: «pide tu factura»** (hub#963). No sustituye al de arriba y por eso son dos
-    // campos: el de VeriFactu apunta a la Sede de la AEAT (`ValidarQR`) y sirve para COTEJAR; este
-    // apunta a este hub y sirve para PEDIR. Ágora imprime «CREAR FACTURA», Cuiner imprime
-    // localizador + QR — y los dos lo ponen al pie, junto al fiscal, sobre el mismo papel.
+    // **The SECOND QR: «pide tu factura»** (ask for your invoice). It does not replace the one
+    // above, which is why there are two fields: the VeriFactu one points at the AEAT's site
+    // (`ValidarQR`) and is for CHECKING; this one points at this hub and is for ASKING. Ágora
+    // prints «CREAR FACTURA», Cuiner prints a locator + QR — and both put it at the foot, next to
+    // the fiscal one, on the same paper.
     //
-    // El **localizador en texto** va debajo y no es decorativo: es la única vía cuando la cámara no
-    // enfoca, el móvil no tiene batería o el tique se fotocopia. Por eso el alfabeto Crockford del
-    // core evita `I`, `L`, `O` y `U` — se teclea de un papel térmico, no se lee de una pantalla.
+    // The **text locator** goes underneath and is not decorative: it is the only way in when the
+    // camera does not focus, the phone has no battery or the ticket is photocopied. That is why
+    // the core's Crockford alphabet avoids `I`, `L`, `O` and `U` — it is typed from thermal
+    // paper, not read off a screen.
     if is_truthy(data, "claim_qr_data") {
         b.set(Align::Center, false, false, false);
         if is_truthy(data, "claim_note") {
@@ -981,10 +961,10 @@ fn render_receipt(b: &mut EscposBuilder, data: &serde_json::Value, kind: Fiscal)
     b.set(Align::Center, false, false, false);
     b.text(&format!("\n{}\n\n", t.label(Label::Thanks)));
 
-    // **The business's promotional QR** (hub#2009): reviews, social media — the link it set in
-    // the POS settings. It closes the paper, like `<ok-receipt>` and the browser paper (sales#345),
-    // and prints smaller than the fiscal QR. Without the URL nothing prints: a note alone names
-    // nothing. Only on the ticket — the full invoice is formal, like the A4.
+    // **The business's promotional QR**: reviews, social media — the link it set in the POS
+    // settings. It closes the paper, like `<ok-receipt>` and the browser paper, and prints smaller
+    // than the fiscal QR. Without the URL nothing prints: a note alone names nothing. Only on the
+    // ticket — the full invoice is formal, like the A4 invoice.
     if kind == Fiscal::Ticket && is_truthy(data, "promo_qr") {
         if is_truthy(data, "promo_note") {
             print_wrapped(b, str_field(data, "promo_note", ""));
@@ -996,7 +976,7 @@ fn render_receipt(b: &mut EscposBuilder, data: &serde_json::Value, kind: Fiscal)
     b.cut();
 }
 
-/// **The bill taken to the table before charging** (ADR-0141, hub#748).
+/// **The bill taken to the table before charging.**
 ///
 /// The waiter's most frequent piece of paper: it comes out once before every payment, so more often
 /// than the fiscal ticket. It is the same list of lines as a receipt and, on purpose, **not the
@@ -1011,9 +991,8 @@ fn render_receipt(b: &mut EscposBuilder, data: &serde_json::Value, kind: Fiscal)
 /// receipt document by mistake gets a bill, never a paper that passes for an invoice. Handing a
 /// customer one of those is a legal problem, not a cosmetic one.
 ///
-/// The Spanish literals are the ones this whole file prints (`COCINA`, `TOTAL`, `Fecha`): the paper
-/// is composed at the device, which has no translator, so what the producer wants said in the
-/// customer's language it sends — that is what `notice` is for.
+/// The labels come from this file's catalogue, in the document's `locale`; a producer that wants
+/// its own wording for the notice sends it in `notice`.
 fn render_prebill(b: &mut EscposBuilder, data: &serde_json::Value) {
     let t = Locale::from_document(data);
     // The title is the first thing anyone reads and the cheapest way to tell this paper from a
@@ -1047,13 +1026,13 @@ fn render_prebill(b: &mut EscposBuilder, data: &serde_json::Value) {
             let total = item.get("total").and_then(|v| v.as_f64()).unwrap_or(0.0);
             b.set(Align::Left, false, false, false);
             b.total_line(&format!("{}x {name}", fmt_qty(item.get("quantity"), qty)), total);
-            // hub#1165 / ADR-0396 — the MENU: `sales` (>= 2.16.10) sends `components: string[]`
-            // (labels already composed, supplement included) besides the one-line `notes`. One
-            // indented line per component, normal weight, NO amount — the header is the line that
-            // carries the money, so it is the components that step back (the opposite emphasis of
-            // the kitchen chit, ADR-0394, same indentation). While `sales` still joins the same
-            // components into `notes`, the list is preferred and the note is skipped: printing
-            // both would say everything twice. An item without the list prints exactly as today.
+            // The MENU: `sales` (>= 2.16.10) sends `components: string[]` (labels already
+            // composed, supplement included) besides the one-line `notes`. One indented line per
+            // component, normal weight, NO amount — the header is the line that carries the money,
+            // so it is the components that step back (the opposite emphasis of the kitchen chit,
+            // same indentation). `sales` also joins the same components into `notes`, so when the
+            // list is there the note is skipped: printing both would say everything twice. An item
+            // without the list prints its `notes`.
             let components: Vec<String> = item
                 .get("components")
                 .and_then(|v| v.as_array())
@@ -1065,15 +1044,15 @@ fn render_prebill(b: &mut EscposBuilder, data: &serde_json::Value) {
                         .collect()
                 })
                 .unwrap_or_default();
-            // hub#1138 — the SUPPLEMENTS of the line, structured. `components` says what the MENU
-            // is made of; `modifiers` says what the customer CHANGED. They are different axes, so
-            // both print, components first and the change after — the same order the kitchen chit
-            // uses. Chained into `notes` they wrapped at 32 columns and the continuation started at
-            // the margin, reading as another article; one line each, indented, fixes exactly that.
+            // The SUPPLEMENTS of the line, structured. `components` says what the MENU is made
+            // of; `modifiers` says what the customer CHANGED. They are different axes, so both
+            // print, components first and the change after — the same order the kitchen chit uses.
+            // Chained into `notes` they would wrap at 32 columns and the continuation would start
+            // at the margin, reading as another article; one line each, indented, avoids that.
             //
             // No amount of their own: in ERPlora the delta already lives inside the line's
             // `unit_price` (`authoritative_modifiers`), so the printed `line_total` includes it and
-            // a second number in that column would not add up with the rest (sales#148).
+            // a second number in that column would not add up with the rest.
             let supplements = modifier_lines(item);
             if !components.is_empty() || !supplements.is_empty() {
                 b.set(Align::Left, false, false, false);
@@ -1125,14 +1104,12 @@ fn render_prebill(b: &mut EscposBuilder, data: &serde_json::Value) {
     b.cut();
 }
 
-/// Porta `_print_kitchen_order`.
 fn render_kitchen_order(b: &mut EscposBuilder, data: &serde_json::Value) {
     let t = Locale::from_document(data);
     b.set(Align::Center, true, true, true);
     b.text(&format!("{}\n", t.label(Label::KitchenTitle)));
 
     b.set(Align::Center, true, true, false);
-    // order_number = data.get('receipt_id', data.get('order_number', ''))
     let order_number = data
         .get("receipt_id")
         .and_then(|v| v.as_str())
@@ -1143,23 +1120,22 @@ fn render_kitchen_order(b: &mut EscposBuilder, data: &serde_json::Value) {
     b.set(Align::Center, false, false, false);
     b.text("================================\n");
 
-    // **La etiqueta de sala** (hub#1156 · ADR-0141/0144). El shell manda `label` desde siempre y
-    // aquí se leía `table`, un campo que no manda nadie: la comanda salía sin decir de qué mesa
-    // era, que en hora punta es papel inservible.
+    // **The room label.** The shell sends `label`; reading only `table`, a field no producer
+    // sends, would print a chit that does not say which table it is for — useless paper at rush
+    // hour.
     //
-    // `label` se imprime **tal cual, sin prefijo**: es opaca a propósito — «Mesa 4», «Barra»,
-    // «Recogida Ana». Cocina no sabe qué es una mesa, ni tiene por qué; anteponerle «Mesa: »
-    // produciría «Mesa: Recogida Ana».
+    // `label` prints **as it comes, with no prefix**: it is opaque on purpose — «Mesa 4»,
+    // «Barra», «Recogida Ana». The kitchen does not know what a table is, nor does it need to;
+    // prefixing «Mesa: » would print «Mesa: Recogida Ana».
     //
-    // `table` sigue vivo detrás, con su prefijo de siempre: el contrato del dispositivo se amplía,
-    // nunca se sustituye. Hoy no hay ningún productor que lo mande —de ahí venía el fallo— pero
-    // arreglar el camino nuevo no puede dejar sin mesa a una integración que use el viejo.
-    // Doble alto Y doble ancho: la mesa es lo más grande del papel a propósito. Es el único campo
-    // que se lee desde el OTRO LADO del pase, a velocidad, para casar un plato con su destino — el
-    // plato se lee a distancia de brazo. Toast lo pone «in large, bold font in the top-left corner»
-    // y Eats365 le da tamaño propio junto al número de pedido, los dos únicos campos del chit que
-    // lo tienen. Renuncia al doble ancho si no cabe: una etiqueta partida en dos trozos por la
-    // impresora es justo lo contrario de un campo que existe para leerse de un vistazo.
+    // `table` stays behind it, with its usual prefix: the device contract grows, it is never
+    // replaced. No producer sends it today, but an integration that does must not lose its table.
+    // Double height AND double width: the table is the biggest thing on the paper on purpose. It is
+    // the only field read from the OTHER SIDE of the pass, at speed, to match a dish with where it
+    // goes — the dish is read at arm's length. Toast puts it «in large, bold font in the top-left
+    // corner» and Eats365 gives it a size of its own next to the order number, the only two fields
+    // of the chit that have one. Double width is dropped when it does not fit: a label the printer
+    // splits in two is the opposite of a field that exists to be read at a glance.
     if is_truthy(data, "label") {
         let label = str_field(data, "label", "");
         let wide = label.chars().count() * 2 <= LINE_WIDTH;
@@ -1175,8 +1151,9 @@ fn render_kitchen_order(b: &mut EscposBuilder, data: &serde_json::Value) {
         b.text(&format!("{}{}\n", t.label(Label::Waiter), str_field(data, "waiter", "")));
     }
 
-    // La ronda distingue el segundo pase del primero en la misma mesa. Sólo a partir de la dos:
-    // «Ronda 1» sería una línea de ruido en el 99 % del papel, que es justo el que nadie relee.
+    // The round tells the second course from the first at the same table. Only from round two on:
+    // «Ronda 1» would be a line of noise on 99 % of the paper, which is exactly the paper nobody
+    // re-reads.
     let round = data
         .get("round_number")
         .and_then(|v| v.as_f64())
@@ -1193,9 +1170,9 @@ fn render_kitchen_order(b: &mut EscposBuilder, data: &serde_json::Value) {
     b.text("--------------------------------\n");
 
     if let Some(items) = data.get("items").and_then(|v| v.as_array()) {
-        // El MENÚ se pinta como una TIRADA de líneas consecutivas con el mismo `combo_ref`
-        // (hub#1156 · kitchen#57 · ADR-0381), igual que `groupCombos()` en el KDS. Las líneas
-        // llegan ordenadas por `line_seq`, así que la tirada ES el grupo.
+        // The MENU is printed as a RUN of consecutive lines with the same `combo_ref`, like
+        // `groupCombos()` in the KDS. The lines arrive sorted by `line_seq`, so the run IS the
+        // group.
         let mut combo: Option<&str> = None;
         for item in items {
             let this_combo = item
@@ -1205,23 +1182,22 @@ fn render_kitchen_order(b: &mut EscposBuilder, data: &serde_json::Value) {
 
             if this_combo != combo {
                 combo = this_combo;
-                // **La cabecera del menú va SIN negrita y a altura normal.** El realce es para los
-                // CAMBIOS —alérgenos y suplementos—, nunca para la jerarquía: un menú en negrita le
-                // roba el ojo a lo que hay que cocinar. De quince productos revisados en kitchen#57,
-                // CERO imprimen el nombre del combo en doble altura y CERO en Font B; la jerarquía
-                // del chit se hace con SANGRADO (Simphony: «indented beneath the combo meal name»,
-                // y lo dice para modo chit; Aloha lo tiene como parámetro, `QC indentation size`).
+                // **The menu header is NOT bold and at normal height.** Emphasis is for the
+                // CHANGES — allergens and supplements — never for hierarchy: a bold menu steals the
+                // eye from what has to be cooked. Of fifteen POS products reviewed, NONE prints the
+                // combo name in double height and NONE in Font B; the hierarchy of the chit is made
+                // with INDENTATION (Simphony: «indented beneath the combo meal name», and it says
+                // so for chit mode; Aloha has it as a parameter, `QC indentation size`).
                 //
-                // Se emite sólo si el menú tiene nombre: sin él el sangrado agrupa igual y no hay
-                // que inventarse un relleno — que además sería una cadena nueva cableada en un
-                // renderizador que hoy no traduce nada.
+                // It is printed only when the menu has a name: without one the indent groups the
+                // lines just as well, and there is no need to invent a filler.
                 if this_combo.is_some() && is_truthy(item, "combo_name") {
                     b.set(Align::Left, false, false, false);
                     b.text(&format!("{}\n", str_field(item, "combo_name", "")));
                 }
             }
 
-            // Dos niveles como mucho: a 32 columnas un tercero deja el texto sin sitio.
+            // Two levels at most: at 32 columns a third would leave the text no room.
             let indent = if combo.is_some() { "  " } else { "" };
             let qty = item.get("quantity").and_then(|v| v.as_f64()).unwrap_or(1.0);
             let name = str_field(item, "name", "");
@@ -1232,16 +1208,17 @@ fn render_kitchen_order(b: &mut EscposBuilder, data: &serde_json::Value) {
                 fmt_qty(item.get("quantity"), qty)
             ));
 
-            // **Los suplementos** (hub#1156 · pm#93). Van ANTES de la nota libre y con el mismo
-            // sangrado: el suplemento lo eligió el cliente en la carta y cambia el plato, la nota
-            // es texto del camarero. Se parten a mano conservando el sangrado — si lo cortara la
-            // térmica a 32 columnas, la continuación arrancaría pegada al margen y se leería como
-            // un plato más de la comanda.
+            // **The supplements.** They go BEFORE the free note and with the same indent: the
+            // customer chose the supplement from the menu and it changes the dish; the note is the
+            // waiter's text. They are wrapped by hand keeping the indent — if the thermal printer
+            // cut them at 32 columns, the continuation would start at the margin and read as one
+            // more dish of the order.
             //
-            // Y EN NEGRITA: el realce es la otra mitad de la misma regla — el suplemento es un
-            // CAMBIO, y un cambio es lo que devuelve el plato. Toast imprime el plato en negro y el
-            // modificador en rojo, Lightspeed tiene `print sub-items in red`, Revel igual: tres de
-            // tres realzan el cambio. En una térmica sin cinta bicolor, el equivalente es la negrita.
+            // And IN BOLD: emphasis is the other half of the same rule — the supplement is a
+            // CHANGE, and a change is what sends a dish back. Toast prints the dish in black and the
+            // modifier in red, Lightspeed has `print sub-items in red`, Revel the same: three out
+            // of three highlight the change. On a thermal printer without a two-colour ribbon, bold
+            // is the equivalent.
             let sub = format!("{indent}   ");
             let supplements = modifier_lines(item);
             if !supplements.is_empty() {
@@ -1253,7 +1230,7 @@ fn render_kitchen_order(b: &mut EscposBuilder, data: &serde_json::Value) {
                 }
             }
 
-            // La nota libre del camarero NO es un cambio de la carta: se lee, no se grita.
+            // The waiter's free note is NOT a change from the menu: it is read, not shouted.
             if is_truthy(item, "notes") {
                 b.set(Align::Left, false, false, false);
                 b.text(&format!("{sub}>> {}\n", str_field(item, "notes", "")));
@@ -1273,7 +1250,6 @@ fn render_kitchen_order(b: &mut EscposBuilder, data: &serde_json::Value) {
     b.cut();
 }
 
-/// Porta `_print_delivery_note`.
 fn render_delivery_note(b: &mut EscposBuilder, data: &serde_json::Value) {
     let t = Locale::from_document(data);
     b.set(Align::Center, true, false, false);
@@ -1306,14 +1282,13 @@ fn render_delivery_note(b: &mut EscposBuilder, data: &serde_json::Value) {
     b.cut();
 }
 
-/// Porta `_print_barcode_label`.
 fn render_barcode_label(b: &mut EscposBuilder, data: &serde_json::Value) {
     b.set(Align::Center, true, false, false);
     b.text(&format!("{}\n", str_field(data, "product_name", "")));
 
     let barcode_value = str_field(data, "barcode", "");
     if !barcode_value.is_empty() {
-        // GS k nativo (EAN13/CODE128) con HRI debajo; ya no es el fallback de texto [code].
+        // Native `GS k` (EAN13/CODE128) with the HRI below.
         b.set(Align::Center, false, false, false);
         b.barcode(barcode_value);
     }
@@ -1327,7 +1302,7 @@ fn render_barcode_label(b: &mut EscposBuilder, data: &serde_json::Value) {
     b.cut();
 }
 
-/// **Which report a `cash_session_report` is** (CASH_REGISTER-F16).
+/// **Which report a `cash_session_report` is.**
 ///
 /// The Hub queues one document type for both and says which in `receipt_id`: «<number> (X)» for
 /// an open session, «<number> (Z)» for a closed one. Anything else — an older or foreign producer —
@@ -1353,7 +1328,7 @@ impl CashReport {
     }
 }
 
-/// Porta `_print_cash_report`, with the X and the Z of the Hub (CASH_REGISTER-F16).
+/// The cash-up report, with the X and the Z of the Hub.
 ///
 /// The Hub's document: `receipt_id` (see [`CashReport`]), `cashier`, the float as
 /// `opening_balance`, the EXPECTED cash as `closing_balance`, and every figure of the report as
@@ -1395,7 +1370,6 @@ fn render_cash_report(b: &mut EscposBuilder, data: &serde_json::Value) {
 
     if let Some(transactions) = data.get("transactions").and_then(|v| v.as_array()) {
         for tx in transactions {
-            // label = tx.get('label', tx.get('type', ''))
             let label = tx
                 .get("label")
                 .and_then(|v| v.as_str())
@@ -1410,7 +1384,6 @@ fn render_cash_report(b: &mut EscposBuilder, data: &serde_json::Value) {
     b.cut();
 }
 
-/// Porta `_print_generic`.
 fn render_generic(b: &mut EscposBuilder, data: &serde_json::Value) {
     let t = Locale::from_document(data);
     b.set(Align::Center, true, false, false);
@@ -1420,9 +1393,9 @@ fn render_generic(b: &mut EscposBuilder, data: &serde_json::Value) {
     b.set(Align::Left, false, false, false);
     if let Some(obj) = data.as_object() {
         for (key, value) in obj {
-            // `locale` steers HOW the paper is printed (hub#1159); it is a field of the
-            // envelope, not a line of the document. Without this the generic renderer — which
-            // prints every key it does not know — would print «locale: en» on the paper.
+            // `locale` steers HOW the paper is printed; it is a field of the envelope, not a line
+            // of the document. Without this the generic renderer — which prints every key it does
+            // not know — would print «locale: en» on the paper.
             if key == "title" || key == "receipt_id" || key == "locale" {
                 continue;
             }
@@ -1439,25 +1412,25 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    // ── La comanda de cocina imprime lo que la fila trae (hub#1156) ─────────────────────────────
+    // ── The kitchen chit prints what the row carries ────────────────────────────────────────────
 
-    /// Rinde una comanda y devuelve el papel **sin bytes de control**, que es lo que lee un
-    /// cocinero. Sin esto, cada aserción compara contra un texto salpicado de `ESC a`/`GS !` y
-    /// acaba pasando por casualidad.
+    /// Renders a kitchen chit and returns the paper **without control bytes**, which is what a cook
+    /// reads. Without this, every assertion compares against text sprinkled with `ESC a`/`GS !` and
+    /// ends up passing by accident.
     fn paper(data: &serde_json::Value) -> String {
-        let bytes = render_document(DocumentType::KitchenOrder, data).expect("comanda válida");
+        let bytes = render_document(DocumentType::KitchenOrder, data).expect("a valid kitchen chit");
         strip_escpos(&bytes)
     }
 
-    /// Quita los mandos ESC/POS y deja el texto que un cocinero lee.
+    /// Strips the ESC/POS commands and leaves the text a cook reads.
     ///
-    /// Filtrar «bytes de control» a secas NO vale y es una trampa que ya mordió: en `ESC a 0` sólo
-    /// el `ESC` es de control — la `a` y el `0` son ASCII imprimible, así que la comanda se leía
-    /// como `aE!0COCINA` y cualquier `contains` pasaba por casualidad sobre basura.
+    /// Filtering out «control bytes» alone does NOT work, and it is a trap: in `ESC a 0` only the
+    /// `ESC` is a control byte — the `a` and the `0` are printable ASCII, so the chit would read as
+    /// `aE!0COCINA` and any `contains` would pass by accident over garbage.
     ///
-    /// Los mandos de la comanda son todos de tres bytes (`ESC a n`, `ESC E n`, `ESC M n`,
-    /// `GS ! n`, `GS V n`): no hay QR ni código de barras aquí, que son los de longitud variable.
-    /// Si algún día entra uno, este helper lo delata en vez de tragárselo.
+    /// The chit's commands are all three bytes long (`ESC a n`, `ESC E n`, `ESC M n`, `GS ! n`,
+    /// `GS V n`): there is no QR or barcode here, which are the variable-length ones. Should one
+    /// ever come in, this helper flags it instead of swallowing it.
     fn strip_escpos(bytes: &[u8]) -> String {
         let mut out = Vec::new();
         let mut i = 0;
@@ -1466,12 +1439,12 @@ mod tests {
                 0x1b | 0x1d => {
                     assert!(
                         i + 2 < bytes.len(),
-                        "mando ESC/POS truncado en {i}: el renderizador emitió bytes a medias"
+                        "ESC/POS command truncated at {i}: the renderer emitted half a command"
                     );
                     assert!(
                         !matches!((bytes[i], bytes[i + 1]), (0x1d, 0x28) | (0x1d, 0x6b)),
-                        "mando de longitud variable (QR/barcode) en una comanda: este helper \
-                         sólo sabe de mandos de 3 bytes y lo estaría cortando mal"
+                        "variable-length command (QR/barcode) in a kitchen chit: this helper \
+                         only knows 3-byte commands and would be cutting it wrong"
                     );
                     i += 3;
                 }
@@ -1484,15 +1457,15 @@ mod tests {
         String::from_utf8_lossy(&out).into_owned()
     }
 
-    /// Cómo sale IMPRESA cada línea, no sólo qué dice: `(texto, negrita, doble_alto)`.
+    /// How each line is PRINTED, not just what it says: `(text, bold, double_height)`.
     ///
-    /// La jerarquía del papel se decide en los modos ESC/POS, no en el texto, así que un test que
-    /// sólo mire el texto no puede distinguir una cabecera discreta de una cabecera que le roba el
-    /// ojo al plato — que es justo lo que hub#1156 tiene que garantizar.
+    /// The hierarchy of the paper is decided in the ESC/POS modes, not in the text, so a test that
+    /// only looks at the text cannot tell a discreet header from one that steals the eye from the
+    /// dish — which is exactly what the chit has to guarantee.
     fn lines_with_modes(bytes: &[u8]) -> Vec<(String, bool, bool)> {
         let (mut bold, mut double_h) = (false, false);
         let (mut out, mut cur) = (Vec::new(), Vec::new());
-        // El modo vigente cuando ARRANCA la línea es el que la imprime.
+        // The mode in force when the line STARTS is the one that prints it.
         let (mut line_bold, mut line_double) = (false, false);
         let mut fresh = true;
         let mut i = 0;
@@ -1531,7 +1504,7 @@ mod tests {
         out
     }
 
-    /// Si la línea `txt` se imprimió con doble ancho (`GS ! n`, bit 0x20).
+    /// Whether the line `txt` was printed in double width (`GS ! n`, bit 0x20).
     fn double_width_of(bytes: &[u8], txt: &str) -> bool {
         let (mut wide, mut i) = (false, 0usize);
         while i < bytes.len() {
@@ -1549,11 +1522,11 @@ mod tests {
                 }
             }
         }
-        panic!("«{txt}» no está en el papel");
+        panic!("«{txt}» is not on the paper");
     }
 
-    /// Los dos lectores de arriba se prueban a sí mismos, por lo mismo que `strip_escpos`: si
-    /// devolvieran siempre `false`, las aserciones de jerarquía saldrían verdes sobre cualquier cosa.
+    /// The two readers above are tested themselves, for the same reason as `strip_escpos`: if they
+    /// always returned `false`, the hierarchy assertions would pass on anything.
     #[test]
     fn the_mode_reader_tells_a_loud_line_from_a_quiet_one() {
         let mut b = EscposBuilder::new();
@@ -1571,9 +1544,9 @@ mod tests {
         assert!(!double_width_of(&bytes, "nota"));
     }
 
-    /// El helper de arriba es el que sostiene todas las aserciones de la comanda, así que se prueba
-    /// a sí mismo: si dejara residuo, un `contains("Mesa 4")` seguiría pasando sobre `aE!0Mesa 4`
-    /// y las pruebas de este bloque valdrían para nada.
+    /// The helper above holds up every assertion about the chit, so it is tested itself: if it left
+    /// residue, a `contains("Mesa 4")` would still pass on `aE!0Mesa 4` and the tests of this block
+    /// would be worth nothing.
     #[test]
     fn the_paper_helper_leaves_no_command_residue() {
         let mut b = EscposBuilder::new();
@@ -1582,36 +1555,36 @@ mod tests {
         assert_eq!(strip_escpos(&b.finish()), "COCINA\n2x Croquetas\n");
     }
 
-    /// **El suplemento sale por la impresora, no sólo por la pantalla** (hub#1156 · pm#93).
+    /// **The supplement comes out of the printer, not only on the screen.**
     ///
-    /// «Sin cebolla» se congela en la fila y el KDS lo pinta, pero la cocina caliente ES papel: en
-    /// la plancha nadie mira una pantalla con las manos ocupadas. Un suplemento que no se imprime
-    /// es el plato que vuelve, y eso no es cosmética.
+    /// «Sin cebolla» is frozen into the row and the KDS paints it, but the hot kitchen IS paper: at
+    /// the grill nobody looks at a screen with their hands full. A supplement that does not print
+    /// is the dish that comes back, and that is not cosmetic.
     #[test]
     fn a_supplement_reaches_the_paper_under_its_own_line() {
         let text = paper(&json!({
             "receipt_id": "K-217",
             "items": [{ "name": "Entrecot", "quantity": 1, "modifiers": "Al punto, sin cebolla" }],
         }));
-        assert!(text.contains("Entrecot"), "el plato está en el papel:\n{text}");
+        assert!(text.contains("Entrecot"), "the dish is on the paper:\n{text}");
         assert!(
             text.contains("Al punto, sin cebolla"),
-            "el suplemento está en el papel — es lo que hace que el plato vuelva:\n{text}"
+            "the supplement is on the paper — it is what sends the dish back:\n{text}"
         );
-        // Debajo de SU plato, no al final de la hoja: en una comanda de ocho líneas, un suplemento
-        // suelto al pie no dice a qué plato pertenece.
-        let plato = text.find("Entrecot").expect("el plato");
-        let suplemento = text.find("Al punto").expect("el suplemento");
-        assert!(suplemento > plato, "el suplemento va DEBAJO de su línea:\n{text}");
+        // Under ITS dish, not at the end of the sheet: on an eight-line chit, a supplement loose at
+        // the foot does not say which dish it belongs to.
+        let plato = text.find("Entrecot").expect("the dish");
+        let suplemento = text.find("Al punto").expect("the supplement");
+        assert!(suplemento > plato, "the supplement goes UNDER its line:\n{text}");
     }
 
-    // ── hub#1165 · the MENU on the customer's ticket and on the bill (ADR-0396) ────────────────
+    // ── The MENU on the customer's ticket and on the bill ──────────────────────────────────────
     //
     // `sales` (>= 2.16.10) sends, besides `notes`, `components: string[]` on a menu item: labels
     // already composed (name + supplement «(+3,00)»), in the order they were chosen. At 32 columns
     // the one-line `notes` wraps and the continuation starts at the margin — it reads as another
-    // item. Same complaint hub#1156 fixed for the kitchen chit; here the header keeps its normal
-    // weight (it carries the money) and the components step back: indent, no amount, no bold.
+    // item. The kitchen chit solves the same thing; here the header keeps its normal weight (it
+    // carries the money) and the components step back: indent, no amount, no bold.
 
     /// One line per component, indented, WITHOUT an amount — under its item, before anything else.
     #[test]
@@ -1630,9 +1603,8 @@ mod tests {
         assert!(!gazpacho_line.contains("16.5"), "a component never carries the item price:\n{text}");
     }
 
-    /// With `components` present, `notes` is NOT printed: until `sales` separates them, `notes`
-    /// still carries the same components joined by « · » and printing both would say everything
-    /// twice (the issue's second acceptance criterion).
+    /// With `components` present, `notes` is NOT printed: `notes` also carries the same components
+    /// joined by « · », and printing both would say everything twice.
     #[test]
     fn components_and_notes_do_not_print_the_components_twice() {
         let text = ticket(&json!({
@@ -1646,7 +1618,7 @@ mod tests {
     }
 
     /// An item WITHOUT `components` prints byte-identical to today: the deployed fleet's tickets
-    /// must not move (sales#78 — unknown keys are ignored, known shapes are frozen).
+    /// must not move (unknown keys are ignored, known shapes are frozen).
     #[test]
     fn an_item_without_components_prints_exactly_as_today() {
         let plain = json!({
@@ -1686,8 +1658,8 @@ mod tests {
         }
     }
 
-    /// The bill taken to the table says the same as the ticket (ADR-0396 §5: one composer, two
-    /// papers): components indented under the menu header, no note duplication.
+    /// The bill taken to the table says the same as the ticket (one composer, two papers):
+    /// components indented under the menu header, no note duplication.
     #[test]
     fn the_prebill_indents_the_menu_components_too() {
         let data = json!({
@@ -1710,27 +1682,27 @@ mod tests {
         strip_escpos(&bytes)
     }
 
-    /// **El suplemento y la nota conviven, y el suplemento va primero.** Son dos cosas distintas:
-    /// el suplemento lo eligió el cliente en la carta y cambia el plato; la nota es texto libre del
-    /// camarero. Perder una al pintar la otra fue el fallo original.
+    /// **The supplement and the note live side by side, and the supplement goes first.** They are
+    /// two different things: the customer chose the supplement from the menu and it changes the
+    /// dish; the note is the waiter's free text. Printing one must not lose the other.
     #[test]
     fn a_line_can_carry_both_a_supplement_and_a_free_note() {
         let text = paper(&json!({
             "items": [{ "name": "Croquetas", "quantity": 2, "modifiers": "Sin gluten", "notes": "para compartir" }],
         }));
-        let mods = text.find("Sin gluten").expect("el suplemento está en el papel");
-        let notes = text.find("para compartir").expect("la nota está en el papel");
-        assert!(mods < notes, "el suplemento va antes que la nota libre:\n{text}");
+        let mods = text.find("Sin gluten").expect("the supplement is on the paper");
+        let notes = text.find("para compartir").expect("the note is on the paper");
+        assert!(mods < notes, "the supplement goes before the free note:\n{text}");
     }
 
-    /// **La comanda dice de qué mesa es** (hub#1156 · ADR-0141/0144).
+    /// **The kitchen chit says which table it is for.**
     ///
-    /// El shell manda `label` desde siempre y el renderizador leía `table`, un campo que no manda
-    /// nadie: la comanda salía sin la única cosa que cocina sabe de la sala. En hora punta, una
-    /// comanda sin mesa es papel que no sirve para nada.
+    /// The shell sends `label`; a renderer that read only `table`, a field nobody sends, would print
+    /// a chit without the one thing the kitchen knows about the room. At rush hour, a chit without
+    /// a table is paper that is good for nothing.
     ///
-    /// La etiqueta se imprime **tal cual**, sin prefijo: es opaca a propósito — «Mesa 4», «Barra»,
-    /// «Recogida Ana». Cocina no sabe qué es una mesa, ni tiene por qué.
+    /// The label prints **as it comes**, with no prefix: it is opaque on purpose — «Mesa 4»,
+    /// «Barra», «Recogida Ana». The kitchen does not know what a table is, nor does it need to.
     #[test]
     fn the_kitchen_order_says_which_table_it_is_for() {
         let text = paper(&json!({
@@ -1739,17 +1711,17 @@ mod tests {
             "round_number": 2,
             "items": [{ "name": "Croquetas", "quantity": 2 }],
         }));
-        assert!(text.contains("Mesa 4"), "la etiqueta de sala está en el papel:\n{text}");
-        assert!(!text.contains("Mesa: Mesa 4"), "tal cual, sin prefijo: la etiqueta es opaca:\n{text}");
-        // La ronda distingue el segundo pase del primero en la misma mesa. Viajaba y nadie la leía.
-        // Se afirma la palabra entera: `contains('2')` habría pasado por el «K-217» de arriba —
-        // un control que acierta por casualidad no prueba nada.
-        assert!(text.contains("Ronda 2"), "la ronda está en el papel:\n{text}");
+        assert!(text.contains("Mesa 4"), "the room label is on the paper:\n{text}");
+        assert!(!text.contains("Mesa: Mesa 4"), "as it comes, with no prefix: the label is opaque:\n{text}");
+        // The round tells the second course from the first at the same table. The whole word is
+        // asserted: `contains('2')` would pass on the «K-217» above — a check that is right by
+        // accident proves nothing.
+        assert!(text.contains("Ronda 2"), "the round is on the paper:\n{text}");
     }
 
-    /// **The VOID slip of a cancelled round is a `kitchen_order` (kitchen#168).** The shell
-    /// (`print-void.ts`) says the void with what an installed app that never updates already prints:
-    /// the word in the floor label and a negative quantity per dish. If this renderer ever dropped
+    /// **The VOID slip of a cancelled round is a `kitchen_order`.** The shell (`print-void.ts`)
+    /// says the void with what an installed app that never updates already prints: the word in the
+    /// floor label and a negative quantity per dish. If this renderer ever dropped
     /// the sign (or clamped it to 1), the slip would read as a NEW round and the dish would be
     /// cooked twice — so the sign is pinned here, where the paper is made.
     #[test]
@@ -1773,22 +1745,22 @@ mod tests {
         assert!(!text.contains("URGENTE"), "a void is never urgent:\n{text}");
     }
 
-    /// **La primera ronda NO se anuncia.** Es el caso normal —una comanda que no es un segundo
-    /// pase— y ponerle «Ronda 1» le añadiría una línea de ruido al 99 % del papel. La ronda dice
-    /// «esto ya es el segundo envío de esta mesa», y eso sólo es cierto a partir de la dos.
+    /// **The first round is NOT announced.** It is the normal case — a chit that is not a second
+    /// course — and printing «Ronda 1» would add a line of noise to 99 % of the paper. The round
+    /// says «this is already the second send for this table», and that is only true from two on.
     #[test]
     fn the_first_round_is_not_announced() {
         let text = paper(&json!({
             "label": "Mesa 4", "round_number": 1,
             "items": [{ "name": "Croquetas", "quantity": 2 }],
         }));
-        assert!(text.contains("Mesa 4"), "la mesa sí:\n{text}");
-        assert!(!text.contains("Ronda"), "la ronda no:\n{text}");
+        assert!(text.contains("Mesa 4"), "the table is:\n{text}");
+        assert!(!text.contains("Ronda"), "the round is not:\n{text}");
     }
 
-    /// **Un suplemento largo se parte con su sangrado, no lo parte la impresora.** A 32 columnas,
-    /// «Al punto, sin cebolla, sin sal, extra salsa» desborda; si lo corta la térmica, el resto
-    /// arranca pegado al margen y se lee como un plato más de la comanda.
+    /// **A long supplement is wrapped keeping its indent, not cut by the printer.** At 32 columns,
+    /// «Al punto, sin cebolla, sin sal, extra salsa» overflows; if the thermal printer cuts it, the
+    /// rest starts at the margin and reads as one more dish of the order.
     #[test]
     fn a_long_supplement_wraps_keeping_its_indent() {
         let text = paper(&json!({
@@ -1801,39 +1773,37 @@ mod tests {
             .lines()
             .filter(|l| l.contains("salsa") || l.contains("Al punto"))
             .collect();
-        // Sin esto el `for` de abajo no se ejecutaría nunca y el test saldría verde sobre una
-        // comanda que ni siquiera imprime el suplemento — un bucle vacío no prueba nada.
+        // Without this the `for` below would never run and the test would pass on a chit that does
+        // not even print the supplement — an empty loop proves nothing.
         assert!(
             partes.len() >= 2,
-            "el suplemento largo se parte en varias líneas, no se pierde:\n{text}"
+            "the long supplement is split over several lines, not lost:\n{text}"
         );
         for line in partes {
-            assert!(line.starts_with("   "), "la continuación conserva el sangrado: {line:?}");
+            assert!(line.starts_with("   "), "the continuation keeps the indent: {line:?}");
             assert!(
                 line.chars().count() <= LINE_WIDTH,
-                "y cabe en el papel ({LINE_WIDTH} columnas): {line:?}"
+                "and it fits on the paper ({LINE_WIDTH} columns): {line:?}"
             );
         }
     }
 
-    /// **Lo que ya mandaba `table` sigue imprimiéndose.** No hay ningún productor vivo que lo mande
-    /// —de ahí el fallo— pero el contrato del dispositivo se amplía, nunca se sustituye: una
-    /// integración que lo use no puede quedarse sin mesa por arreglar el camino nuevo.
+    /// **What `table` carries still prints.** No live producer sends it, but the device contract
+    /// grows, it is never replaced: an integration that uses it must not lose its table.
     #[test]
     fn the_legacy_table_field_still_prints() {
         let text = paper(&json!({ "table": "4", "items": [{ "name": "Croquetas", "quantity": 2 }] }));
-        assert!(text.contains("Mesa: 4"), "la forma vieja conserva su prefijo:\n{text}");
+        assert!(text.contains("Mesa: 4"), "the old shape keeps its prefix:\n{text}");
     }
 
-    /// **Un MENÚ sale como cabecera + componentes SANGRADOS, nunca como párrafo** (hub#1156 ·
-    /// kitchen#57 · ADR-0381).
+    /// **A MENU prints as a header + INDENTED components, never as a paragraph.**
     ///
-    /// El sangrado es el eje de jerarquía del sector, no el tamaño: Simphony documenta los
-    /// componentes *«indented beneath the combo meal name»* **y dice explícitamente que vale en
-    /// modo chit**, y Aloha lo eleva a parámetro numérico (`QC indentation size`). El fallo
-    /// estrella es el contrario: Square amontona el combo en *«one long run-on paragraph, which
-    /// makes it kind of hard to decipher when in the kitchen»*, y su comunidad lo tiene abierto
-    /// desde hace años con «comprar otra impresora» como único remedio.
+    /// Indentation is the industry's axis of hierarchy, not size: Simphony documents the
+    /// components *«indented beneath the combo meal name»* **and says explicitly that it holds in
+    /// chit mode**, and Aloha makes it a numeric parameter (`QC indentation size`). The textbook
+    /// failure is the opposite: Square piles the combo into *«one long run-on paragraph, which
+    /// makes it kind of hard to decipher when in the kitchen»*, and its community has had it open
+    /// for years with «buy another printer» as the only remedy.
     #[test]
     fn a_menu_prints_a_header_with_its_components_indented_below() {
         let text = paper(&json!({
@@ -1847,26 +1817,26 @@ mod tests {
         let lines: Vec<&str> = text.lines().collect();
         assert!(
             lines.contains(&"MENU DEL DIA"),
-            "la cabecera del menú está en el papel, a la izquierda del todo:\n{text}"
+            "the menu header is on the paper, at the far left:\n{text}"
         );
-        // Cada componente en SU línea y sangrado dos columnas. Un párrafo corrido sería el fallo de
-        // Square; la misma columna que las croquetas los haría tres platos sueltos.
-        assert!(lines.contains(&"  1x Gazpacho"), "componente sangrado:\n{text}");
-        assert!(lines.contains(&"  1x Entrecot"), "componente sangrado:\n{text}");
-        assert!(lines.contains(&"2x Croquetas"), "lo de la carta NO se sangra:\n{text}");
+        // Every component on ITS line, indented two columns. A run-on paragraph would be Square's
+        // failure; the same column as the croquetas would make them three loose dishes.
+        assert!(lines.contains(&"  1x Gazpacho"), "indented component:\n{text}");
+        assert!(lines.contains(&"  1x Entrecot"), "indented component:\n{text}");
+        assert!(lines.contains(&"2x Croquetas"), "à la carte dishes are NOT indented:\n{text}");
     }
 
-    /// 🔴 **La cabecera del menú NO le roba el ojo al plato** (kitchen#57).
+    /// 🔴 **The menu header does NOT steal the eye from the dish.**
     ///
-    /// La regla es «el realce es para alérgenos y cambios, NUNCA para jerarquía», y en papel se
-    /// traduce quitándole la NEGRITA a la cabecera, no encogiéndola: de quince productos revisados,
-    /// **cero** imprimen el nombre del combo en doble altura y **cero** en Font B. Eats365 da
-    /// tamaño propio a seis campos del chit —nº de pedido, mesa, notas…— y al nombre del combo sólo
-    /// un interruptor de visibilidad: cuando un fabricante te da tamaño para seis cosas y para la
-    /// séptima sólo «sí/no», te está diciendo que esa séptima no es una instrucción de cocina.
+    /// The rule is «emphasis is for allergens and changes, NEVER for hierarchy», and on paper it
+    /// means taking the BOLD off the header, not shrinking it: of fifteen products reviewed,
+    /// **none** prints the combo name in double height and **none** in Font B. Eats365 gives six
+    /// fields of the chit a size of their own — order number, table, notes… — and the combo name
+    /// only a visibility switch: when a vendor gives you a size for six things and only «yes/no»
+    /// for the seventh, it is telling you the seventh is not a kitchen instruction.
     ///
-    /// Se afirma sobre los MODOS ESC/POS, no sobre el texto: la jerarquía del papel vive ahí, y un
-    /// test que sólo leyera el texto no distinguiría una cabecera discreta de una que grita.
+    /// It is asserted on the ESC/POS MODES, not on the text: the hierarchy of the paper lives there,
+    /// and a test that only read the text could not tell a discreet header from one that shouts.
     #[test]
     fn the_menu_header_never_steals_the_eye_from_the_dishes() {
         let bytes = render_document(
@@ -1883,28 +1853,29 @@ mod tests {
         let cabecera = modes
             .iter()
             .find(|(t, _, _)| t == "MENU DEL DIA")
-            .expect("la cabecera está en el papel");
+            .expect("the header is on the paper");
         assert_eq!(
             (cabecera.1, cabecera.2),
             (false, false),
-            "la cabecera del menú va SIN negrita y a altura normal: es contexto, no trabajo"
+            "the menu header is NOT bold and at normal height: it is context, not work"
         );
-        // Control positivo, que es lo que hace que la aserción de arriba signifique algo: los
-        // platos —lo que de verdad hay que cocinar— sí van realzados.
+        // Positive control, which is what makes the assertion above mean something: the dishes —
+        // what really has to be cooked — are emphasised.
         for plato in ["  1x Gazpacho", "  1x Entrecot"] {
             let l = modes.iter().find(|(t, _, _)| t == plato).expect(plato);
             assert_eq!(
                 (l.1, l.2),
                 (true, true),
-                "el plato manda sobre la cabecera: {plato}"
+                "the dish outranks the header: {plato}"
             );
         }
     }
 
-    /// **El suplemento SÍ va realzado** — la otra mitad de la misma regla. El realce es para los
-    /// CAMBIOS, y un cambio es exactamente lo que es un suplemento. Toast imprime el plato en negro
-    /// y el modificador en ROJO, Lightspeed tiene `print sub-items in red` y Revel igual: tres de
-    /// tres realzan el cambio. En una térmica sin cinta bicolor, el equivalente es la negrita.
+    /// **The supplement IS emphasised** — the other half of the same rule. Emphasis is for the
+    /// CHANGES, and a change is exactly what a supplement is. Toast prints the dish in black and
+    /// the modifier in RED, Lightspeed has `print sub-items in red` and Revel the same: three out
+    /// of three highlight the change. On a thermal printer without a two-colour ribbon, bold is the
+    /// equivalent.
     #[test]
     fn a_supplement_is_emphasised_because_it_is_a_change_not_a_hierarchy() {
         let bytes = render_document(
@@ -1913,21 +1884,21 @@ mod tests {
         )
         .unwrap();
         let modes = lines_with_modes(&bytes);
-        let sup = modes.iter().find(|(t, _, _)| t.contains("SIN CEBOLLA")).expect("el suplemento");
-        assert!(sup.1, "el suplemento va en negrita: es el cambio que devuelve el plato");
-        assert!(!sup.2, "pero a altura normal: el plato sigue mandando");
-        // La nota libre del camarero NO es un cambio de la carta: se lee, no se grita.
-        let nota = modes.iter().find(|(t, _, _)| t.contains("mesa con prisa")).expect("la nota");
-        assert!(!nota.1, "la nota libre no compite con el suplemento");
+        let sup = modes.iter().find(|(t, _, _)| t.contains("SIN CEBOLLA")).expect("the supplement");
+        assert!(sup.1, "the supplement is bold: it is the change that sends the dish back");
+        assert!(!sup.2, "but at normal height: the dish still outranks it");
+        // The waiter's free note is NOT a change from the menu: it is read, not shouted.
+        let nota = modes.iter().find(|(t, _, _)| t.contains("mesa con prisa")).expect("the note");
+        assert!(!nota.1, "the free note does not compete with the supplement");
     }
 
-    /// **La cabecera se repite en CADA hoja de estación** (opción `11 - Send to Combo Parent Order
-    /// Devices` de Simphony; TouchBistro lo hace por defecto y sin opción).
+    /// **The header repeats on EVERY station sheet** (Simphony's option `11 - Send to Combo Parent
+    /// Order Devices`; TouchBistro does it by default, with no option).
     ///
-    /// Cada hoja es un documento propio con las líneas de SU rol, así que se comprueba como se
-    /// imprime: dos renderizados. Un cocinero de la plancha que no lee «MENÚ» no sabe que su
-    /// entrecot va acoplado a un gazpacho, y lo saca cuando le viene bien. El modo huérfano de
-    /// Toast —el componente sin el nombre del padre— es al que se entra a propósito, no el defecto.
+    /// Each sheet is a document of its own with the lines of ITS role, so it is checked the way it
+    /// prints: two renders. A grill cook who does not read «MENÚ» does not know their entrecot is
+    /// paired with a gazpacho, and sends it out whenever it suits them. Toast's orphan mode — the
+    /// component without its parent's name — is one you opt into, not the default.
     #[test]
     fn the_menu_header_repeats_on_every_station_sheet() {
         let plancha = paper(&json!({
@@ -1939,15 +1910,14 @@ mod tests {
         for (estacion, hoja) in [("plancha", &plancha), ("barra", &barra)] {
             assert!(
                 hoja.lines().any(|l| l == "MENU DEL DIA"),
-                "la hoja de {estacion} dice de qué menú es:\n{hoja}"
+                "the {estacion} sheet says which menu it belongs to:\n{hoja}"
             );
         }
     }
 
-    /// **Un menú sin nombre sigue agrupándose por el SANGRADO**, sin una línea en blanco donde
-    /// iría la cabecera. El sangrado es el mecanismo principal, no la cabecera: se sostiene solo.
-    /// Y así no hay que inventarse un «MENÚ» de relleno, que sería una cadena nueva cableada en un
-    /// renderizador que hoy no traduce nada.
+    /// **A nameless menu is still grouped by INDENTATION**, with no blank line where the header
+    /// would go. Indentation is the main mechanism, not the header: it stands on its own, so there
+    /// is no need to invent a filler «MENÚ».
     #[test]
     fn a_nameless_menu_still_groups_its_components_by_indentation() {
         let text = paper(&json!({
@@ -1956,21 +1926,21 @@ mod tests {
                 { "name": "Entrecot", "quantity": 1, "combo_ref": "c1", "combo_name": "" }
             ],
         }));
-        assert!(text.contains("  1x Gazpacho"), "sigue sangrado:\n{text}");
-        assert!(text.contains("  1x Entrecot"), "sigue sangrado:\n{text}");
-        // Y no se cuela una línea vacía donde iría la cabecera: el primer componente va PEGADO a la
-        // regla que abre la lista. (Se mira el vecino, no «hay alguna línea vacía»: el corte de
-        // papel deja tres al final y esa comprobación saltaría siempre.)
+        assert!(text.contains("  1x Gazpacho"), "still indented:\n{text}");
+        assert!(text.contains("  1x Entrecot"), "still indented:\n{text}");
+        // And no empty line sneaks in where the header would go: the first component sits RIGHT
+        // UNDER the rule that opens the list. (The neighbour is checked, not «is there any empty
+        // line»: the paper cut leaves three at the end and that check would always fire.)
         let lines: Vec<&str> = text.lines().collect();
-        let i = lines.iter().position(|l| *l == "  1x Gazpacho").expect("el componente");
+        let i = lines.iter().position(|l| *l == "  1x Gazpacho").expect("the component");
         assert!(
             lines[i - 1].starts_with('-'),
-            "el componente sigue a la regla, sin cabecera en blanco por medio:\n{text}"
+            "the component follows the rule, with no blank header in between:\n{text}"
         );
     }
 
-    /// **El suplemento de un componente se sangra un nivel más** (0 → 2 → 5). Dos niveles como
-    /// mucho: a 32 columnas, un tercero deja el texto sin sitio y lo parte la impresora.
+    /// **A component's supplement is indented one level further** (0 → 2 → 5). Two levels at most:
+    /// at 32 columns, a third leaves the text no room and the printer cuts it.
     #[test]
     fn a_supplement_of_a_menu_component_indents_one_level_further() {
         let text = paper(&json!({
@@ -1979,15 +1949,15 @@ mod tests {
                 "combo_ref": "c1", "combo_name": "MENU DEL DIA",
             }],
         }));
-        assert!(text.contains("\n     Al punto\n"), "sangrado a 5, bajo su componente:\n{text}");
+        assert!(text.contains("\n     Al punto\n"), "indented to 5, under its component:\n{text}");
     }
 
-    /// **La mesa es lo MÁS GRANDE del papel**: doble alto y doble ancho.
+    /// **The table is the BIGGEST thing on the paper**: double height and double width.
     ///
-    /// Es el único campo que se lee desde el otro lado del pase, a velocidad, para casar un plato
-    /// con su destino — el plato se lee a distancia de brazo, la mesa a distancia de sala. Toast lo
-    /// pone *«in large, bold font in the top-left corner»* y Eats365 le da tamaño propio junto al
-    /// número de pedido, los dos únicos campos del chit que lo tienen.
+    /// It is the only field read from the other side of the pass, at speed, to match a dish with
+    /// where it goes — the dish is read at arm's length, the table from across the room. Toast puts
+    /// it *«in large, bold font in the top-left corner»* and Eats365 gives it a size of its own next
+    /// to the order number, the only two fields of the chit that have one.
     #[test]
     fn the_table_is_the_biggest_thing_on_the_paper() {
         let bytes = render_document(
@@ -1996,17 +1966,17 @@ mod tests {
         )
         .unwrap();
         let modes = lines_with_modes(&bytes);
-        let mesa = modes.iter().find(|(t, _, _)| t == "Mesa 4").expect("la mesa");
-        assert!(mesa.1 && mesa.2, "la mesa va en negrita y doble alto");
+        let mesa = modes.iter().find(|(t, _, _)| t == "Mesa 4").expect("the table");
+        assert!(mesa.1 && mesa.2, "the table is bold and double height");
         assert!(
             double_width_of(&bytes, "Mesa 4"),
-            "y en doble ancho: es lo que se lee desde el otro lado del pase"
+            "and double width: it is what is read from the other side of the pass"
         );
     }
 
-    /// **Una etiqueta larga renuncia al doble ancho antes que partirse.** «Recogida Ana Martinez» a
-    /// doble ancho ocupa 42 de las 32 columnas del papel: la impresora la corta por donde le toca y
-    /// la mesa —el campo que existe para leerse de un vistazo— acaba en dos trozos.
+    /// **A long label gives up double width rather than being split.** «Recogida Ana Martinez» in
+    /// double width takes 42 of the paper's 32 columns: the printer cuts it wherever it falls and
+    /// the table — the field that exists to be read at a glance — ends up in two pieces.
     #[test]
     fn a_long_label_gives_up_double_width_before_it_wraps() {
         let bytes = render_document(
@@ -2016,14 +1986,14 @@ mod tests {
         .unwrap();
         assert!(
             !double_width_of(&bytes, "Recogida Ana Martinez"),
-            "cabe entera aunque sea a un solo ancho"
+            "it fits whole, even if at single width"
         );
         let text = strip_escpos(&bytes);
-        assert!(text.contains("Recogida Ana Martinez"), "y no se pierde:\n{text}");
+        assert!(text.contains("Recogida Ana Martinez"), "and it is not lost:\n{text}");
     }
 
-    /// **Una comanda a la carta sale EXACTAMENTE igual que antes de hub#1156.** Es el 99 % de las
-    /// comandas: romper esto es romper la cocina entera para arreglar un caso raro.
+    /// **An à la carte chit prints EXACTLY as it always has.** It is 99 % of the chits: breaking
+    /// this is breaking the whole kitchen to fix a rare case.
     #[test]
     fn an_ordinary_order_prints_exactly_as_it_did_before() {
         let text = paper(&json!({
@@ -2039,7 +2009,7 @@ mod tests {
              --------------------------------\n2x Croquetas\n   >> sin gluten\n1x Flan\n\
              ================================\n\n\n\n\n"
                 .replace("HH:MM", &now_hm()),
-            "el papel de siempre, byte a byte"
+            "the usual paper, byte for byte"
         );
     }
 
@@ -2072,10 +2042,9 @@ mod tests {
         }
     }
 
-    /// **A document type nobody knows is refused, not printed as `Generic`.** A typo used to reach
-    /// the paper as a nameless key/value dump, and the kitchen only noticed when the plate did not
-    /// arrive. `parse` is now the ONLY way in — the lenient `from_wire` that degraded to `Generic`
-    /// went with its last caller, the standalone Bridge (hub#340 / hub#578).
+    /// **A document type nobody knows is refused, not printed as `Generic`.** Printed as `Generic`,
+    /// a typo reaches the paper as a nameless key/value dump, and the kitchen only notices when the
+    /// plate does not arrive. `parse` is the ONLY way in.
     #[test]
     fn an_unknown_document_type_is_refused_instead_of_degraded() {
         for unknown in ["Kitchen", "kitchn", "", "html", "KITCHEN_ORDER"] {
@@ -2088,8 +2057,8 @@ mod tests {
     }
 
     /// **`generic` is a document you ASK for, never one you fall back into.** The distinction is
-    /// the whole point of removing the lenient door: the type still exists, and a producer may
-    /// legitimately name it, but nothing maps an unknown string onto it any more.
+    /// the whole point of having no lenient door: the type exists, and a producer may legitimately
+    /// name it, but nothing maps an unknown string onto it.
     #[test]
     fn generic_is_only_reachable_by_naming_it() {
         assert_eq!(DocumentType::parse("generic"), Some(DocumentType::Generic));
@@ -2124,8 +2093,8 @@ mod tests {
         let mut b = EscposBuilder::new();
         b.set(Align::Center, false, false, false).qr("https://erplora.com/v/abc").cut();
         let out = b.finish();
-        assert!(out.windows(3).any(|w| w == [0x1d, 0x28, 0x6b]), "debe contener GS ( k (QR)");
-        assert!(out.windows(3).any(|w| w == [0x1d, 0x56, 0x01]), "debe contener GS V 1 (corte)");
+        assert!(out.windows(3).any(|w| w == [0x1d, 0x28, 0x6b]), "must contain GS ( k (QR)");
+        assert!(out.windows(3).any(|w| w == [0x1d, 0x56, 0x01]), "must contain GS V 1 (cut)");
     }
 
     /// The guard above rejects **shape**, never content: a real ticket still renders, and what comes
@@ -2154,7 +2123,7 @@ mod tests {
         );
     }
 
-    // ── A reprint says «duplicado» (hub#1931, RD 1619/2012 art. 14.4) ───────────────────────────
+    // ── A reprint says «duplicado» (RD 1619/2012 art. 14.4) ─────────────────────────────────────
 
     fn fiscal_paper(doc: DocumentType, extra: serde_json::Value) -> Vec<(String, bool, bool)> {
         let mut data = json!({
@@ -2163,7 +2132,7 @@ mod tests {
             "items": [{ "name": "Cafe", "quantity": 2, "total": 2.4 }],
             "total": 2.4,
         });
-        // A full invoice is refused without its parties and its breakdown (hub#2005), so the
+        // A full invoice is refused without its parties and its breakdown, so the
         // invoice gets them here: what these tests look at is the mark, not the refusal.
         if doc == DocumentType::Invoice {
             for (k, v) in full_invoice().as_object().expect("an object") {
@@ -2214,7 +2183,7 @@ mod tests {
         }
     }
 
-    /// The mark speaks the language of the paper, like every other label (hub#1159).
+    /// The mark speaks the language of the paper, like every other label.
     #[test]
     fn the_duplicate_mark_speaks_the_language_of_the_paper() {
         let lines = fiscal_paper(DocumentType::Receipt, json!({ "duplicate": true, "locale": "en" }));
@@ -2222,7 +2191,7 @@ mod tests {
         assert!(!says(&lines, "DUPLICADO"), "and not the Spanish word");
     }
 
-    // ── A full invoice on the thermal roll (hub#2005) ──────────────────────────────────────────
+    // ── A full invoice on the thermal roll ─────────────────────────────────────────────────────
 
     /// What makes an invoice a FULL invoice (RD 1619/2012 art. 6): both parties identified and
     /// the VAT broken down per rate. Two rates on purpose: a single-rate sale is the case where a
@@ -2278,9 +2247,9 @@ mod tests {
         assert!(!says(&lines, "Ticket: "), "an invoice does not call itself a ticket");
     }
 
-    /// **A corrective invoice says so in its title** (hub#2381). An R1–R4 prints with a negative
-    /// total and, titled like any other invoice, reads at a glance as one more invoice; the A4 and
-    /// the market (Holded, Odoo, Business Central) title it «Factura rectificativa». Same place,
+    /// **A corrective invoice says so in its title.** An R1–R4 prints with a negative total and,
+    /// titled like any other invoice, reads at a glance as one more invoice; the A4 invoice and the
+    /// market (Holded, Odoo, Business Central) title it «Factura rectificativa». Same place,
     /// same weight as the plain title, and it fits the 80 mm line.
     #[test]
     fn a_corrective_invoice_is_titled_factura_rectificativa() {
@@ -2305,7 +2274,7 @@ mod tests {
     }
 
     /// Without the mark the paper does not move: the word is a statement about the document, so
-    /// only an explicit `true` switches it on — like `duplicate` (hub#1931).
+    /// only an explicit `true` switches it on — like `duplicate`.
     #[test]
     fn only_an_explicit_true_makes_an_invoice_corrective() {
         for flag in [None, Some(json!(false)), Some(json!("yes")), Some(json!(1))] {
@@ -2377,7 +2346,7 @@ mod tests {
         assert_eq!(lines[long + 1].0, format!("{:<8}{:>12}{:>12}", "", "10.00", "0.14"));
     }
 
-    /// English paper, English labels (hub#1159): the invoice is not a Spanish-only document.
+    /// English paper, English labels: the invoice is not a Spanish-only document.
     #[test]
     fn a_full_invoice_speaks_the_language_of_the_paper() {
         let mut data = full_invoice();
@@ -2391,10 +2360,10 @@ mod tests {
         assert!(!says(&lines, "FACTURA") && !says(&lines, "Cuota"), "no Spanish left over");
     }
 
-    /// **An invoice missing what makes it an invoice is REFUSED, never cut as a mute ticket**
-    /// (hub#2005). Before, `invoice` fell into the ticket's body and a customer who asked for their
-    /// invoice took home paper without their tax id or the breakdown — the silent failure. The
-    /// refusal names the missing field, so the print host's error says what to fix.
+    /// **An invoice missing what makes it an invoice is REFUSED, never cut as a mute ticket.** Cut
+    /// with the ticket's body, a customer who asked for their invoice would take home paper without
+    /// their tax id or the breakdown — the silent failure. The refusal names the missing field, so
+    /// the print host's error says what to fix.
     #[test]
     fn an_invoice_missing_what_makes_it_an_invoice_is_refused_naming_the_field() {
         type Breaks = Box<dyn Fn(&mut serde_json::Value)>;
@@ -2436,11 +2405,11 @@ mod tests {
         assert!(!says(&lines, "B12345678") && !says(&lines, "Cuota"), "{lines:#?}");
     }
 
-    /// **The bill the waiter takes to the table is a document this printer knows** (hub#748).
+    /// **The bill the waiter takes to the table is a document this printer knows.**
     ///
     /// It is the most frequently printed paper of a restaurant service — it comes out before every
-    /// payment, so more often than the fiscal ticket — and until now `prebill` was not in the
-    /// vocabulary at all, so the only door refused it and no printer could produce it.
+    /// payment, so more often than the fiscal ticket — so `prebill` has to be in the vocabulary, or
+    /// the only door refuses it and no printer can produce it.
     ///
     /// Named through `parse` and not the variant on purpose: this is the string the hub's queue
     /// stores and the drain frame carries, so the test pins the **wire**, which is the contract.
@@ -2464,7 +2433,7 @@ mod tests {
             / 5
     }
 
-    /// **Two QRs, not one** (hub#963). The VeriFactu one points at the AEAT's `ValidarQR` and is
+    /// **Two QRs, not one.** The VeriFactu one points at the AEAT's `ValidarQR` and is
     /// for CHECKING; the second points at this hub and is for ASKING — «pide tu factura». They are
     /// two fields on purpose: printing one over the other would either strip the fiscal proof from
     /// the ticket or leave the customer with nothing to scan.
@@ -2503,7 +2472,7 @@ mod tests {
         );
     }
 
-    /// **«VERI*FACTU» under the fiscal QR** (sales#327). RD 1619/2012 art. 6.5.b (7.5 for the
+    /// **«VERI*FACTU» under the fiscal QR.** RD 1619/2012 art. 6.5.b (7.5 for the
     /// simplified invoice a ticket is) wants the legend beside the QR of every invoice from a
     /// system that remits all its records, and Orden HAC/1177/2024 art. 20.1.b wants it as
     /// visible as the rest of the data. The producer sends it as `qr_legend`; the renderer prints
@@ -2569,8 +2538,8 @@ mod tests {
         );
     }
 
-    /// **«QR tributario:» above the fiscal QR, and the QR at the very top** (sales#339). The AEAT's
-    /// QR specification (v0.5.0 §3, which Orden HAC/1177/2024 art. 21.1 points at) wants the QR
+    /// **«QR tributario:» above the fiscal QR, and the QR at the very top.** The AEAT's QR
+    /// specification (v0.5.0 section 3, which Orden HAC/1177/2024 art. 21.1 points at) wants the QR
     /// «always preceded» by the text «QR tributario:», above it, and the QR «at the beginning of
     /// the invoice, before the content generated by the invoicing system». The producer sends the
     /// heading as `qr_heading` (a fixed legal text, not translated); the second QR stays at the foot.
@@ -2664,8 +2633,8 @@ mod tests {
         );
     }
 
-    /// A ticket with no claim prints exactly what it printed before. The second QR is opt-in, so
-    /// no hub that has not adopted this grows a blank line or a stray caption.
+    /// A ticket with no claim prints only the fiscal QR. The second QR is opt-in, so a hub that does
+    /// not use it gets no blank line or stray caption.
     #[test]
     fn a_ticket_without_a_claim_is_unchanged() {
         let doc = json!({
@@ -2701,7 +2670,7 @@ mod tests {
         );
     }
 
-    /// **The bill is NOT a ticket, and the paper has to say so** (ADR-0141).
+    /// **The bill is NOT a ticket, and the paper has to say so.**
     ///
     /// A bill with a series number, a payment method or a VeriFactu QR is a piece of paper that
     /// looks like an invoice without being one, which is a legal problem rather than a cosmetic
@@ -2782,9 +2751,8 @@ mod tests {
     /// not come out: nobody checks a bill that printed.
     ///
     /// It matters beyond a typo. The module that produces the bill is installed at its **published**
-    /// version, so between the hub taking this change and the module being republished, the old
-    /// producer is what runs — and it sends exactly that shape (ERPlora/sales#78). Failing loudly
-    /// puts the reason in `_print_queue.last_error` instead of in the customer's hand.
+    /// version, so an older producer that sends exactly that shape can be the one running. Failing
+    /// loudly puts the reason in `_print_queue.last_error` instead of in the customer's hand.
     #[test]
     fn a_bill_with_no_lines_is_refused_instead_of_cut_blank() {
         // The shape `<ok-receipt>` paints on screen: right document, wrong keys.
@@ -2807,7 +2775,7 @@ mod tests {
     /// **Typographic punctuation reaches the paper as punctuation, not as `?`.**
     ///
     /// The printer speaks cp437 and the encoder replaces what it cannot represent with `?`, so the
-    /// translated notice — «Cuenta — no es una factura» with a real em dash — came out as
+    /// translated notice — «Cuenta — no es una factura» with a real em dash — would come out as
     /// «Cuenta ? no es una factura». The text is written by translators in a text editor, so the
     /// dashes and curly quotes are not a mistake anybody is going to stop making; the encoder is
     /// the place that has to cope.
@@ -2825,14 +2793,14 @@ mod tests {
         assert!(text.contains("..."), "the ellipsis prints as three dots: {text}");
     }
 
-    // ── hub#1138 · the supplements arrive as a LIST, one line each ──────────────────────────────
+    // ── The supplements arrive as a LIST, one line each ─────────────────────────────────────────
     //
-    // `kitchen` composes them today into a single string (`modifiers_for_display`, joined with
-    // «, ») because the renderer only ever read a string. An ARRAY in the same key is truthy but
-    // is not a string, so `str_field` hands back `""`: the supplements vanish from the paper
-    // WITHOUT an error — exactly the silent drop sales#78 warns about. Both shapes must print.
+    // `kitchen` composes them into a single string (`modifiers_for_display`, joined with «, »).
+    // An ARRAY in the same key is truthy but is not a string, so `str_field` hands back `""`: read
+    // that way, the supplements would vanish from the paper WITHOUT an error. Both shapes must
+    // print.
 
-    /// An array prints ONE indented line per supplement — the point of the issue.
+    /// An array prints ONE indented line per supplement.
     #[test]
     fn each_supplement_of_the_list_gets_its_own_line() {
         let text = paper(&json!({
@@ -2870,8 +2838,8 @@ mod tests {
         assert!(text.contains("Sin cebolla"), "and so does the second one:\n{text}");
     }
 
-    /// A supplement is a CHANGE, so it keeps the emphasis hub#1156 gave it (ADR-0394): the list
-    /// must not quietly demote it to normal weight.
+    /// A supplement is a CHANGE, so it keeps the chit's emphasis for changes: the list must not
+    /// quietly demote it to normal weight.
     #[test]
     fn a_listed_supplement_is_emphasised_like_a_joined_one() {
         let bytes = render_document(
@@ -2888,8 +2856,8 @@ mod tests {
         assert!(line.1, "the supplement prints in bold, like the joined one: {line:?}");
     }
 
-    /// The string `kitchen` sends TODAY prints byte for byte as it does today: the fleet that has
-    /// not moved yet must not see its chits change.
+    /// The string `kitchen` sends prints byte for byte as it always has: a fleet still sending it
+    /// must not see its chits change.
     #[test]
     fn the_joined_string_still_prints_exactly_as_today() {
         let text = paper(&json!({
@@ -2950,12 +2918,12 @@ mod tests {
         }
     }
 
-    // ── hub#1159 · the paper speaks the language the document asks for ──────────────────────────
+    // ── The paper speaks the language the document asks for ─────────────────────────────────────
     //
-    // Every label in this file was wired in Spanish, so a hub running in another language painted
-    // a translated KDS and pushed a Spanish chit out of the thermal printer. English is the source
-    // (ADR-0055/0199) and `es` reproduces, byte for byte, the paper the fleet prints today: a
-    // document WITHOUT `locale` — every deployed `erplora-app` — must not move a single column.
+    // A hub running in another language must not paint a translated KDS and push a Spanish chit
+    // out of the thermal printer. English is the source and `es` reproduces, byte for byte, the
+    // paper the fleet prints today: a document WITHOUT `locale` — every deployed `erplora-app` —
+    // must not move a single column.
 
     /// Renders any document and returns the paper without control bytes.
     fn printed(doc: DocumentType, data: &serde_json::Value) -> String {
@@ -3049,14 +3017,14 @@ mod tests {
             &json!({ "locale": "en", "receipt_id": "S-1", "cashier": "Ana",
                      "opening_balance": 100.0, "closing_balance": 150.0 }),
         );
-        // No «Difference»: closing − opening is not the over/short (CASH_REGISTER-F16).
+        // No «Difference»: closing − opening is not the over/short.
         for wanted in ["CASH REPORT", "Session: S-1", "Cashier: Ana", "Opening", "Closing"] {
             assert!(report.contains(wanted), "the cash report says {wanted:?}:\n{report}");
         }
     }
 
-    /// 🔴 The compatibility guarantee: a document WITHOUT `locale` prints byte for byte what it
-    /// printed before this change, and `locale: "es"` prints the very same bytes. Every deployed
+    /// 🔴 The compatibility guarantee: a document WITHOUT `locale` prints byte for byte the Spanish
+    /// paper the fleet already prints, and `locale: "es"` prints the very same bytes. Every deployed
     /// `erplora-app` sends no locale, so if this moves, every kitchen in the fleet notices.
     #[test]
     fn a_document_without_a_locale_prints_exactly_the_spanish_paper_of_today() {
@@ -3097,7 +3065,7 @@ mod tests {
                 json!({ "receipt_id": "S-1", "cashier": "Ana",
                         "opening_balance": 100.0, "closing_balance": 150.0 }),
                 // A report that does not say X or Z is titled neutrally and carries no invented
-                // «Diferencia» (CASH_REGISTER-F16): the two changes this paper made on purpose.
+                // «Diferencia».
                 vec!["INFORME DE CAJA", "Sesion: S-1", "Cajero: Ana", "Apertura", "Cierre"],
             ),
         ];
@@ -3143,17 +3111,17 @@ mod tests {
     }
 
 
-    // ── hub#1138 · the SUPPLEMENT on the customer's ticket and on the bill ───────────────────────
+    // ── The SUPPLEMENT on the customer's ticket and on the bill ─────────────────────────────────
     //
-    // The chit already prints supplements one per line (hub#1156). The ticket and the bill still
-    // read only `notes`, where `sales` chains them with « · » — so with two or three the line wraps
-    // at 32 columns and the continuation starts at the margin, reading as another article. Same
-    // complaint hub#1165 fixed for the menu's `components`, and it is fixed the same way: the
-    // structured list wins and the joined note steps aside, so nothing is said twice.
+    // The chit prints supplements one per line. Read only from `notes`, where `sales` chains them
+    // with « · », two or three of them would wrap at 32 columns and the continuation would start at
+    // the margin, reading as another article. The menu's `components` have the same problem and
+    // the same fix: the structured list wins and the joined note steps aside, so nothing is said
+    // twice.
 
     /// One indented line per supplement, and NO amount of its own: in ERPlora the delta is already
     /// inside the line's `unit_price` (`authoritative_modifiers`), so a second number in that
-    /// column would not add up with the rest — the Odoo bug the issue cites.
+    /// column would not add up with the rest — a bug Odoo has.
     #[test]
     fn a_supplement_reaches_the_customers_ticket_on_its_own_line() {
         let text = printed(
@@ -3189,9 +3157,8 @@ mod tests {
         assert!(text.contains("  Sin cebolla"), "and the second one:\n{text}");
     }
 
-    /// With `modifiers` present the joined `notes` is NOT printed: until `sales` separates them,
-    /// the note still carries the same supplements chained with « · », and printing both would say
-    /// everything twice — the precedence the issue asks to decide.
+    /// With `modifiers` present the joined `notes` is NOT printed: the note also carries the same
+    /// supplements chained with « · », and printing both would say everything twice.
     #[test]
     fn a_structured_supplement_replaces_the_joined_note() {
         for doc in [DocumentType::Receipt, DocumentType::Prebill] {
@@ -3312,17 +3279,16 @@ mod tests {
         assert!(!text.contains("locale"), "the envelope field is not a line:\n{text}");
     }
 
-    // ── The paper is signed by a product that EXISTS (hub#1735) ─────────────────────────────────
+    // ── The paper is signed by a product that EXISTS ────────────────────────────────────────────
 
-    /// **The test page used to sign itself «ERPlora Bridge»** — the standalone daemon ADR-0196
-    /// retired and hub#340 deleted from the tree. It is the one sheet a shop owner prints on
-    /// purpose, to check the printer answers, so the dead name went straight into their hands on
-    /// paper: nothing corrects a sheet once it is cut. It now signs with the same name the receipt
-    /// next to it falls back to (`render_receipt`) — the product they actually installed.
+    /// **The test page signs itself with a product that exists.** It is the one sheet a shop owner
+    /// prints on purpose, to check the printer answers, so a dead product name would go straight
+    /// into their hands on paper: nothing corrects a sheet once it is cut. It signs with the same
+    /// name the receipt next to it falls back to (`render_receipt`) — the product they installed.
     #[test]
     fn the_test_page_is_signed_with_a_product_that_still_exists() {
         // An EMPTY document: the sheet an `erplora-app` prints when whatever asked for it is older
-        // than this binary and sends no envelope (hub#1803). That is the case this guard is for —
+        // than this binary and sends no envelope. That is the case this guard is for —
         // with a `business_name` the header is the shop's, which the next test pins.
         let paper = strip_escpos(&render_test_page("network:10.0.2.2:9100", &json!({})));
         assert!(
@@ -3331,8 +3297,8 @@ mod tests {
         );
         // Everything the sheet is FOR stays on it: a header fix that quietly dropped the outcome
         // or the printer's address would satisfy the line above and lose the diagnosis, which is
-        // the only reason anybody prints this page. The wording is now the catalogue's (hub#1803),
-        // so the assertion follows the fallback language rather than the retired English literal.
+        // the only reason anybody prints this page. The wording is the catalogue's, so the
+        // assertion follows the fallback language.
         assert!(
             paper.contains("Prueba de impresion correcta"),
             "the outcome is still printed:\n{paper}"
@@ -3343,16 +3309,15 @@ mod tests {
         );
     }
 
-    // ── The test page speaks the hub's language and carries its name (hub#1803) ──────────────────
+    // ── The test page speaks the hub's language and carries its name ───────────────────────────
 
-    /// **The one sheet that was never translated.**
+    /// **The test page is translated like every other sheet.**
     ///
-    /// Every other document this crate renders takes its language off the envelope
-    /// ([`Locale::from_document`], hub#1159); the test page could not, because it was rendered
-    /// from a printer id with NO document behind it. So a Spanish salon pressed «Probar» and got
-    /// «Test Print OK» out of the printer while the ticket beside it came out in Spanish. English
-    /// is the SOURCE language, not the paper's (ADR-0055/0199) — a sheet hardcoded in either
-    /// language is what the rule forbids.
+    /// Every document this crate renders takes its language off the envelope
+    /// ([`Locale::from_document`]). Rendered from a printer id alone, with NO document behind it,
+    /// the test page would give a Spanish salon that pressed «Probar» a «Test Print OK» while the
+    /// ticket beside it came out in Spanish. English is the SOURCE language, not the paper's — a sheet
+    /// hardcoded in either language is what the rule forbids.
     #[test]
     fn the_test_page_is_printed_in_the_language_the_document_carries() {
         let english = strip_escpos(&render_test_page(
@@ -3381,7 +3346,7 @@ mod tests {
             "and the Spanish label for the printer it came out of:\n{spanish}"
         );
 
-        // The point of the whole change: the two sheets are NOT the same paper. A translation that
+        // The point of the test: the two sheets are NOT the same paper. A translation that
         // resolved both keys to the same literal would satisfy every assertion above one by one.
         assert_ne!(english, spanish, "the sheet actually changes with the language");
     }
@@ -3401,13 +3366,11 @@ mod tests {
         assert!(english.contains("Test Print OK"), "`en_GB` is English:\n{english}");
     }
 
-    /// **Headed by the business, like the ticket next to it** (hub#1803).
+    /// **Headed by the business, like the ticket next to it.**
     ///
-    /// hub#1735 replaced a dead product name («ERPlora Bridge») with a live one, which was the
-    /// bug of the day but left the sheet signed by the SOFTWARE. The shop owner holding it wants
-    /// to know which of their printers answered, and the name they recognise is their own — the
-    /// receipt has headed itself that way all along (`render_receipt`), from the very same
-    /// `business_name` field.
+    /// A sheet signed by the SOFTWARE does not tell the shop owner holding it which of their
+    /// printers answered, and the name they recognise is their own — the receipt heads itself that
+    /// way (`render_receipt`), from the very same `business_name` field.
     #[test]
     fn the_test_page_is_headed_by_the_business_that_printed_it() {
         let paper = strip_escpos(&render_test_page(
@@ -3429,8 +3392,9 @@ mod tests {
         );
     }
 
-    /// **No paper this crate renders names the retired Bridge**, not just the test page — the
-    /// guard that keeps the dead product from coming back through another renderer (hub#1735).
+    /// **No paper this crate renders names «Bridge»**, a product that no longer exists — not just
+    /// the test page. The guard that keeps the dead product from coming back through another
+    /// renderer.
     ///
     /// It reads the RAW bytes rather than the stripped paper on purpose: a receipt carries a QR
     /// (`GS ( k`), a command of variable length that [`strip_escpos`] refuses by design, so a
@@ -3443,7 +3407,7 @@ mod tests {
         let data = json!({
             "business_name": "SALON AURORA SL",
             "tax_id": "12345678Z",
-            // What an invoice cannot be printed without (hub#2005).
+            // What an invoice cannot be printed without.
             "vat_number": "B11111111",
             "receipt_id": "F-1",
             "customer_name": "Cliente SL",
@@ -3477,8 +3441,7 @@ mod tests {
         for (what, bytes) in papers {
             assert!(
                 !bytes.windows(b"Bridge".len()).any(|w| w == b"Bridge"),
-                "{what}: the paper names the Bridge, a product retired by ADR-0196 and deleted \
-                 from the tree by hub#340"
+                "{what}: the paper names the Bridge, a product that no longer exists"
             );
         }
     }
@@ -3517,9 +3480,9 @@ mod tests {
             .collect()
     }
 
-    /// **The business's promotional QR reaches the thermal paper** (hub#2009, sale of sales#345).
-    /// The screen (`<ok-receipt>`) and the browser paper already carry it; the roll printed nothing
-    /// and the business believed its ticket did.
+    /// **The business's promotional QR reaches the thermal paper.** The screen (`<ok-receipt>`)
+    /// and the browser paper carry it; a roll that printed nothing would leave the business
+    /// believing its ticket did.
     #[test]
     fn a_ticket_prints_the_promotional_qr_with_its_note() {
         let bytes =
@@ -3562,8 +3525,8 @@ mod tests {
         assert!(sizes[2] > 0, "a zero module size prints nothing");
     }
 
-    /// No URL, no promotion: a note alone names nothing, and a ticket of a business that did not
-    /// configure it prints byte for byte what it printed before.
+    /// No URL, no promotion: a note alone names nothing, so the ticket prints byte for byte as if
+    /// the note were not there.
     #[test]
     fn a_promotional_note_without_its_qr_prints_nothing() {
         let mut with_note = ticket_with_promo();
@@ -3577,7 +3540,7 @@ mod tests {
         );
     }
 
-    /// The full invoice is formal: no promotion on it, like the A4 (sales#345). A producer that
+    /// The full invoice is formal: no promotion on it, like the A4 invoice. A producer that
     /// builds the invoice from its ticket (sales `saleToInvoicePrintDocument`) must not smuggle
     /// the review link onto an invoice.
     #[test]
@@ -3591,10 +3554,10 @@ mod tests {
         assert!(!text.contains("Escanea"), "nor its note");
     }
 
-    /// The module size of every QR on the paper is a contract, not a relation (rv-2012): the fiscal
-    /// QR and «pide tu factura» keep the 4 dots (0.5 mm at 203 dpi) they printed at before hub#2009,
-    /// and the promotional one prints at 3. «Smaller than the fiscal» alone lets the fiscal one drift
-    /// to 5 or the promotional one to 2 (0.25 mm, which a phone no longer reads) without a test going red.
+    /// The module size of every QR on the paper is a contract, not a relation: the fiscal QR and
+    /// «pide tu factura» keep their 4 dots (0.5 mm at 203 dpi), and the promotional one prints at 3.
+    /// «Smaller than the fiscal» alone would let the fiscal one drift to 5 or the promotional one to
+    /// 2 (0.25 mm, which a phone no longer reads) without a test going red.
     #[test]
     fn every_qr_prints_at_its_contracted_module_size() {
         let receipt = DocumentType::parse("receipt").unwrap();
@@ -3606,7 +3569,7 @@ mod tests {
         assert_eq!(qr_module_sizes(&bytes), vec![4, 4], "byte for byte what it printed before");
     }
 
-    // ── The paper prints money in the currency's own scale (hub#2129) ──────────────────────────
+    // ── The paper prints money in the currency's own scale ────────────────────────────────────
 
     /// The paper's text lines, whatever the document type.
     fn money_paper(doc: DocumentType, data: &serde_json::Value) -> Vec<String> {
@@ -3638,9 +3601,9 @@ mod tests {
         })
     }
 
-    /// **A yen shop's ticket has no cents** (hub#2129): `sales` sends the amounts already divided
-    /// by the currency's scale and says which scale it is; the paper used to add «.00» to every
-    /// one of them while the screen and the HTML ticket showed «1500».
+    /// **A yen shop's ticket has no cents**: `sales` sends the amounts already divided by the
+    /// currency's scale and says which scale it is, so the paper must not add «.00» to every one of
+    /// them while the screen and the HTML ticket show «1500».
     #[test]
     fn a_yen_ticket_prints_every_amount_without_decimals() {
         let lines = money_paper(DocumentType::Receipt, &yen_ticket());
@@ -3662,8 +3625,8 @@ mod tests {
         assert!(line_of(&lines, "TOTAL").ends_with(" 1400"), "{lines:#?}");
     }
 
-    /// **A dinar has three decimals, and the third one is money** (hub#2129): `1.234` KWD used to
-    /// print as `1.23`, a fil lost on every amount — the VAT breakdown included.
+    /// **A dinar has three decimals, and the third one is money**: printed as `1.23`, `1.234` KWD
+    /// would lose a fil on every amount — the VAT breakdown included.
     #[test]
     fn a_dinar_invoice_keeps_its_third_decimal_on_every_amount() {
         let mut data = full_invoice();
@@ -3701,8 +3664,8 @@ mod tests {
         assert!(label.iter().any(|l| l.trim() == "480"), "{label:#?}");
     }
 
-    /// **A document without `decimals` prints exactly as before** — two decimals. Every module
-    /// in the fleet that predates hub#2129 sends none, and a euro ticket must not change a byte.
+    /// **A document without `decimals` prints two decimals**, as a euro ticket always has: a module
+    /// that does not send the field must not change a byte of it.
     /// A scale that is not a whole number between 0 and 4 (the widest ISO 4217 scale) is not
     /// trusted either: two decimals, never a ticket with nine.
     #[test]
@@ -3725,7 +3688,7 @@ mod tests {
         );
     }
 
-    // ── hub#2462 · the business's own text wraps by words on the roll ───────────────────────────
+    // ── The business's own text wraps by words on the roll ────────────────────────────────────
     //
     // The header, the footer and the notes of the ticket are prose the business (or the producer)
     // writes, of any length. Printed as one line, the printer folds them at its column count
@@ -3798,7 +3761,7 @@ mod tests {
 
     /// The business's text on the ticket, long enough not to fit one line, with accents, `€`
     /// (printed `EUR`, three columns for one character) and the line break Ventas puts between
-    /// the discount note and the business's footer (sales#505).
+    /// the discount note and the business's footer.
     const LONG_TEXTS: [(&str, &str); 5] = [
         ("receipt_header", "Vale de 5 € para tu próxima cita en el salón"),
         (
@@ -3825,8 +3788,8 @@ mod tests {
         data
     }
 
-    /// **The point of the issue**: the business's text reaches the ticket cut between words, never
-    /// inside one, on a 58 mm roll and on an 80 mm one.
+    /// **The business's text reaches the ticket cut between words**, never inside one, on a 58 mm
+    /// roll and on an 80 mm one.
     #[test]
     fn the_business_text_on_the_ticket_wraps_by_words_on_every_roll() {
         for (field, text) in LONG_TEXTS {
@@ -3873,7 +3836,7 @@ mod tests {
         assert_eq!(lines[at + 1..at + 3], ["", "Vuelva pronto"], "{lines:#?}");
     }
 
-    /// A text that already fits prints exactly as it did: one line, as written.
+    /// A text that already fits prints as written: one line.
     #[test]
     fn a_short_footer_prints_exactly_as_today() {
         let data = ticket_with("receipt_footer", "Vuelva pronto");
@@ -3886,15 +3849,16 @@ mod tests {
         );
     }
 
-    // ── CASH_REGISTER-F16 · the X and the Z report on paper ──────────────────────────────────────
+    // ── The X and the Z report on paper ────────────────────────────────────────────────────────
     //
     // The Hub queues ONE document type for both reports (`cash_register.session.print`): the open
     // session's partial report (X) and the closed session's cash closing (Z). It tells them apart
     // in `receipt_id` («<number> (X)» / «<number> (Z)»), sends the float as `opening_balance`, the
     // EXPECTED cash as `closing_balance`, and every figure of the report — «Expected» included
     // and, on the Z only, «Counted» and «Over/short» — as `transactions`, already in the language
-    // of whoever prints. The paper used to title both «CIERRE DE CAJA», relabel the expected cash
-    // as «Cierre» and invent a «Diferencia» (closing − opening) next to the Hub's real over/short.
+    // of whoever prints. So the paper must not title both «CIERRE DE CAJA», relabel the expected
+    // cash as «Cierre» or invent a «Diferencia» (closing − opening) next to the Hub's real
+    // over/short.
 
     /// The Hub's `transactions` labels in `en` and in `es` (its `cash report` catalogue).
     fn hub_report_label(locale: &str, en: &'static str) -> &'static str {
@@ -4070,7 +4034,7 @@ mod tests {
 
     /// A cash report that does not say X or Z (an older or foreign producer) gets a NEUTRAL title:
     /// it may well be an open session's, so it is never titled a closing. The figures it sends
-    /// still reach the paper; the difference this printer used to invent does not.
+    /// still reach the paper; an invented difference does not.
     #[test]
     fn a_cash_report_without_x_or_z_gets_a_neutral_title() {
         for receipt_id in [
@@ -4144,10 +4108,10 @@ mod tests {
 /// **Typographic punctuation → what a cp437 printer can actually produce.**
 ///
 /// The encoder replaces whatever cp437 cannot represent with `?`, so the translated bill notice
-/// («Cuenta — no es una factura», with the em dash a translator naturally types) reached the paper
-/// as «Cuenta ? no es una factura». Curly quotes, ellipses and non-breaking spaces do the same, and
-/// they come from people writing in a text editor — not a habit anybody is going to stop having, so
-/// this is the layer that copes. Accented Spanish needs none of this: cp437 has it.
+/// («Cuenta — no es una factura», with the em dash a translator naturally types) would reach the
+/// paper as «Cuenta ? no es una factura». Curly quotes, ellipses and non-breaking spaces do the
+/// same, and they come from people writing in a text editor — not a habit anybody is going to stop
+/// having, so this is the layer that copes. Accented Spanish needs none of this: cp437 has it.
 fn to_printable(txt: &str) -> String {
     let mut out = String::with_capacity(txt.len());
     for c in txt.chars() {
@@ -4167,14 +4131,14 @@ fn to_printable(txt: &str) -> String {
     out
 }
 
-/// Parte un texto en líneas de como mucho `width` columnas, **por palabras**.
+/// Splits a text into lines of at most `width` columns, **by words**.
 ///
-/// La impresora corta por columna sin mirar dónde: sin esto, el aviso de la cuenta salía partido a
-/// mitad de palabra. Una palabra más larga que el ancho se deja tal cual — partirla la haría
-/// ilegible y es preferible que la impresora la doble.
+/// The printer cuts by column without looking where: without this, the bill's notice would come
+/// out split in the middle of a word. A word longer than the width is left as it is — splitting it
+/// would make it unreadable, and it is better for the printer to fold it.
 ///
 /// It measures the text as it reaches the paper ([`to_printable`]): `€` prints as `EUR`, three
-/// columns for one character, and counting it as one let a line overflow by two (hub#2462).
+/// columns for one character, and counting it as one would let a line overflow by two.
 fn wrap_to_width(txt: &str, width: usize) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     let mut current = String::new();
@@ -4196,7 +4160,7 @@ fn wrap_to_width(txt: &str, width: usize) -> Vec<String> {
 }
 
 /// Prints prose the business or the producer writes (a header, a footer, an address, a note)
-/// wrapped by words to the paper, keeping the line breaks it already has (hub#2462).
+/// wrapped by words to the paper, keeping the line breaks it already has.
 ///
 /// Printed as one line, the printer folds it at its own column count without looking where, and
 /// the customer gets words cut in two on a 58 mm roll and on an 80 mm one alike.
@@ -4212,8 +4176,8 @@ fn print_wrapped(b: &mut EscposBuilder, txt: &str) {
     }
 }
 
-/// Formatea la cantidad como lo hace `f"{qty}x …"` en Python: si el JSON trae un entero
-/// (`2`) se imprime `2`, no `2.0`. Si trae decimal (`1.5`) se imprime `1.5`.
+/// Formats the quantity the way Python's `f"{qty}x …"` does: a JSON integer (`2`) prints as `2`,
+/// not `2.0`, and a decimal (`1.5`) prints as `1.5`.
 fn fmt_qty(raw: Option<&serde_json::Value>, fallback: f64) -> String {
     match raw {
         Some(serde_json::Value::Number(n)) => {
@@ -4227,7 +4191,7 @@ fn fmt_qty(raw: Option<&serde_json::Value>, fallback: f64) -> String {
         }
         Some(serde_json::Value::String(s)) => s.clone(),
         _ => {
-            // Sin valor → el default de Python es el entero 1.
+            // No value → the default is the integer 1, as in Python.
             if fallback.fract() == 0.0 {
                 format!("{}", fallback as i64)
             } else {

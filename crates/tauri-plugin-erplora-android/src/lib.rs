@@ -1,18 +1,16 @@
-//! Permisos de RUNTIME de Android para el shell de ERPlora.
+//! The app's native Android side: runtime permissions, Bluetooth and NFC, the system voice, the
+//! Downloads collection, the print service and the notices.
 //!
-//! Declarar un permiso en el manifest no basta, y los dos que necesita el TPV fallan **en
-//! silencio**:
+//! Declaring a permission in the manifest is not enough, and the two the till needs fail
+//! **silently**:
 //!
-//! - sin `ACCESS_LOCAL_NETWORK` (API 37+) el barrido del puerto 9100 son 254 **timeouts**, así que
-//!   el descubrimiento devuelve `[]` y parece que el local no tiene impresoras;
-//! - sin `POST_NOTIFICATIONS` (API 33+) la notificación no aparece, y la comanda entra en cocina
-//!   sin que nadie se entere.
+//! - without `ACCESS_LOCAL_NETWORK` (API 37+) the port 9100 sweep is 254 **timeouts**, so discovery
+//!   returns `[]` and the venue looks as if it had no printers;
+//! - without `POST_NOTIFICATIONS` (API 33+) the notification never shows, and the order reaches the
+//!   kitchen without anybody noticing.
 //!
-//! Verificado en el emulador API 37 antes de existir este plugin: `erplora_discover_printers`
-//! devolvía una lista vacía sin la menor queja hasta conceder el permiso a mano con `adb`.
-//!
-//! En escritorio no hay nada que pedir: los comandos existen igual y responden «concedido», para
-//! que la PWA pueda llamarlos sin ramificar por plataforma.
+//! On desktop there is nothing to ask for: the commands exist all the same and answer «granted», so
+//! the page can call them without branching per platform.
 
 use serde::{Deserialize, Serialize};
 use tauri::{
@@ -21,7 +19,7 @@ use tauri::{
     Manager, Runtime,
 };
 
-/// Estado de un permiso tal y como lo ve la PWA: `{ "android.permission.X": true }`.
+/// A permission's state as the page sees it: `{ "android.permission.X": true }`.
 pub type PermissionStatus = std::collections::HashMap<String, bool>;
 
 /// Local network access (API 37+). Without it the printer sweep is 254 silent timeouts.
@@ -34,18 +32,18 @@ pub const ACCESS_LOCAL_NETWORK: &str = "android.permission.ACCESS_LOCAL_NETWORK"
 /// System notifications (API 33+). Mirror of `PermissionPolicy.POST_NOTIFICATIONS`.
 pub const POST_NOTIFICATIONS: &str = "android.permission.POST_NOTIFICATIONS";
 
-/// Talking to bonded Bluetooth devices (API 31+): the SPP transport of ADR-0204 (hub#388).
+/// Talking to bonded Bluetooth devices (API 31+): the SPP printer transport.
 /// Mirror of `PermissionPolicy.BLUETOOTH_CONNECT`. Denied, the bonded list comes back empty and
 /// the RFCOMM connect throws — the same silent-failure family as the two above.
 pub const BLUETOOTH_CONNECT: &str = "android.permission.BLUETOOTH_CONNECT";
 
-/// The code a bluetooth operation is refused under when `BLUETOOTH_CONNECT` is denied (ADR-0204).
+/// The code a bluetooth operation is refused under when `BLUETOOTH_CONNECT` is denied.
 /// Mirror of `ErploraAndroidPlugin.BLUETOOTH_PERMISSION_DENIED` — same trip as
 /// [`DOWNLOADS_UNREACHABLE`]: Kotlin rejects with a code, Tauri renders `[code] - message`, and
 /// the shell recognises it out of the text.
 pub const BLUETOOTH_PERMISSION_DENIED: &str = "bluetooth_permission_denied";
 
-/// This device has no NFC reader at all (hub#988). Mirror of `NfcBadge.NFC_UNAVAILABLE`, and the
+/// This device has no NFC reader at all. Mirror of `NfcBadge.NFC_UNAVAILABLE`, and the
 /// refusal every non-Android build answers with: there is nothing to switch on, so the shell must
 /// stop polling instead of waiting for a card that can never come.
 pub const NFC_UNAVAILABLE: &str = "nfc_unavailable";
@@ -63,14 +61,14 @@ pub const NFC_RANDOM_UID: &str = "nfc_random_uid";
 /// owns the bounds ([`NfcBadge.clampTimeout`]); this is only the default the shell sends.
 pub const NFC_DEFAULT_TIMEOUT_MS: u64 = 15_000;
 
-/// The code an Android with no public Downloads collection is refused under (hub#499).
+/// The code an Android with no public Downloads collection is refused under.
 ///
-/// Mirror of `DownloadPublisher.DOWNLOADS_UNREACHABLE`, and the same word `apps/tauri` and
-/// `save-download.ts` already read: it is the ONE refusal the user can act on, so it must survive
+/// Mirror of `DownloadPublisher.DOWNLOADS_UNREACHABLE`, and the same word `src-tauri` and the
+/// page's `save-download.ts` already read: it is the ONE refusal the user can act on, so it must survive
 /// the trip from Kotlin to the page intact. A test below checks the two sides never drift apart.
 pub const DOWNLOADS_UNREACHABLE: &str = "downloads_unreachable";
 
-/// The system voice has no engine, or no voice for the language (round 2026-11-04a): the page reads
+/// The system voice has no engine, or no voice for the language: the page reads
 /// with the browser's voice if it has one. Mirror of `SystemVoice.TTS_UNAVAILABLE`.
 pub const TTS_UNAVAILABLE: &str = "tts_unavailable";
 
@@ -85,7 +83,7 @@ pub enum Error {
     /// put a file that the user could then open. The shell turns this into its own sentence.
     #[error("downloads_unreachable")]
     DownloadsUnreachable,
-    /// No NFC reader on this device — a desktop, or a tablet sold without one (hub#988).
+    /// No NFC reader on this device — a desktop, or a tablet sold without one.
     #[error("nfc_unavailable")]
     NfcUnavailable,
     /// There is a reader and it is switched off. The only one of the three the user can fix.
@@ -111,16 +109,15 @@ impl Serialize for Error {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Empty {}
 
-/// The scope of a `request_permissions` call (hub#758): the permissions the OPERATION that asks
-/// is about to use, or `None` when the caller sent none (a web older than the scope), which keeps
-/// the old ask-for-everything behavior so the two separately-shipped halves cannot break each
-/// other.
+/// The scope of a `request_permissions` call: the permissions the OPERATION that asks is about to
+/// use, or `None` when the caller sent none (a web older than the scope), which keeps asking for
+/// everything so the app and the web, shipped separately, cannot break each other.
 #[derive(Debug, Serialize)]
 struct RequestPermissionsArgs {
     permissions: Option<Vec<String>>,
 }
 
-/// What the shell asks the native side to publish, and where it staged the bytes (hub#499).
+/// What the shell asks the native side to publish, and where it staged the bytes.
 ///
 /// A **path** and not the bytes: the shell has already written the file into its own cache, so an
 /// export crosses the JNI boundary once instead of being copied onto a tablet's heap a second time.
@@ -131,7 +128,7 @@ struct PublishArgs {
     name: String,
 }
 
-/// A bluetooth print job on its way to Kotlin (ADR-0204): the MAC of a bonded printer plus the
+/// A bluetooth print job on its way to Kotlin: the MAC of a bonded printer plus the
 /// ALREADY-RENDERED ESC/POS bytes. base64 and not a JSON array of numbers, for the same reason as
 /// `save_download`: a ticket is ~1.3× its size this way and ~4× the other, on a tablet.
 #[derive(Debug, Serialize)]
@@ -153,12 +150,11 @@ impl BluetoothPrintArgs {
 
 /// What `bluetoothPrint` answers with once the bytes are on the printer: nothing. Kotlin's
 /// `invoke.resolve()` with no data reaches Rust as JSON `null`, so it is read and ignored whatever
-/// its shape — reading it as [`Empty`] reported a ticket already on paper as `failed` (hub#2024,
-/// the same trap as `printHtml` in hub#2008).
+/// its shape — reading it as [`Empty`] reported a ticket already on paper as `failed`.
 type BluetoothPrintAnswer = serde::de::IgnoredAny;
 
-/// A bonded printer as Kotlin announces it: `id` is `bluetooth:{MAC}` (the printer_id contract of
-/// ADR-0204), `mac` the raw identity the registry keys on.
+/// A bonded printer as Kotlin announces it: `id` is `bluetooth:{MAC}` (the `printer_id` the
+/// peripherals crate parses), `mac` the raw identity the registry keys on.
 #[derive(Debug, Clone, Deserialize)]
 pub struct BluetoothPrinter {
     pub id: String,
@@ -172,11 +168,11 @@ pub struct BluetoothPrinterList {
     pub printers: Vec<BluetoothPrinter>,
 }
 
-/// The command that opens Android's print screen with an A4 document (hub#2008). Mirror of
+/// The command that opens Android's print screen with an A4 document. Mirror of
 /// `ErploraAndroidPlugin.printHtml`; a test below checks the two never drift apart.
 pub const PRINT_HTML_COMMAND: &str = "printHtml";
 
-/// An A4 document on its way to Kotlin (hub#2008): its html, already checked by the shell. A
+/// An A4 document on its way to Kotlin: its html, already checked by the shell. A
 /// string and not a path: an invoice is tens of KB, and the shell caps it well below what the
 /// bridge carries.
 #[derive(Debug, Serialize)]
@@ -186,10 +182,10 @@ struct PrintHtmlArgs {
 
 /// What `printHtml` answers with. Kotlin's `invoke.resolve()` with no data reaches Rust as JSON
 /// `null`, so the answer is read and ignored whatever its shape — reading it as [`Empty`] turned a
-/// print screen that DID open into a failure (seen on the emulator, hub#2008).
+/// print screen that DID open into a failure.
 type PrintHtmlAnswer = serde::de::IgnoredAny;
 
-/// The question the app asks before a link links another hub (hub#2644), answered by an
+/// The question the app asks before a link links another hub, answered by an
 /// `AlertDialog`. Mirror of `ErploraAndroidPlugin.askToOpenHub`; a test below checks the two never
 /// drift apart. Only Rust calls it: it is in neither `build.rs` nor the default permissions, so no
 /// page can show the question, let alone answer it.
@@ -220,9 +216,8 @@ struct AskToOpenHubAnswer {
     open: bool,
 }
 
-/// HUB_APP-F26 (hub#836; the old hub's hub#2307) — what the page asks of the listening service: `on`,
-/// and the words of the ongoing notification in the app's language (ADR-0055: the catalogue lives
-/// with the page). Off, no words.
+/// What the page asks of the listening service: `on`, and the words of the ongoing notification in
+/// the app's language (the translations live with the page). Off, no words.
 #[derive(Debug, Serialize)]
 struct KeepListeningArgs {
     on: bool,
@@ -234,19 +229,18 @@ struct KeepListeningArgs {
     channel: Option<String>,
 }
 
-/// `keepListening` resolves with no data (`invoke.resolve()` → `null`): read it as anything (hub#2024).
+/// `keepListening` resolves with no data (`invoke.resolve()` → `null`): read it as anything.
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 type KeepListeningAnswer = serde::de::IgnoredAny;
 
-/// `leaveApp` resolves with no data (`invoke.resolve()` → `null`): read it as anything (hub#2024).
+/// `leaveApp` resolves with no data (`invoke.resolve()` → `null`): read it as anything.
 type LeaveAppAnswer = serde::de::IgnoredAny;
 
-/// `openAppSettings` resolves with no data (`invoke.resolve()` → `null`): read it as anything
-/// (hub#2024).
+/// `openAppSettings` resolves with no data (`invoke.resolve()` → `null`): read it as anything.
 #[cfg(target_os = "android")]
 type OpenAppSettingsAnswer = serde::de::IgnoredAny;
 
-/// How long reader mode may stay open on one call (hub#988). Kotlin clamps it: an argument nobody
+/// How long reader mode may stay open on one call. Kotlin clamps it: an argument nobody
 /// typed by hand must never be the reason a till has no reader.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -269,8 +263,7 @@ pub struct NfcBadgeRead {
 ///
 /// Same trip as [`classify_publish_error`]: Tauri renders a plugin rejection as `[code] - message`
 /// and hands Rust a plain string. Getting it wrong is not cosmetic — a tablet with no reader would
-/// be told to switch NFC on in its settings and sent looking for a toggle that is not there
-/// (the hub#338 lesson, again).
+/// be told to switch NFC on in its settings and sent looking for a toggle that is not there.
 fn classify_nfc_error(message: &str) -> Error {
     if message.contains(NFC_UNAVAILABLE) {
         Error::NfcUnavailable
@@ -307,7 +300,7 @@ fn classify_publish_error(message: &str) -> Error {
     }
 }
 
-/// What the assistant asks the system voice to read (round 2026-11-04a): the text and its language
+/// What the assistant asks the system voice to read: the text and its language
 /// as a BCP 47 tag with its region (`es-ES`, `en-US`).
 #[derive(Debug, Serialize)]
 struct TtsSpeakArgs {
@@ -345,10 +338,9 @@ fn classify_tts_error(message: &str) -> Error {
     }
 }
 
-/// The tap on a notice that STARTED the app (hub#2360): the notice's id, the JSON the notification
-/// plugin stored it as, whose `extra.path` is the screen it leads to, and the screen the app wrote
-/// down when it showed it (hub#1039) — the plugin never stores that JSON, so `path` is what brings
-/// the screen back.
+/// The tap on a notice that STARTED the app: the notice's id, the JSON the notification plugin
+/// stored it as, whose `extra.path` is the screen it leads to, and the screen the app wrote down
+/// when it showed it — the plugin never stores that JSON, so `path` is what brings the screen back.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct LaunchNoticeTap {
     pub id: i32,
@@ -358,15 +350,15 @@ pub struct LaunchNoticeTap {
     pub path: Option<String>,
 }
 
-/// hub#1039 — the Kotlin command that writes down the screen a notice leads to, as it goes out.
+/// The Kotlin command that writes down the screen a notice leads to, as it goes out.
 /// Only Rust calls it: it is in neither `build.rs` nor the default permissions.
 pub const REMEMBER_NOTICE_COMMAND: &str = "rememberNotice";
 
-/// hub#1039 — the Kotlin command Rust hands the channel through which Kotlin says a tap waits for
+/// The Kotlin command Rust hands the channel through which Kotlin says a tap waits for
 /// the page. Only Rust calls it: it is in neither `build.rs` nor the default permissions.
 pub const WATCH_NOTICE_TAPS_COMMAND: &str = "watchNoticeTaps";
 
-/// The notice's number and the screen it leads to, under the keys Kotlin reads (hub#1039).
+/// The notice's number and the screen it leads to, under the keys Kotlin reads.
 #[derive(Debug, Serialize)]
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 struct RememberNoticeArgs<'a> {
@@ -374,11 +366,11 @@ struct RememberNoticeArgs<'a> {
     path: Option<&'a str>,
 }
 
-/// `rememberNotice` resolves with no data (`invoke.resolve()` → `null`): read it as anything (hub#2024).
+/// `rememberNotice` resolves with no data (`invoke.resolve()` → `null`): read it as anything.
 #[cfg(target_os = "android")]
 type RememberNoticeAnswer = serde::de::IgnoredAny;
 
-/// `watchNoticeTaps` resolves with no data (`invoke.resolve()` → `null`): read it as anything (hub#2024).
+/// `watchNoticeTaps` resolves with no data (`invoke.resolve()` → `null`): read it as anything.
 #[cfg(target_os = "android")]
 type WatchNoticeTapsAnswer = serde::de::IgnoredAny;
 
@@ -400,7 +392,7 @@ struct NoticeTapAnswer {
 #[cfg(target_os = "android")]
 const PLUGIN_IDENTIFIER: &str = "com.erplora.android";
 
-/// Estado del plugin: en Android guarda el handle del módulo Kotlin; en escritorio, nada.
+/// The plugin's state: the handle of the Kotlin module on Android, nothing on desktop.
 #[cfg(target_os = "android")]
 pub struct ErploraAndroid<R: Runtime>(tauri::plugin::PluginHandle<R>);
 
@@ -408,7 +400,7 @@ pub struct ErploraAndroid<R: Runtime>(tauri::plugin::PluginHandle<R>);
 pub struct ErploraAndroid<R: Runtime>(std::marker::PhantomData<fn() -> R>);
 
 impl<R: Runtime> ErploraAndroid<R> {
-    /// hub#1906 — sends the app to the background, as the system Back does on a root screen.
+    /// Sends the app to the background, as the system Back does on a root screen.
     pub fn leave_app(&self) -> Result<(), Error> {
         #[cfg(target_os = "android")]
         {
@@ -422,7 +414,7 @@ impl<R: Runtime> ErploraAndroid<R> {
         Ok(())
     }
 
-    /// hub#1886 — opens this app's page in the device settings, the only place left to turn a
+    /// Opens this app's page in the device settings, the only place left to turn a
     /// permission on once Android stops showing its dialog. On desktop there is no such page.
     pub fn open_app_settings(&self) -> Result<(), Error> {
         #[cfg(target_os = "android")]
@@ -437,7 +429,7 @@ impl<R: Runtime> ErploraAndroid<R> {
         Ok(())
     }
 
-    /// HUB_APP-F26 (hub#836) — keeps the app running with the screen off (a foreground service and
+    /// Keeps the app running with the screen off (a foreground service and
     /// its ongoing notification) or lets Android reclaim it again. Every notice is born in the page,
     /// so this is what makes them arrive while nobody looks at the device. On desktop the app is not
     /// reclaimed.
@@ -457,7 +449,7 @@ impl<R: Runtime> ErploraAndroid<R> {
         }
     }
 
-    /// Round 2026-11-04a — whether the system voice (Android's `TextToSpeech`) can read the language.
+    /// Whether the system voice (Android's `TextToSpeech`) can read the language.
     /// The first call makes the engine and waits for it to start. On desktop, never: Windows'
     /// WebView2 reads with the page's own `speechSynthesis`, which is where `false` sends the page.
     ///
@@ -478,7 +470,7 @@ impl<R: Runtime> ErploraAndroid<R> {
         }
     }
 
-    /// Round 2026-11-04a — reads the text aloud in the system voice, ending what it was reading.
+    /// Reads the text aloud in the system voice, ending what it was reading.
     /// Answers once the whole text was read or stopped; refuses with [`Error::TtsUnavailable`] (no
     /// engine or no voice for the language) or [`Error::TtsFailed`]. On desktop there is no system
     /// voice to read with here: the page reads with its own.
@@ -500,7 +492,7 @@ impl<R: Runtime> ErploraAndroid<R> {
         }
     }
 
-    /// Round 2026-11-04a — stops the system voice; what was being read answers as ended.
+    /// Stops the system voice; what was being read answers as ended.
     fn tts_stop(&self) -> Result<(), Error> {
         #[cfg(target_os = "android")]
         {
@@ -514,7 +506,7 @@ impl<R: Runtime> ErploraAndroid<R> {
         Ok(())
     }
 
-    /// Permisos concedidos ahora mismo. En escritorio, siempre vacío: no hay nada que conceder.
+    /// The permissions granted right now. Always empty on desktop: there is nothing to grant.
     pub fn check_permissions(&self) -> Result<PermissionStatus, Error> {
         #[cfg(target_os = "android")]
         {
@@ -527,8 +519,8 @@ impl<R: Runtime> ErploraAndroid<R> {
         Ok(PermissionStatus::new())
     }
 
-    /// Asks for what is missing, scoped to what the calling operation is about to use (hub#758).
-    /// `None` = no scope sent (an older web): the whole batch, as before. Idempotent: if
+    /// Asks for what is missing, scoped to what the calling operation is about to use.
+    /// `None` = no scope sent (an older web): the whole batch. Idempotent: if
     /// everything in scope is granted, no dialog.
     pub fn request_permissions(
         &self,
@@ -548,7 +540,7 @@ impl<R: Runtime> ErploraAndroid<R> {
         }
     }
 
-    /// The bonded devices that look like printers (ADR-0204, hub#388) — Android's bonded list,
+    /// The bonded devices that look like printers — Android's bonded list,
     /// filtered by `BluetoothSpp.looksLikePrinter`. On desktop, honestly empty: the platform is
     /// network-only by decision, and an error here would poison the network half of discovery.
     pub fn bluetooth_bonded_printers(&self) -> Result<Vec<BluetoothPrinter>, Error> {
@@ -564,8 +556,8 @@ impl<R: Runtime> ErploraAndroid<R> {
         Ok(Vec::new())
     }
 
-    /// Sends already-rendered ESC/POS bytes to the bonded printer at `mac` over RFCOMM
-    /// (ADR-0204). The rendering stays in Rust; Kotlin is transport only.
+    /// Sends already-rendered ESC/POS bytes to the bonded printer at `mac` over RFCOMM.
+    /// The rendering stays in Rust; Kotlin is transport only.
     ///
     /// ⚠️ **Blocks** — dispatched onto Android's main looper and waits for the socket work, so
     /// the calling command must be `#[tauri::command(async)]`, exactly like `save_download`.
@@ -583,18 +575,18 @@ impl<R: Runtime> ErploraAndroid<R> {
         }
         #[cfg(not(target_os = "android"))]
         {
-            // An ERROR, never a silent no-op: a resolved print that put no paper out is the
-            // hub#475 failure all over again. Unreachable through the shell, which routes
+            // An ERROR, never a silent no-op: a resolved print that put no paper out would tell
+            // the till the ticket was printed. Unreachable through the shell, which routes
             // `bluetooth:` ids here only on Android — said out loud anyway.
             let _ = (mac, payload);
             Err(Error::PluginInvoke(
-                "bluetooth printing is Android-only (ADR-0204)".into(),
+                "bluetooth printing is Android-only".into(),
             ))
         }
     }
 
     /// Opens NFC reader mode for at most `timeout_ms` and answers with the badge of the card that
-    /// was tapped (hub#988) — `None` when the window closed with nothing on the reader.
+    /// was tapped — `None` when the window closed with nothing on the reader.
     ///
     /// The badge is the card's UID as uppercase hex (`NfcBadge.toBadge`): the SAME kind of string a
     /// USB keyboard-wedge reader types, so the shell can hand it to the badge subscribers the wedge
@@ -625,7 +617,7 @@ impl<R: Runtime> ErploraAndroid<R> {
         }
     }
 
-    /// hub#2360 — the tap on a notice that started the app, handed over once.
+    /// The tap on a notice that started the app, handed over once.
     ///
     /// The notification plugin reports that tap while it is still loading, before the page has a
     /// listener, and the event is lost; Kotlin keeps it instead. Off Android there is no such launch.
@@ -642,7 +634,7 @@ impl<R: Runtime> ErploraAndroid<R> {
         Ok(None)
     }
 
-    /// hub#1039 — writes down the screen notice `id` leads to, as it goes out. The notification
+    /// Writes down the screen notice `id` leads to, as it goes out. The notification
     /// plugin brings a tap back with the notice's number only (it never stores the notice on the
     /// tap's intent), so this is what lets the tap open its screen, also when it starts the app.
     /// Off Android a tap carries its screen itself: there is nothing to write down.
@@ -662,7 +654,7 @@ impl<R: Runtime> ErploraAndroid<R> {
         }
     }
 
-    /// hub#1039 — `on_tap` runs every time a tap on a notice waits for a page that already
+    /// `on_tap` runs every time a tap on a notice waits for a page that already
     /// listens: the notification plugin's own report of it says nothing the page can open. The
     /// shell tells the page, which claims the tap with `take_notice_tap`. Off Android there is no
     /// such tap to watch.
@@ -692,12 +684,12 @@ impl<R: Runtime> ErploraAndroid<R> {
     }
 
     /// Publishes the file at `source_path` into Android's **public** Downloads collection under
-    /// `name`, and answers with the place to show the user (hub#499).
+    /// `name`, and answers with the place to show the user.
     ///
     /// This is how a business gets its own data off the tablet it keeps it on. Everywhere else the
     /// shell just writes to the Downloads folder; on Android there is no such folder to write to —
     /// what `download_dir()` resolves is app-scoped storage that Android 11 closed to every file
-    /// manager, so the file would exist and be unreachable (hub#480, ADR-0259). `MediaStore` is the
+    /// manager, so the file would exist and be unreachable. `MediaStore` is the
     /// way in, and it needs Kotlin.
     ///
     /// ⚠️ **Blocks.** The call is dispatched onto Android's main looper and waits for the answer,
@@ -735,7 +727,7 @@ impl<R: Runtime> ErploraAndroid<R> {
 
 impl<R: Runtime> ErploraAndroid<R> {
     /// Opens Android's print screen with `html`, preset to A4: every printer the device knows and
-    /// «Save as PDF» (hub#2008). Resolves once the screen has been asked for; what the user does
+    /// «Save as PDF». Resolves once the screen has been asked for; what the user does
     /// in it is the system's.
     ///
     /// ⚠️ **Blocks**, like [`Self::save_to_downloads`]: call it from an `async` command, never
@@ -764,7 +756,7 @@ impl<R: Runtime> ErploraAndroid<R> {
     }
 
     /// Asks the person «Open <hub> on this device?» in an `AlertDialog` before a link links another
-    /// hub (hub#2644); `true` only for «Open». Both languages travel and the device's is shown.
+    /// hub; `true` only for «Open». Both languages travel and the device's is shown.
     ///
     /// ⚠️ **Blocks** until the person answers: call it from a thread of its own.
     pub fn ask_to_open_hub(&self, en: &Wording, es: &Wording) -> Result<bool, Error> {
@@ -798,7 +790,7 @@ impl<R: Runtime, T: Manager<R>> ErploraAndroidExt<R> for T {
     }
 }
 
-/// hub#1906 — leaves the app the way the system Back does on a root screen (the task goes to
+/// Leaves the app the way the system Back does on a root screen (the task goes to
 /// the background; nothing is killed). The shell calls it when it holds the Back button and there
 /// is nothing left to close nor to go back to. On desktop there is no such button: a no-op.
 #[tauri::command]
@@ -806,15 +798,14 @@ async fn leave_app<R: Runtime>(app: tauri::AppHandle<R>) -> Result<(), Error> {
     app.erplora_android().leave_app()
 }
 
-/// hub#1886 — takes the owner to this app's page in the device settings. The shell only offers it
+/// Takes the owner to this app's page in the device settings. The shell only offers it
 /// on a device that really has a permission refused, so on desktop it is never called: a no-op.
 #[tauri::command]
 async fn open_app_settings<R: Runtime>(app: tauri::AppHandle<R>) -> Result<(), Error> {
     app.erplora_android().open_app_settings()
 }
 
-/// HUB_APP-F26 (hub#836) — the page asks the app to keep listening for notices with the screen off,
-/// or to stop.
+/// The page asks the app to keep listening for notices with the screen off, or to stop.
 #[tauri::command]
 async fn keep_listening<R: Runtime>(
     app: tauri::AppHandle<R>,
@@ -826,7 +817,7 @@ async fn keep_listening<R: Runtime>(
     app.erplora_android().keep_listening(KeepListeningArgs { on, title, body, channel })
 }
 
-/// Round 2026-11-04a — whether the system voice reads `language` (`es-ES`): `{ available }`. The
+/// Whether the system voice reads `language` (`es-ES`): `{ available }`. The
 /// first call waits for the engine to start, so it waits on a blocking thread.
 #[tauri::command]
 async fn tts_available<R: Runtime>(app: tauri::AppHandle<R>, language: String) -> Result<TtsAvailability, Error> {
@@ -836,7 +827,7 @@ async fn tts_available<R: Runtime>(app: tauri::AppHandle<R>, language: String) -
         .map(|available| TtsAvailability { available })
 }
 
-/// Round 2026-11-04a — reads `text` aloud in the system voice and answers when it was read or
+/// Reads `text` aloud in the system voice and answers when it was read or
 /// stopped. The wait is the whole reading, so it happens on a blocking thread, never on an async
 /// worker the rest of the app's commands need.
 #[tauri::command]
@@ -846,7 +837,7 @@ async fn tts_speak<R: Runtime>(app: tauri::AppHandle<R>, text: String, language:
         .map_err(|e| Error::PluginInvoke(e.to_string()))?
 }
 
-/// Round 2026-11-04a — stops the system voice; the pending `tts_speak` answers as ended.
+/// Stops the system voice; the pending `tts_speak` answers as ended.
 #[tauri::command]
 async fn tts_stop<R: Runtime>(app: tauri::AppHandle<R>) -> Result<(), Error> {
     app.erplora_android().tts_stop()
@@ -870,7 +861,7 @@ fn handler<R: Runtime, F: Fn(Invoke<R>) -> bool>(commands: F) -> F {
     commands
 }
 
-/// The plugin, with `gate` in front of every one of its commands (hub#2642). The capability grants
+/// The plugin, with `gate` in front of every one of its commands. The capability grants
 /// `erplora-android:default` to every page under erplora.com; the app hands in the gate that lets
 /// only the LINKED hub through (`hub_link::linked_hub_only`), and a page it refuses gets the error
 /// code the gate returns, with no command run.
@@ -917,7 +908,7 @@ where
 mod tests {
     use super::*;
 
-    /// hub#1906 — once the shell takes the Android Back button (Tauri's `onBackButtonPress`),
+    /// Once the shell takes the Android Back button (Tauri's `onBackButtonPress`),
     /// Tauri no longer leaves the app on its own when the WebView has no history left: the shell
     /// has to ask for it, and Tauri's own `exit` has no ACL permission to grant. `leave_app` is that
     /// door. Four places have to agree or the press dies in silence: the build (which generates the
@@ -929,7 +920,7 @@ mod tests {
     const DEFAULT_PERMISSIONS: &str = include_str!("../permissions/default.toml");
 
     #[test]
-    fn leave_app_is_declared_wired_granted_and_implemented_hub1906() {
+    fn leave_app_is_declared_wired_granted_and_implemented() {
         assert!(BUILD_RS.contains("\"leave_app\""), "build.rs does not declare leave_app: no permission is generated");
         // Only the code above the tests: this very assertion spells the handler too.
         let production = LIB_RS.split("#[cfg(test)]").next().unwrap_or_default();
@@ -953,7 +944,7 @@ mod tests {
         assert!(body.contains("invoke.resolve()"), "leaveApp never answers: the web would wait forever");
     }
 
-    /// hub#1886 — once Android stops showing a permission dialog, the only way back is the app's
+    /// Once Android stops showing a permission dialog, the only way back is the app's
     /// page in the device settings, and the shell offers a button that takes the owner there.
     /// Four places have to agree or the tap dies in silence on a real device only: the build
     /// (which generates the permission), the invoke handler, the default permission set the hub
@@ -965,7 +956,7 @@ mod tests {
     const DEFAULT_PERMISSIONS_TOML: &str = include_str!("../permissions/default.toml");
 
     #[test]
-    fn open_app_settings_is_declared_wired_granted_and_implemented_hub1886() {
+    fn open_app_settings_is_declared_wired_granted_and_implemented() {
         assert!(
             BUILD_RS_SOURCE.contains("\"open_app_settings\""),
             "build.rs does not declare open_app_settings: no permission is generated"
@@ -1009,7 +1000,7 @@ mod tests {
         );
     }
 
-    // ── HUB_APP-F26 (hub#836; the old hub's hub#2307): listening with the screen off ──────────
+    // ── Listening with the screen off ─────────────────────────────────────────────────────────
     //
     // The notices come out of the page (the bell's poll, the event socket), so they only arrive while
     // Android keeps the app running. A foreground service is what keeps it: six places have to agree
@@ -1029,7 +1020,7 @@ mod tests {
     const PLUGIN_MANIFEST: &str = include_str!("../android/src/main/AndroidManifest.xml");
 
     #[test]
-    fn keep_listening_is_declared_wired_granted_and_implemented_hub2307() {
+    fn keep_listening_is_declared_wired_granted_and_implemented() {
         assert!(BUILD_RS.contains("\"keep_listening\""), "build.rs does not declare keep_listening");
         let production = LIB_RS.split("#[cfg(test)]").next().unwrap_or_default();
         let handler = production
@@ -1089,7 +1080,7 @@ mod tests {
     }
 
     #[test]
-    fn the_app_is_not_kept_listening_once_its_page_is_gone_hub2307() {
+    fn the_app_is_not_kept_listening_once_its_page_is_gone() {
         // The service keeps the PROCESS; the page is what listens. With the activity destroyed or the
         // app swiped away, a notification saying «listening» would be a promise nothing keeps.
         let on_destroy = PLUGIN_KT
@@ -1112,7 +1103,7 @@ mod tests {
     }
 
     #[test]
-    fn the_page_is_kept_running_exactly_while_the_app_listens_hub2307() {
+    fn the_page_is_kept_running_exactly_while_the_app_listens() {
         // The service keeps the process, `PageKeeper` keeps the page: without it Chromium freezes
         // the hidden page at 60 s and no notice is born, with the service and its notification in
         // place (measured on the device). What it does has its own test in Kotlin
@@ -1157,7 +1148,7 @@ mod tests {
     }
 
     #[test]
-    fn the_listening_service_is_declared_where_no_generator_can_drop_it_hub2307() {
+    fn the_listening_service_is_declared_where_no_generator_can_drop_it() {
         let manifest = without_comments(PLUGIN_MANIFEST);
         let declared = declared_permissions(PLUGIN_MANIFEST);
         for permission in [
@@ -1186,7 +1177,7 @@ mod tests {
         );
     }
 
-    /// hub#247, hub#2552 — wry hands the microphone and the position to WHATEVER page asks. The
+    /// wry hands the microphone and the position to WHATEVER page asks. The
     /// origin check is `WebPermissionGate.kt` (and its JUnit tests), and it only bites if the plugin
     /// puts it in front of wry's client: from `load` (which Tauri calls from wry's
     /// `on_webview_created`, after `setWebChromeClient`), through `post`, so it finds the client
@@ -1207,7 +1198,7 @@ mod tests {
         assert!(
             load.contains("webView.post { WebPermissionGate.install(webView) }"),
             "the plugin never puts the origin check in front of wry's WebChromeClient: once granted, \
-             any page the window loads gets the microphone and the position (hub#247, hub#2552)"
+             any page the window loads gets the microphone and the position"
         );
         // One domain on both halves: a hub the Rust side trusts must keep its microphone.
         assert!(SHELL_LIB_RS.contains("const HUB_DOMAIN_SUFFIX: &str = \".erplora.com\";"));
@@ -1229,8 +1220,8 @@ mod tests {
     }
 
     #[test]
-    fn el_estado_serializa_como_un_mapa_permiso_a_booleano() {
-        // Es el contrato que consume la PWA: `{ "android.permission.X": true }`.
+    fn the_status_serializes_as_a_map_of_permission_to_bool() {
+        // The contract the page reads: `{ "android.permission.X": true }`.
         let mut estado = PermissionStatus::new();
         estado.insert("android.permission.POST_NOTIFICATIONS".into(), true);
         let json = serde_json::to_string(&estado).unwrap();
@@ -1240,7 +1231,7 @@ mod tests {
     /// The Kotlin policy is the only place that can actually ASK for these permissions, and the
     /// map it returns is keyed by the raw string. If the two sides ever spelled one differently,
     /// Rust would read `None` for a permission Android had denied and the till would go back to
-    /// reporting zero printers with a straight face (hub#338).
+    /// reporting zero printers with a straight face.
     const PERMISSION_POLICY_KT: &str =
         include_str!("../android/src/main/java/com/erplora/android/PermissionPolicy.kt");
 
@@ -1313,13 +1304,13 @@ mod tests {
 
     /// Asking for a permission the merged manifest never declared is not a dialog the user can
     /// say yes to: Android answers DENIED at once, forever, and shows nothing. The till would
-    /// then tell the user to grant local network access in the system settings (hub#338) and send
+    /// then tell the user to grant local network access in the system settings and send
     /// them looking for a toggle that does not exist.
     ///
     /// The plugin declares them in its OWN Android library manifest, which the manifest merger
     /// folds into the app at build time. That is what makes the declaration survive
-    /// `cargo tauri android init` — the generator rewrites `apps/tauri/src-tauri/gen/android`, it
-    /// does not reach into `crates/` (hub#337).
+    /// `cargo tauri android init` — the generator rewrites `src-tauri/gen/android`, it does not
+    /// reach into `crates/`.
     #[test]
     fn the_plugin_declares_every_permission_it_can_ask_for() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/android/src/main/AndroidManifest.xml");
@@ -1346,8 +1337,8 @@ mod tests {
         }
     }
 
-    /// The scope of a permission request has to reach Kotlin under the key Kotlin reads
-    /// (hub#758). If either side renamed it, the argument would silently vanish and the plugin
+    /// The scope of a permission request has to reach Kotlin under the key Kotlin reads.
+    /// If either side renamed it, the argument would silently vanish and the plugin
     /// would fall back to requesting its whole batch — the exact out-of-context notifications
     /// dialog this contract exists to end, with no error anywhere.
     #[test]
@@ -1363,7 +1354,7 @@ mod tests {
         assert!(
             PLUGIN_KT.contains("optJSONArray(\"permissions\")"),
             "ErploraAndroidPlugin.kt no longer reads the \"permissions\" scope: every request \
-             would go back to asking for the whole batch (hub#758)"
+             would go back to asking for the whole batch"
         );
     }
 
@@ -1377,7 +1368,7 @@ mod tests {
         assert!(json["permissions"].is_null());
     }
 
-    // ── Bluetooth Classic SPP (ADR-0204, hub#388) ────────────────────────────────────────────
+    // ── Bluetooth Classic SPP ────────────────────────────────────────────────────────────────
     //
     // The transport lives in Kotlin (`BluetoothSpp.kt`); what Rust owns is the CONTRACT across
     // the JNI boundary — command names, argument keys, the shape of the answer, and the refusal
@@ -1430,9 +1421,9 @@ mod tests {
 
     #[test]
     fn desktop_stays_network_only_by_construction() {
-        // ADR-0204: only Android produces or accepts `bluetooth:{mac}`. On desktop the bonded
-        // list is honestly empty and a bluetooth print is an ERROR, never a silent no-op — a
-        // resolved print that put no paper out is the hub#475 failure all over again.
+        // Only Android produces or accepts `bluetooth:{mac}`. On desktop the bonded list is
+        // honestly empty and a bluetooth print is an ERROR, never a silent no-op: a resolved print
+        // that put no paper out would tell the till the ticket was printed.
         let desktop = ErploraAndroid::<tauri::Wry>(std::marker::PhantomData);
         assert_eq!(
             desktop
@@ -1444,7 +1435,7 @@ mod tests {
         assert!(desktop.bluetooth_print("AA:BB:CC:DD:EE:FF", &[0x1b]).is_err());
     }
 
-    // ── Reading a badge off the device's own NFC reader (hub#988) ────────────────────────────
+    // ── Reading a badge off the device's own NFC reader ──────────────────────────────────────
     //
     // Same shape as the bluetooth block above: the radio lives in Kotlin (`NfcBadge.kt`), and what
     // Rust owns is the CONTRACT across the JNI boundary — the command name, the argument key, the
@@ -1503,7 +1494,7 @@ mod tests {
     fn each_nfc_refusal_is_classified_as_itself() {
         // Three refusals because there are three different things to do about it: buy a reader,
         // switch NFC on, use another card. Collapsing them into one would send the user to the
-        // settings screen for a tablet that has no reader to enable (the hub#338 lesson).
+        // settings screen for a tablet that has no reader to enable.
         assert!(matches!(
             classify_nfc_error(&format!("[{NFC_UNAVAILABLE}] - no reader on this device")),
             Error::NfcUnavailable
@@ -1569,13 +1560,13 @@ mod tests {
     }
 
     #[test]
-    fn el_error_llega_al_frontend_como_texto_plano() {
-        // Mismo patrón que el resto del shell: la promesa se rechaza con un mensaje legible.
+    fn the_error_reaches_the_frontend_as_plain_text() {
+        // The same as the rest of the shell: the promise is rejected with a readable message.
         let e = Error::PluginInvoke("sin actividad".into());
         assert_eq!(serde_json::to_string(&e).unwrap(), "\"sin actividad\"");
     }
 
-    // ── Publishing a file into the public Downloads collection (hub#499) ─────────────────────────
+    // ── Publishing a file into the public Downloads collection ───────────────────────────────────
 
     const DOWNLOAD_PUBLISHER_KT: &str =
         include_str!("../android/src/main/java/com/erplora/android/DownloadPublisher.kt");
@@ -1614,7 +1605,7 @@ mod tests {
 
     #[test]
     fn the_refusal_reaches_the_page_under_the_name_the_shell_reads() {
-        // `apps/tauri` maps this variant onto `ShellError::DownloadsUnreachable`, which serializes
+        // `src-tauri` maps this variant onto `ShellError::DownloadsUnreachable`, which serializes
         // to the same word the web checks for (`save-download.ts`). One spelling, end to end.
         assert_eq!(
             serde_json::to_string(&Error::DownloadsUnreachable).unwrap(),
@@ -1635,10 +1626,9 @@ mod tests {
 
     /// Kotlin source with its comments taken out.
     ///
-    /// The guard below went red on its own prose the first time it ran: `DownloadPublisher` EXPLAINS
-    /// why it does not use `WRITE_EXTERNAL_STORAGE`, and a plain `contains` cannot tell an
-    /// explanation from a call. Same lesson as [`without_comments`] one screen up — a guard has to
-    /// read the code, or it reads the documentation about the code.
+    /// `DownloadPublisher` EXPLAINS why it does not use `WRITE_EXTERNAL_STORAGE`, and a plain
+    /// `contains` cannot tell an explanation from a call. Same reason as [`without_comments`] one
+    /// screen up: a guard has to read the code, not the documentation about the code.
     fn without_kotlin_comments(source: &str) -> String {
         let mut out = String::new();
         let mut rest = source;
@@ -1685,7 +1675,7 @@ mod tests {
         );
     }
 
-    // ── The A4 document through Android's own print service (hub#2008) ───────────────────────
+    // ── The A4 document through Android's own print service ──────────────────────────────────
     //
     // The WebView that prints lives in Kotlin (`HtmlPrinter.kt`); Rust owns the command name and
     // the argument key, both bare literals on the two sides.
@@ -1693,7 +1683,7 @@ mod tests {
     const HTML_PRINTER_KT: &str =
         include_str!("../android/src/main/java/com/erplora/android/HtmlPrinter.kt");
 
-    // ── hub#2644: the question before a link links another hub ─────────────────────────────
+    // ── The question before a link links another hub ───────────────────────────────────────
 
     fn question_in(language: &str) -> Wording {
         Wording {
@@ -1723,7 +1713,7 @@ mod tests {
             assert!(
                 code.contains(&literal),
                 "{literal} is not in ErploraAndroidPlugin.kt — a link to another hub would never be asked \
-                 about on a real device (hub#2644)"
+                 about on a real device"
             );
         }
         let languages = without_kotlin_comments(HUB_QUESTION_KT);
@@ -1746,7 +1736,7 @@ mod tests {
     #[test]
     fn no_page_can_show_or_answer_the_hub_question() {
         // Only Rust asks: a command in `build.rs` gets an `allow-*` permission a capability could
-        // grant, and the page is exactly who must not be able to answer (hub#2644).
+        // grant, and the page is exactly who must not be able to answer.
         let build = include_str!("../build.rs");
         let permissions = include_str!("../permissions/default.toml");
         for name in ["ask_to_open_hub", "ask-to-open-hub", ASK_TO_OPEN_HUB_COMMAND] {
@@ -1791,7 +1781,7 @@ mod tests {
 
     #[test]
     fn the_printed_document_runs_no_code() {
-        // The same frontier as the desktop print window's CSP (hub#2006): the html comes from a
+        // The same frontier as the desktop print window's CSP: the html comes from a
         // remote page, so the WebView that renders it runs no script and exposes no bridge.
         let code = without_kotlin_comments(HTML_PRINTER_KT);
         assert!(code.contains("javaScriptEnabled = false"), "{code}");
@@ -1802,12 +1792,12 @@ mod tests {
     #[test]
     fn desktop_refuses_to_print_through_the_android_plugin() {
         // Unreachable by construction (the shell only routes here on Android), and a refusal
-        // anyway: a resolved call would read as a dialog that opened (hub#475).
+        // anyway: a resolved call would read as a dialog that opened.
         let desktop = ErploraAndroid::<tauri::Wry>(std::marker::PhantomData);
         assert!(desktop.print_html("<p>F-1</p>").is_err());
     }
 
-    // ── Kotlin answers with no data (hub#2024) ──────────────────────────────────────────────
+    // ── Kotlin answers with no data ─────────────────────────────────────────────────────────
     //
     // `invoke.resolve()` with no data reaches Rust as JSON `null`. Read as a struct, that `null`
     // is a deserialize error, so a call that DID its job came back as a failure: the ticket was
@@ -1904,12 +1894,12 @@ mod tests {
             assert!(
                 reads_anything,
                 "{command} answers `null` from Kotlin but Rust reads it as {ty}: a call that did \
-                 its job would come back as a failure (hub#2024)"
+                 its job would come back as a failure"
             );
         }
     }
 
-    // ── hub#2360: the tap that started the app ───────────────────────────────────────────────────
+    // ── The tap that started the app ─────────────────────────────────────────────────────────────
     //
     // The notification plugin reports it while it is still loading, before the page listens, and the
     // event is lost. Kotlin keeps it and the shell asks for it once — three places that have to agree
@@ -1931,7 +1921,7 @@ mod tests {
     }
 
     #[test]
-    fn kotlin_keeps_the_launch_tap_and_hands_it_over_once_hub2360() {
+    fn kotlin_keeps_the_launch_tap_and_hands_it_over_once() {
         const NOTICE_TAPS_KT: &str = include_str!("../android/src/main/java/com/erplora/android/NoticeTaps.kt");
         let production = LIB_RS.split("#[cfg(test)]").next().unwrap_or_default();
         assert!(
@@ -1950,7 +1940,7 @@ mod tests {
             "load does not hand the box the intent that started the app"
         );
         // The memory has to outlive the process: back through the icon after the system killed it,
-        // the task's intent is the old tap again (rv-2411).
+        // the task's intent is the old tap again.
         assert!(
             NOTICE_TAPS_KT.contains("NoticeTapBox(PreferencesMemory(context.applicationContext))"),
             "the box no longer remembers the kept tap outside the process"
@@ -1961,7 +1951,7 @@ mod tests {
         );
     }
 
-    // ── hub#1039: a tap comes back without its notice ───────────────────────────────────────────
+    // ── A tap comes back without its notice ─────────────────────────────────────────────────────
     //
     // The notification plugin never stores the notice on the intent of its tap (`sourceJson` is
     // never set, tauri-apps/plugins-workspace#3550): its `actionPerformed` says neither the number
@@ -1970,7 +1960,7 @@ mod tests {
     // the page a tap waits while it listens: names and keys the compiler does not see.
 
     #[test]
-    fn the_screen_of_a_notice_crosses_to_kotlin_under_the_keys_kotlin_reads_hub1039() {
+    fn the_screen_of_a_notice_crosses_to_kotlin_under_the_keys_kotlin_reads() {
         assert_eq!(
             serde_json::to_value(RememberNoticeArgs { id: 8, path: Some("/kitchen/display") }).expect("serializable"),
             serde_json::json!({ "id": 8, "path": "/kitchen/display" })
@@ -1988,7 +1978,7 @@ mod tests {
         for literal in ["optInt(\"id\"", "getString(\"path\"", "NoticeTaps.remember(activity, id, path)"] {
             assert!(
                 body.contains(literal),
-                "{literal} is not in Kotlin rememberNotice — a tap on a notice would come back without its screen (hub#1039)"
+                "{literal} is not in Kotlin rememberNotice — a tap on a notice would come back without its screen"
             );
         }
         assert!(
@@ -1998,7 +1988,7 @@ mod tests {
     }
 
     #[test]
-    fn the_kept_tap_brings_back_the_screen_the_app_wrote_down_hub1039() {
+    fn the_kept_tap_brings_back_the_screen_the_app_wrote_down() {
         let kept: NoticeTapAnswer =
             serde_json::from_str(r#"{"tap":{"id":8,"notification":null,"path":"/kitchen/display"}}"#)
                 .expect("a kept tap reads");
@@ -2015,7 +2005,7 @@ mod tests {
     }
 
     #[test]
-    fn kotlin_tells_rust_when_a_tap_waits_for_the_page_hub1039() {
+    fn kotlin_tells_rust_when_a_tap_waits_for_the_page() {
         const NOTICE_TAPS_KT: &str = include_str!("../android/src/main/java/com/erplora/android/NoticeTaps.kt");
         let code = without_kotlin_comments(ERPLORA_ANDROID_PLUGIN_KT);
         let command = format!("fun {WATCH_NOTICE_TAPS_COMMAND}(invoke: Invoke)");
@@ -2045,7 +2035,7 @@ mod tests {
     }
 
     #[test]
-    fn no_page_can_write_down_a_notice_nor_watch_the_taps_hub1039() {
+    fn no_page_can_write_down_a_notice_nor_watch_the_taps() {
         // Only Rust calls them: a command in `build.rs` gets an `allow-*` permission a capability
         // could grant, and a page that wrote down screens could send a tap anywhere.
         let build = include_str!("../build.rs");
@@ -2063,7 +2053,7 @@ mod tests {
         }
     }
 
-    // ── The system voice (round 2026-11-04a) ───────────────────────────────────────────────────
+    // ── The system voice ───────────────────────────────────────────────────────────────────────
 
     /// The Android WebView has no `speechSynthesis`, so the assistant's «Read aloud» reads through
     /// these three commands in the app. Five places have to agree or the assistant stays mute on a

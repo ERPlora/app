@@ -4,7 +4,7 @@
 #
 # The installable app (this repo, Tauri v2 thin client). The bundle does NOT carry the hub UI:
 # `frontendDist` packs the committed fallback page `shell-dist/` and the real UI is served by the
-# hub (ADR-0154/0159).
+# hub.
 #
 # WHEN IT RELEASES. Every push to `main` runs this workflow, and the first job (`version`,
 # scripts/release-version.sh) decides. The version lives in ONE place, `version` in
@@ -27,7 +27,7 @@
 # pinned by commit SHA (the version in a comment): this job holds the keystore, the store
 # credentials and an AWS role.
 #
-# S3 LAYOUT (AWS, by OIDC; the SaaS reads `downloads/app/latest/latest.json`, saas-next
+# S3 LAYOUT (AWS, by OIDC; the SaaS reads `downloads/app/latest/latest.json` in
 # `public/appdist.py`):
 #   s3://$DOWNLOADS_BUCKET/downloads/app/
 #   ├── latest/
@@ -40,11 +40,11 @@
 #   │   └── latest.json             {"version","published_at"} — the ONLY thing that says what is here
 #   └── v{version}/...
 #
-# `latest.json` is the source of truth of «the last published version» (hub#400): the SaaS serves
+# `latest.json` is the source of truth of «the last published version»: the SaaS serves
 # it at `GET /api/v1/app/release/` and the installed app compares its own version with it. Without
 # it there is no update channel and the fleet is orphaned.
 #
-# The bucket and the OIDC role are created by aws-next (PLAN-AWS ronda 18) and handed over as the
+# The bucket and the OIDC role are created by the `aws` repo and handed over as the
 # repo Variables `AWS_DOWNLOADS_ROLE_ARN` and `DOWNLOADS_BUCKET` (+ `AWS_REGION`). Until both exist
 # `upload-s3` warns and skips, the installers still reach the GitHub Release, and the channel must
 # be declared pending (`s3` in `RELEASE_CHANNELS_PENDING`) for the gate to pass.
@@ -52,16 +52,15 @@
 # PENDING CHANNELS (app#7). A channel listed in the Variable `RELEASE_CHANNELS_PENDING` (`store`,
 # `play`, `s3`) does not run at all: its job's `if:` skips it even when its own Variables are set,
 # and the release gate reads it `skipped` + declared → green with a warning. The gate excuses a
-# skip, never a failure: before this, Play ran while declared pending, failed, and held release
-# 1.1.31 red (27/10). To turn a channel on: its Variables and secrets first, then take it out of
+# skip, never a failure. To turn a channel on: its Variables and secrets first, then take it out of
 # the list — in that order, and nothing runs until the second step.
 #
-# Windows signing (ADR-0136): the MAIN Windows channel is Microsoft Store — an unsigned MSIX the
+# Windows signing: the MAIN Windows channel is Microsoft Store — an unsigned MSIX the
 # Store re-signs after certification (no Authenticode cert, no SmartScreen, Store-managed updates).
 # See `publish-store` + MICROSOFT-STORE.md. The NSIS/MSI are the secondary, UNSIGNED channel.
 #
-# Android is the SAME Tauri app under the one identity `com.erplora.app` (ADR-0160/0180/0196): this
-# workflow builds the AAB and publishes it to Play (`publish-play`, hub#308). Runbook: GOOGLE-PLAY.md.
+# Android is the SAME Tauri app under the one identity `com.erplora.app`: this workflow builds the
+# AAB and publishes it to Play (`publish-play`). Runbook: GOOGLE-PLAY.md.
 #
 # Contract: scripts/tests/tauri-release-workflow.test.sh; wiring of the gates:
 # src-tauri/tests/release_gate.rs; runner assumptions: src-tauri/tests/release_runner_assumptions.rs.
@@ -78,7 +77,7 @@ on:
   workflow_dispatch:
     inputs:
       # `false` = check that packaging still works without publishing anything: `latest.json`
-      # is what the whole fleet reads (hub#400), and a test run must never overwrite it.
+      # is what the whole fleet reads, and a test run must never overwrite it.
       publish:
         description: "Publish (stores, S3, tag) when the version is new; false = build only"
         type: boolean
@@ -96,12 +95,11 @@ concurrency:
 permissions:
   contents: read
 
-# 🔴 `dl.google.com` answers 404 to `ci-runner-1` over IPv6 — for EVERY path of that host (checked
-# on the machine: `curl -6` 404, `curl -4` 206 for the same URL). Node resolves AAAA first, so every
-# JS action that downloads from Google takes the broken road: `Setup Android SDK` died with
-# `HTTPError: Unexpected HTTP response: 404` for command line tools that EXIST (hub#878). This flips
-# the resolution order for the Node processes we do not launch (the actions themselves). A no-op
-# where there is no IPv6.
+# 🔴 `dl.google.com` can answer 404 over IPv6 for EVERY path of that host while IPv4 works. Node
+# resolves AAAA first, so every JS action that downloads from Google takes the broken road:
+# `Setup Android SDK` fails with `HTTPError: Unexpected HTTP response: 404` for command line tools
+# that EXIST. This flips the resolution order for the Node processes we do not launch (the actions
+# themselves). A no-op where there is no IPv6.
 env:
   NODE_OPTIONS: --dns-result-order=ipv4first
 
@@ -160,8 +158,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # All three on GitHub's images: the old stack's shared Linux runner is gone, so no job
-          # reads a runner from a Variable (contract §10).
+          # All three on GitHub's images: no job reads its runner from a Variable
+          # (`scripts/tests/tauri-release-workflow.test.sh` checks it).
           - os: ubuntu-latest
             label: linux
           - os: windows-latest
@@ -175,8 +173,8 @@ jobs:
 
       # Tauri's system dependencies on Linux.
       #
-      # ⚠️ The condition reads the LABEL, not `matrix.os`: on our runner `matrix.os` is
-      # `self-hosted`, `== 'ubuntu-latest'` was false and this whole step was skipped (#848).
+      # ⚠️ The condition reads the LABEL, not `matrix.os`: on a self-hosted runner `matrix.os` is
+      # `self-hosted`, and a check against `ubuntu-latest` would skip this whole step.
       #
       # The last two are not for compiling but for PACKAGING the AppImage — things the bundler takes
       # FROM THE MACHINE, so no project dependency can replace them:
@@ -186,8 +184,8 @@ jobs:
       #   · `libgtk-3-bin` → `gtk-query-immodules-3.0`, with which linuxdeploy's GTK plugin writes
       #     `immodules.cache` and then `sed -i`s it under `set -e`: missing tool, dead step.
       # GitHub's image carries both; a bare Ubuntu does not. Guarded by
-      # `release_runner_assumptions.rs` (hub#878). Through the apt-lock wrapper: on a shared runner
-      # another job may hold apt's lock (infra#313).
+      # `release_runner_assumptions.rs`. Through the apt-lock wrapper: on a shared runner another job
+      # may hold apt's lock.
       - name: Install Linux build deps
         if: matrix.label == 'linux'
         run: |
@@ -206,11 +204,11 @@ jobs:
             xdg-utils \
             libgtk-3-bin
 
-      # No frontend is built here (hub#465): `tauri.conf.json` has no `beforeBuildCommand` because
-      # `frontendDist` points at the committed static `shell-dist/` (ADR-0154). Guarded by
-      # scripts/pack-msix.test.sh. `dtolnay/rust-toolchain` does NOT install rustup, it USES it: on
-      # GitHub's runners it is always there; on our runner it is a file rust-cache's `Post` once
-      # deleted (see below).
+      # No frontend is built here: `tauri.conf.json` has no `beforeBuildCommand` because
+      # `frontendDist` points at the committed static `shell-dist/`. Guarded by
+      # scripts/pack-msix.test.sh. `dtolnay/rust-toolchain` does NOT install rustup, it USES it:
+      # GitHub's runners always have it; on a self-hosted runner rust-cache's `Post` can delete it
+      # (see below).
       - name: Bootstrap rustup (own runner)
         if: runner.environment == 'self-hosted'
         shell: bash
@@ -227,16 +225,17 @@ jobs:
         uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable (branch head on 2026-10-14)
 
       # 🔴 `cache-bin: false`: this action's `Post` cleans `$CARGO_HOME/bin` and deletes the
-      # runner's `rustup`, breaking the NEXT job on our own runner. Explained in `test-shell.yml`.
+      # runner's `rustup`, breaking the NEXT job on a self-hosted runner. Explained in
+      # `test-shell.yml`.
       #
-      # 🔴 `save-if` off on our own runner, and not as an optimisation either. The same `Post` calls
+      # 🔴 `save-if` off on a self-hosted runner, and not as an optimisation. The same `Post` calls
       # `cleanRegistry`, which `rmRF`s every non-workspace directory under `~/.cargo/registry/src`.
-      # This job and `build-android` run AT THE SAME TIME on `ci-runner-1` — two slots, one `$HOME`
-      # — and the Android build includes `:tauri-android`, `:tauri-plugin-deep-link`,
+      # On a runner with two slots and one `$HOME` this job and `build-android` run AT THE SAME
+      # TIME, and the Android build includes `:tauri-android`, `:tauri-plugin-deep-link`,
       # `:tauri-plugin-notification` and `:tauri-plugin-opener` as Gradle projects living EXACTLY
-      # there. Measured: «... Cleaning cargo registry ...» at 13:29:24 and 41 s later Android died
-      # with «No variants exist» for those four (hub#878). `save-if: false` returns BEFORE cleaning,
-      # so the restore still works and hosted runners still save.
+      # there: the cleanup makes Android fail with «No variants exist» for those four.
+      # `save-if: false` returns BEFORE cleaning, so the restore still works and hosted runners
+      # still save.
       - name: Cache cargo
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -244,12 +243,12 @@ jobs:
           cache-bin: false
           save-if: ${{ runner.environment != 'self-hosted' }}
 
-      # 🔴 The Tauri CLI comes from the WORKSPACE, not from `npm install -g` (hub#878).
+      # 🔴 The Tauri CLI comes from the WORKSPACE, not from `npm install -g`.
       #
       # `tauri-action` only uses a package manager if the project DEPENDS on the CLI; otherwise it
-      # falls back to `npm install -g @tauri-apps/cli@v2`, which writes to `/usr/lib/node_modules`
-      # — the user's on a GitHub runner, root's on `ci-runner-1`: the Linux job of `v1.1.0` died
-      # with `EACCES`. `package.json` pins the CLI in the lockfile (same exact version on the three
+      # falls back to `npm install -g @tauri-apps/cli@v2`, which writes to `/usr/lib/node_modules`:
+      # the user's on a GitHub runner, root's on a self-hosted one, where it fails with `EACCES`.
+      # `package.json` pins the CLI in the lockfile (same exact version on the three
       # platforms) and installs it inside the workspace, where we can always write.
       # `--filter @erplora/app` keeps it to the CLI: no frontend is built here.
       - name: Node 22 + pnpm (pinned by package.json `packageManager`)
@@ -309,7 +308,7 @@ jobs:
           [ "$missing" -eq 0 ] || exit 1
 
       # `retention-days` is NOT cosmetic: without it the artifact lives the repo maximum (90 days)
-      # and the release of `v1.1.8` died of «Artifact storage quota has been hit», half published.
+      # and a release can die of «Artifact storage quota has been hit», half published.
       # These bundles are intermediate: their consumers are the jobs of THIS run. 3 days leaves
       # room to download one by hand or to re-run a failed channel.
       - name: Upload artifact
@@ -321,7 +320,7 @@ jobs:
           retention-days: 3
 
       # ------------------------------------------------------------------------------
-      # Microsoft Store channel (ADR-0136): an UNSIGNED MSIX (the Store re-signs it after
+      # Microsoft Store channel: an UNSIGNED MSIX (the Store re-signs it after
       # certification). Pure post-build over the exe this job just compiled. Only when the repo
       # has the Partner Center identity in its Variables (MSIX_IDENTITY_NAME · MSIX_PUBLISHER ·
       # MSIX_PUBLISHER_DISPLAY). Runbook: MICROSOFT-STORE.md
@@ -350,7 +349,7 @@ jobs:
           retention-days: 3
 
   # ------------------------------------------------------------------------------
-  # Android — the SAME Tauri app, not a separate one (ADR-0160/0180). Needs `gen/android`
+  # Android — the SAME Tauri app, not a separate one. Needs `gen/android`
   # committed: the AndroidManifest with the local network and notification permissions lives
   # there, and regenerating it would drop them.
   # ------------------------------------------------------------------------------
@@ -363,7 +362,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # No pnpm/Node setup here (hub#465): the Android build is Rust + Kotlin and its CLI comes
+      # No pnpm/Node setup here: the Android build is Rust + Kotlin and its CLI comes
       # from `cargo install tauri-cli` below. The plugin's Kotlin module compiles with jvmTarget 17.
       - name: Setup JDK 17
         uses: actions/setup-java@v4
@@ -372,9 +371,9 @@ jobs:
           java-version: 17
 
       # This step downloads the command line tools from `dl.google.com` (the IPv4 preference in
-      # the workflow `env` is what keeps it alive on `ci-runner-1`, hub#878).
+      # the workflow `env` is what keeps it alive where IPv6 to that host is broken).
       # Only `platform-tools`: the action's default is `tools platform-tools`, and Google retired
-      # the legacy `tools` package on 2026-09-16 — `sdkmanager` exits 1 on it (hub#1881).
+      # the legacy `tools` package — `sdkmanager` exits 1 on it.
       - name: Setup Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
         with:
@@ -404,7 +403,7 @@ jobs:
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
 
       # 🔴 `cache-bin: false`: see `test-shell.yml`; this job also runs `cargo install tauri-cli`,
-      # which writes right into `$CARGO_HOME/bin`. 🔴 `save-if` off on our own runner: this job is
+      # which writes right into `$CARGO_HOME/bin`. 🔴 `save-if` off on a self-hosted runner: this job is
       # the VICTIM of the desktop job's `cleanRegistry` (explained there), and its own `Post` would
       # be the executioner in the opposite order.
       - name: Cache cargo
@@ -417,8 +416,8 @@ jobs:
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2" --locked
 
-      # SAME keystore and alias `erplora` as the Kotlin app (ADR-0053): without it an existing
-      # install cannot update over it — Android refuses the signature change. Without the secrets
+      # SAME keystore and alias `erplora` as the app already installed on the tills: without it an
+      # existing install cannot update over it — Android refuses the signature change. Without the secrets
       # Gradle builds UNSIGNED (fine for a local build): an APK nobody can install and an AAB Play
       # rejects. So a missing secret is red HERE, naming it. The secrets reach the script through
       # `env:`, never pasted into its text.
@@ -437,7 +436,7 @@ jobs:
             echo "password=$ANDROID_KEYSTORE_PASSWORD"
           } > keystore.properties
 
-      # `ERPLORA_DISTRIBUTION=play` marks the binary as «distributed by Play» (hub#757): the shell
+      # `ERPLORA_DISTRIBUTION=play` marks the binary as «distributed by Play»: the shell
       # stops offering the APK download, which Google forbids an app from doing for itself.
       - name: Build APK + AAB
         env:
@@ -452,7 +451,7 @@ jobs:
         run: ./gradlew :tauri-plugin-erplora-android:testDebugUnitTest
 
       # `versionCode` is a ONE-WAY door on Play: once published, that number is burned. Checked
-      # against ADR-0160's formula on the REAL artifact, not on the config.
+      # against major*1000000 + minor*1000 + patch on the REAL artifact, not on the config.
       - name: Check identity and versionCode
         run: |
           set -euo pipefail
@@ -462,15 +461,15 @@ jobs:
           BADGING=$("$AAPT" dump badging "$APK")
           echo "$BADGING" | head -3
           echo "$BADGING" | grep -q "package: name='com.erplora.app'" \
-            || { echo "::error::wrong identity (ADR-0160 requires com.erplora.app)"; exit 1; }
+            || { echo "::error::wrong identity (the app id must be com.erplora.app)"; exit 1; }
           VN=$(echo "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
           VC=$(echo "$BADGING" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")
           EXPECTED=$(echo "$VN" | awk -F. '{print $1*1000000 + $2*1000 + $3}')
           echo "versionName=$VN versionCode=$VC expected=$EXPECTED"
           [ "$VC" = "$EXPECTED" ] \
-            || { echo "::error::versionCode $VC != $EXPECTED (ADR-0160 formula)"; exit 1; }
+            || { echo "::error::versionCode $VC != $EXPECTED (major*1000000 + minor*1000 + patch)"; exit 1; }
 
-      # The permissions, READ OFF THE APK (hub#337). It is the only place the MERGED manifest
+      # The permissions, READ OFF THE APK. It is the only place the MERGED manifest
       # exists: the Rust tests check the two source manifests, but that the merger really folds
       # them together is only visible here. Without ACCESS_LOCAL_NETWORK Android blocks the LAN
       # BELOW the API: the 9100 sweep times out, no error — it installs, starts and finds no
@@ -496,24 +495,24 @@ jobs:
                    android.permission.RECORD_AUDIO \
                    android.permission.MODIFY_AUDIO_SETTINGS; do
             echo "$PERMISSIONS" | grep -q "name='$P'" \
-              || { echo "::error::the APK does NOT declare $P — the hardware would die SILENTLY (hub#337)"; exit 1; }
+              || { echo "::error::the APK does NOT declare $P — the hardware would die SILENTLY"; exit 1; }
           done
-          # 🔴 The NFC permission drags an IMPLICIT requirement of `android.hardware.nfc` (hub#988):
+          # 🔴 The NFC permission drags an IMPLICIT requirement of `android.hardware.nfc`:
           # Play hides the app from every device without the chip — the cheap counter tablets —
           # unless the manifest says it is optional. Only the MERGED manifest knows, and
           # `dump badging` reads it. The ` ?` of the pattern is not sloppiness: aapt1 prints
           # `uses-feature-not-required:name=` and aapt2 puts a space after the colon.
           BADGING=$("$AAPT" dump badging "$APK")
           echo "$BADGING" | grep -qE "uses-feature-not-required: ?name='android.hardware.nfc'" \
-            || { echo "::error::the APK REQUIRES android.hardware.nfc — Play would hide it from tablets without the chip (hub#988)"; echo "$BADGING" | grep -i nfc; exit 1; }
-          # Same risk with location (hub#2552): ACCESS_COARSE/FINE_LOCATION imply
+            || { echo "::error::the APK REQUIRES android.hardware.nfc — Play would hide it from tablets without the chip"; echo "$BADGING" | grep -i nfc; exit 1; }
+          # Same risk with location: ACCESS_COARSE/FINE_LOCATION imply
           # `android.hardware.location` WHATEVER the targetSdk. The till does not need it.
           echo "$BADGING" | grep -qE "uses-feature-not-required: ?name='android.hardware.location'" \
-            || { echo "::error::the APK REQUIRES android.hardware.location — Play would hide it from devices without location hardware (hub#2552)"; echo "$BADGING" | grep -i location; exit 1; }
-          # Same risk with the microphone (hub#247): RECORD_AUDIO implies `android.hardware.microphone`
+            || { echo "::error::the APK REQUIRES android.hardware.location — Play would hide it from devices without location hardware"; echo "$BADGING" | grep -i location; exit 1; }
+          # Same risk with the microphone: RECORD_AUDIO implies `android.hardware.microphone`
           # (aapt2, targetSdk 36). Dictating to the assistant is optional; the till sells without it.
           echo "$BADGING" | grep -qE "uses-feature-not-required: ?name='android.hardware.microphone'" \
-            || { echo "::error::the APK REQUIRES android.hardware.microphone — Play would hide it from devices without a microphone (hub#247)"; echo "$BADGING" | grep -i microphone; exit 1; }
+            || { echo "::error::the APK REQUIRES android.hardware.microphone — Play would hide it from devices without a microphone"; echo "$BADGING" | grep -i microphone; exit 1; }
 
       # Both or red: `if-no-files-found: error` below only fires when NEITHER is there.
       - name: Stage artifacts
@@ -668,23 +667,22 @@ jobs:
         shell: pwsh
         run: msstore publish "${{ github.workspace }}/artifacts/erplora-app.msix" -id "${{ vars.MICROSOFT_STORE_PRODUCT_ID }}"
 
-  # ── Google Play (hub#308) ────────────────────────────────────────────────────────────────────
+  # ── Google Play ──────────────────────────────────────────────────────────────────────────────
   # Consumes the AAB `build-android` uploaded — it rebuilds nothing.
   #
   # ⚠️ The FIRST upload of an app is MANUAL (Google's rule: it registers the upload key). Gated by
   # the Variable `PLAY_PACKAGE_NAME` (empty = job skipped; the release gate then fails unless
   # `play` is declared in RELEASE_CHANNELS_PENDING) and by that declaration: with `play` in
-  # RELEASE_CHANNELS_PENDING the job is skipped even with `PLAY_PACKAGE_NAME` set (app#7 — on 27/10
-  # it ran while declared pending, its preflight failed, and release 1.1.31 stayed red).
+  # RELEASE_CHANNELS_PENDING the job is skipped even with `PLAY_PACKAGE_NAME` set (app#7).
   #
   # `PLAY_TRACK` picks the track and defaults to `internal` on purpose: this step uploads with
   # `status: completed`, a 100% rollout at once. `PLAY_TRACK=production` would send every release,
   # untested, to EVERY till at once — on a POS that is an incident, not a deployment. Automating
   # production needs a staged rollout (`status: inProgress` + `userFraction`) first.
   #
-  # 🔴 `changesNotSentForReview: false` since 2026-08-19. With `true` the AAB lands as «Changes not
-  # yet submitted for review» and waits for a click nobody knows is pending: 14 changes sat unsent
-  # for five days while every tag went green. Guarded by `release_gate.rs`.
+  # 🔴 `changesNotSentForReview: false`. With `true` the AAB lands as «Changes not yet submitted
+  # for review» and waits for a click nobody knows is pending, while every release goes green.
+  # Guarded by `release_gate.rs`.
   #
   # The service account needs NO GCP IAM roles: it is invited in Play Console on this app with
   # «Release to testing tracks» and nothing else.
@@ -707,8 +705,8 @@ jobs:
         run: bash scripts/ci/require-config.sh secret:PLAY_SERVICE_ACCOUNT_JSON
 
       # Each release SENDS the app to review (`changesNotSentForReview: false` below), so the
-      # account Google reviews with has to work BEFORE anything is uploaded (hub#1888). The control
-      # signs in as the reviewer and demands a living hub with modules (hub#1718). No `if:` and no
+      # account Google reviews with has to work BEFORE anything is uploaded. The control signs in
+      # as the reviewer and demands a living hub with modules. No `if:` and no
       # `continue-on-error` on purpose: missing configuration is red `missing_credentials` naming
       # the variables, never a silent skip. Contract:
       # `scripts/tests/play-reviewer-preflight-on-publish.test.sh`.
@@ -725,7 +723,7 @@ jobs:
           name: app-android
           path: artifacts
 
-      # The uploaded AAB has to be THE build's, signed with ADR-0053's keystore. Play would reject
+      # The uploaded AAB has to be THE build's, signed with the release keystore. Play would reject
       # an unsigned one with an error that does not say so — stop it here, naming the cause.
       - name: Check that the AAB is signed
         run: |
@@ -748,7 +746,7 @@ jobs:
 
   # ── S3: the installers and the update manifest (AWS, by OIDC) ────────────────────────────────
   # No static keys: GitHub's OIDC token is exchanged for the role `AWS_DOWNLOADS_ROLE_ARN`
-  # (aws-next, PLAN-AWS ronda 18), which can write `downloads/app/*` of `DOWNLOADS_BUCKET`. Until
+  # (created by the `aws` repo), which can write `downloads/app/*` of `DOWNLOADS_BUCKET`. Until
   # both Variables exist the upload is skipped OUT LOUD (warning + summary) and reported to the gate
   # as `skipped`, so it shows as «declared pending» or red — never as «published». With `s3` in
   # RELEASE_CHANNELS_PENDING the whole job is skipped (app#7): it has no `outputs.result` then, and
@@ -775,13 +773,13 @@ jobs:
         if: vars.AWS_DOWNLOADS_ROLE_ARN == '' || vars.DOWNLOADS_BUCKET == ''
         run: |
           msg="S3 upload skipped: AWS_DOWNLOADS_ROLE_ARN/DOWNLOADS_BUCKET not set"
-          echo "::warning::$msg. The installers of v${VERSION} still go to the GitHub Release, but latest.json — the in-app update channel — is NOT updated until aws-next creates the bucket and the OIDC role (PLAN-AWS ronda 18) and the two repo Variables are set."
+          echo "::warning::$msg. The installers of v${VERSION} still go to the GitHub Release, but latest.json — the in-app update channel — is NOT updated until the bucket and the OIDC role exist and the two repo Variables are set."
           {
             echo "## $msg"
             echo
             echo "The installers of **v${VERSION}** are attached to the GitHub Release instead."
             echo "\`downloads/app/latest/latest.json\` (what \`GET /api/v1/app/release/\` reads) is **not** updated."
-            echo "Set the repo Variables \`AWS_DOWNLOADS_ROLE_ARN\` and \`DOWNLOADS_BUCKET\` once aws-next creates them, then remove \`s3\` from \`RELEASE_CHANNELS_PENDING\`."
+            echo "Set the repo Variables \`AWS_DOWNLOADS_ROLE_ARN\` and \`DOWNLOADS_BUCKET\` once the bucket and the role exist, then remove \`s3\` from \`RELEASE_CHANNELS_PENDING\`."
           } >> "$GITHUB_STEP_SUMMARY"
           echo "result=skipped" >> "$GITHUB_OUTPUT"
 
@@ -804,7 +802,7 @@ jobs:
           role-to-assume: ${{ vars.AWS_DOWNLOADS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      # The manifest (hub#400): an installer does not say which version it is (the name in
+      # The manifest: an installer does not say which version it is (the name in
       # `latest/` is fixed), so without `latest.json` there is nothing the installed app can
       # compare against — and a till without news looks exactly like a healthy one. Written in the
       # SAME step as the installers and LAST, so `latest/` never announces a version whose
@@ -843,11 +841,11 @@ jobs:
           echo "result=success" >> "$GITHUB_OUTPUT"
 
   # ------------------------------------------------------------------------------
-  # Release gate (hub#895) — a green release has to mean «published».
+  # Release gate — a green release has to mean «published».
   #
   # Every publishing job is gated by a repo Variable, and an empty Variable leaves the job
-  # `skipped` — which does not colour a run: three releases in a row (the last v1.0.3, hub#839)
-  # ended GREEN publishing nothing. This job looks at the result of ALL the others:
+  # `skipped`, which does not colour a run: a release could end GREEN having published nothing.
+  # This job looks at the result of ALL the others:
   #   · channel published                         → fine
   #   · channel skipped, its Variable empty       → RED, naming the Variable
   #   · channel DECLARED pending                  → green, but said out loud

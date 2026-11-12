@@ -1,16 +1,11 @@
-# Granted by default: asking about and requesting permissions is NEVER the danger — the danger is
-# not being able to ask, and the hardware going dead with nobody knowing why. `allow-leave-app`
-# (hub#1906) sends the app to the background, the same as the system Back on the root screen: there
-# is nothing to protect behind it. `allow-open-app-settings` (hub#1886) only opens the app's page in
-# the system settings: the person still decides.
-# `allow-keep-listening` (HUB_APP-F26, hub#836) keeps the app running with the screen off, with Android's ongoing
-# notification saying so; the page only asks for it while somebody is signed in with notices on.
-# `allow-tts-available`, `allow-tts-speak` and `allow-tts-stop` (round 2026-11-04a) read the
-# assistant's answers aloud in the system voice, when the person asks for it: the Android WebView
-# has no `speechSynthesis`, and without them the assistant is mute in the app.
-# The app grants this set to every page under erplora.com, but registers the plugin with its
-# linked-hub gate in front (`init(gate)`, hub#2642): any other page gets `not_the_linked_hub` and no
-# command runs.
+# Granted by default because none of these is dangerous on its own: asking for a permission is
+# harmless, while being unable to ask leaves the hardware dead with nobody knowing why. Leaving the
+# app does what the system Back does on the root screen, opening the app's settings page still
+# leaves the decision to the person, keeping the app listening shows Android's ongoing
+# notification, and the system voice only reads what the person asked to hear (the Android WebView
+# has no `speechSynthesis`).
+# The app grants this set to every page under erplora.com, but registers the plugin behind its
+# linked-hub gate (`init(gate)`): any other page gets `not_the_linked_hub` and no command runs.
 "$schema" = "schemas/schema.json"
 
 [default]

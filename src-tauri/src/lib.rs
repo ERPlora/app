@@ -1,29 +1,28 @@
-//! ERPlora Shell — cliente **FINO** de escritorio (ADR-0159).
+//! ERPlora shell: a **thin** native client around remote pages.
 //!
-//! La ventana carga ORÍGENES REMOTOS: el **onboarding del SaaS** (`{saas}/shell/`) en el primer
-//! arranque y, una vez capturado, la **PWA del hub cloud** (`hub_url`). El contrato de captura es
-//! el marcador `?shell=1`: el SaaS redirige al hub con él (`/shell/open/<id>/` → 302 a
-//! `{hub}/?shell=1`) y el shell persiste el ORIGEN de esa navegación como `hub.url`; los arranques
-//! siguientes cargan el hub directo. `forget_hub` (p. ej. Cloud 410 `hub_not_found`) borra la
-//! captura y devuelve la ventana al onboarding.
+//! The window loads REMOTE ORIGINS: the **SaaS onboarding** (`{saas}/shell/`) on the first start
+//! and, once captured, the **hub PWA** (`hub_url`). The capture contract is the `?shell=1` marker:
+//! the SaaS redirects to the hub with it (`/shell/open/<id>/` → 302 to `{hub}/?shell=1`) and the
+//! shell persists the ORIGIN of that navigation as `hub.url`; later starts load the hub directly.
+//! `forget_hub` (for example after a 410 `hub_not_found`) deletes the capture and sends the window
+//! back to the onboarding.
 //!
-//! Qué NO hay aquí (ADR-0154 lo retiró; 0159 no lo resucita): runtime embebido, SQLite,
-//! entitlement gate, token de máquina/keychain. El entitlement lo aplica el hub cloud server-side;
-//! la identidad de máquina la inyecta el deployment. `invoke` queda SOLO para lo nativo
-//! (`device_context`, `forget_hub`) y el HARDWARE (`erplora_*` → `erplora-peripherals`: el shell
-//! ES el bridge, ADR-0050 §2.7).
+//! What is NOT here: an embedded runtime, a local database, an entitlement gate or a machine token
+//! in a keychain. The hub enforces entitlements on the server. `invoke` is ONLY for what is native
+//! (`device_context`, `forget_hub`) and for HARDWARE (`erplora_*` → `erplora-peripherals`: the
+//! shell IS the hardware bridge).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::Serialize;
 
-/// What the window shows when the network dies under it (hub#1716).
+/// What the window shows when the network dies under it.
 mod connectivity;
 use connectivity::{ShellNav, spawn_connectivity_guard};
-/// Only the linked hub drives the device (hub#2504).
+/// Only the linked hub drives the device.
 mod hub_link;
-/// A link to another hub waits for the person's word (hub#2644).
+/// A link to another hub waits for the person's word.
 mod link_consent;
 mod navigation;
 mod notice_tap;
@@ -37,20 +36,21 @@ pub use native_print::{
 #[cfg(desktop)]
 pub use native_print::open_print_window;
 
-/// Id de dispositivo estable por instalación (`X-Device-Id` del login; sesión única ADR-0154).
+/// Stable per-installation device id, sent as `X-Device-Id` at login (one session per device).
 const DEVICE_ID_FILE: &str = "device.id";
-/// Origen persistido de la PWA del hub capturado por `?shell=1` (modo app).
+/// Persisted origin of the hub PWA captured through `?shell=1`.
 const HUB_URL_FILE: &str = "hub.url";
-/// Registro persistente de dispositivos de hardware (mismo formato que el bridge standalone).
+/// Persistent registry of hardware devices (same format as the standalone bridge).
 const DEVICES_FILE: &str = "devices.json";
 
-/// Base del SaaS (onboarding). Default horneado; solo un fork/self-host la toca.
+/// Base URL of the SaaS (onboarding). Baked-in default; only a fork or a self-hosted install
+/// sets it.
 pub const ENV_SAAS_URL: &str = "ERPLORA_SAAS_URL";
-/// Override de la URL inicial COMPLETA (solo desarrollo: apuntar a un SaaS local o a una PWA dev).
+/// Override of the FULL start URL (development only: point at a local SaaS or a dev PWA).
 pub const ENV_SHELL_URL: &str = "ERPLORA_SHELL_URL";
 const DEFAULT_SAAS_URL: &str = "https://erplora.com";
 
-/// Error del shell serializado como string hacia el frontend (mismo patrón que el bridge).
+/// Shell error, serialized to the frontend as a string.
 #[derive(Debug, thiserror::Error)]
 pub enum ShellError {
     #[error("io error: {0}")]
@@ -60,11 +60,11 @@ pub enum ShellError {
     ExternalUrlRefused,
     /// There is a browser to ask for and it said no — or there is none at all (an Android with no
     /// browser installed answers `ActivityNotFoundException`). Either way the trip did not happen,
-    /// and the page has to say so instead of pretending it did (hub#475).
+    /// and the page has to say so instead of pretending it did.
     #[error("external_url_unavailable: {0}")]
     ExternalUrlUnavailable(String),
     /// This device has no Downloads folder the USER can open, so there is nowhere to save a file
-    /// that would count as saved ([`downloads_dir_is_reachable`], hub#480). The page turns this
+    /// that would count as saved ([`downloads_dir_is_reachable`]). The page turns this
     /// one into its own sentence: it is the only refusal the user can act on.
     #[error("downloads_unreachable")]
     DownloadsUnreachable,
@@ -72,7 +72,7 @@ pub enum ShellError {
     /// written under any name. Either way nothing was saved.
     #[error("download_refused")]
     DownloadRefused,
-    /// This device has no NFC reader (hub#988) — a desktop, or a tablet sold without one. The page
+    /// This device has no NFC reader — a desktop, or a tablet sold without one. The page
     /// stops offering the tap and stops polling; the badge keeps arriving through the USB reader.
     #[error("nfc_unavailable")]
     NfcUnavailable,
@@ -85,7 +85,7 @@ pub enum ShellError {
     /// locked out by a card that demonstrably worked the day it was set up.
     #[error("nfc_random_uid")]
     NfcRandomUid,
-    /// The page sent no document to print, or one too big to hold (hub#2006).
+    /// The page sent no document to print, or one too big to hold.
     #[error("print_document_refused")]
     PrintDocumentRefused,
     /// This platform has no system print dialog for a webview (iOS). The print door
@@ -103,40 +103,40 @@ impl Serialize for ShellError {
     }
 }
 
-// ── Identidad de dispositivo (X-Device-Id) ───────────────────────────────────────────────────────
+// ── Device identity (X-Device-Id) ────────────────────────────────────────────────────────────────
 
-/// Identidad de dispositivo que el frontend envía al hacer login (sesión única por dispositivo,
-/// ADR-0154 §5). El frontend la manda como `X-Client-Type` + `X-Device-Id` + `X-Device-Platform`.
+/// Device identity the frontend sends at login (one session per device), as `X-Client-Type` +
+/// `X-Device-Id` + `X-Device-Platform`.
 #[derive(Debug, Clone, Serialize)]
 pub struct DeviceContext {
     pub id: String,
     pub client_type: String,
     pub platform: String,
-    /// De dónde salió ESTE binario: `play`, `msstore` o `direct` (hub#757).
+    /// Where THIS binary came from: `play`, `msstore` or `direct`.
     ///
-    /// Solo el shell puede decirlo. El web va servido por el hub (ADR-0154/0159), así que un flag
-    /// suyo sería el mismo para todas las instalaciones y no distinguiría una copia de Play de una
-    /// instalada a mano. Aquí se hornea al compilar: los jobs de tienda del workflow exportan
-    /// `ERPLORA_DISTRIBUTION`, y todo lo demás —instalador de Windows, `.deb`, AppImage— se queda
-    /// en `direct`, que es justo quien necesita seguir avisando de que hay versión nueva.
+    /// Only the shell can tell. The web is served by the hub, so a flag of its own would be the
+    /// same for every installation and could not tell a Play copy from one installed by hand.
+    /// Here it is baked in at compile time: the store jobs of the release workflow export
+    /// `ERPLORA_DISTRIBUTION`, and everything else (Windows installer, `.deb`, AppImage) stays
+    /// `direct`, which is exactly the copy that must keep announcing new versions.
     pub distribution: String,
 }
 
-/// Canal por el que llegó este binario. Se resuelve distinto en cada plataforma **porque el CI las
-/// construye distinto**, no por capricho:
+/// The channel this binary came through. Each platform resolves it differently **because CI
+/// builds them differently**:
 ///
-/// - **Android**: el AAB es su propio build y solo va a Play, así que la marca se hornea al
-///   compilar (`ERPLORA_DISTRIBUTION=play` en ese job). `option_env!` y no `env!`: sin la variable
-///   el build no falla, se declara `direct`.
-/// - **Windows**: el MSIX se empaqueta **del mismo `.exe`** que el instalador normal (el workflow
-///   lo hace a propósito para no facturar el build dos veces), así que un flag de compilación
-///   valdría lo mismo para los dos canales y no distinguiría nada. Hay que mirarlo en ejecución:
-///   una app empaquetada corre desde `WindowsApps`, y una instalada por el `.exe`/`.msi` no.
+/// - **Android**: the AAB is its own build and only goes to Play, so the mark is baked in at
+///   compile time (`ERPLORA_DISTRIBUTION=play` in that job). `option_env!` rather than `env!`:
+///   without the variable the build does not fail, it declares `direct`.
+/// - **Windows**: the MSIX is packaged **from the same `.exe`** as the regular installer (the
+///   workflow does that on purpose so the app is built only once), so a compile-time flag would
+///   be the same for both channels. It has to be checked at run time: a packaged app runs from
+///   `WindowsApps`, one installed through the `.exe`/`.msi` does not.
 ///
-/// El sesgo de los errores es deliberado. Equivocarse hacia `direct` deja a una copia de tienda con
-/// un aviso de más —feo, y lo caza la revisión—; equivocarse hacia `msstore` dejaría a un TPV de
-/// mostrador sin enterarse nunca de que hay versión nueva, que es el problema que este módulo
-/// existe para evitar. Ante la duda, `direct`.
+/// The bias of the errors is deliberate. Erring towards `direct` leaves a store copy with one
+/// notice too many (ugly, and review catches it); erring towards `msstore` would leave a counter
+/// till never learning that there is a new version, which is the problem this exists to avoid.
+/// When in doubt, `direct`.
 fn distribution_channel() -> &'static str {
     if let Some(forced) = option_env!("ERPLORA_DISTRIBUTION") {
         return match forced {
@@ -147,9 +147,9 @@ fn distribution_channel() -> &'static str {
     }
     #[cfg(target_os = "windows")]
     {
-        // `GetCurrentPackageFullName` sería lo canónico, pero exige traer la crate `windows` para
-        // una sola llamada. La ruta es el mismo hecho observable: el runtime de MSIX monta la app
-        // bajo `%ProgramFiles%\WindowsApps\<identity>`, y ahí no aterriza ningún instalador.
+        // `GetCurrentPackageFullName` would be the canonical check, but it needs the `windows`
+        // crate for a single call. The path is the same observable fact: the MSIX runtime mounts
+        // the app under `%ProgramFiles%\WindowsApps\<identity>`, where no installer ever lands.
         if std::env::current_exe()
             .ok()
             .map(|p| p.to_string_lossy().to_lowercase().contains("windowsapps"))
@@ -161,8 +161,8 @@ fn distribution_channel() -> &'static str {
     "direct"
 }
 
-/// Lee (o crea y persiste) un id de dispositivo estable por instalación en `app_data_dir`.
-/// Sobrevive a limpiezas de caché del webview: identifica **esta** instalación del shell.
+/// Reads (or creates and persists) a stable per-installation device id in `app_data_dir`.
+/// It survives webview cache wipes: it identifies **this** installation of the shell.
 fn ensure_device_id(cache_dir: &Path) -> Result<String, ShellError> {
     let path = cache_dir.join(DEVICE_ID_FILE);
     if let Ok(existing) = std::fs::read_to_string(&path) {
@@ -177,7 +177,7 @@ fn ensure_device_id(cache_dir: &Path) -> Result<String, ShellError> {
     Ok(id)
 }
 
-/// Comando `invoke` que devuelve la identidad de dispositivo para el login.
+/// Returns the device identity the page sends at login.
 #[tauri::command]
 fn device_context(app: tauri::AppHandle) -> Result<DeviceContext, ShellError> {
     use tauri::Manager;
@@ -186,9 +186,9 @@ fn device_context(app: tauri::AppHandle) -> Result<DeviceContext, ShellError> {
         .app_data_dir()
         .map_err(|e| ShellError::Io(e.to_string()))?;
     let id = ensure_device_id(&cache_dir)?;
-    // Verificado en el emulador (API 37): sin la rama `android` el shell se anunciaba como
-    // `hub-desktop`/`desktop` DESDE UN MÓVIL, así que el Cloud no podía distinguir una tablet de
-    // un TPV de mostrador — ni en la lista de sesiones ni en la sesión única de ADR-0154.
+    // Without the `android` branch the shell announced itself as `hub-desktop`/`desktop` FROM A
+    // PHONE (seen on the emulator, API 37), so the server could not tell a tablet from a counter
+    // till, neither in the session list nor in the one-session-per-device rule.
     let platform = if cfg!(target_os = "windows") {
         "windows"
     } else if cfg!(target_os = "macos") {
@@ -209,24 +209,24 @@ fn device_context(app: tauri::AppHandle) -> Result<DeviceContext, ShellError> {
     };
     Ok(DeviceContext {
         id,
-        // Taxonomía del Cloud; la plataforma concreta viaja aparte en X-Device-Platform.
+        // The server's client taxonomy; the concrete platform travels in X-Device-Platform.
         client_type: client_type.to_string(),
         platform: platform.to_string(),
         distribution: distribution_channel().to_string(),
     })
 }
 
-// ── Deep link `erplora://` (ADR-0196 §7) ─────────────────────────────────────────────────────────
+// ── Deep link `erplora://` ───────────────────────────────────────────────────────────────────────
 //
 // A link is the one thing that lets a page OUTSIDE the app steer the app, so it is a trust
 // boundary and not a convenience: whoever writes the link picks the destination, and the
-// destination is the window that owns the hardware handlers (ADR-0221). The app therefore never
-// opens what the link says — it RESOLVES it, and only a hub of ours resolves at all. Anything else
-// returns `None`, and `None` means "leave the window where it is": the browser that issued the
-// link is the one that owns the fallback (see `architecture/hub/apps/tauri.md`).
+// destination is the window that owns the hardware handlers. The app therefore never opens what
+// the link says — it RESOLVES it, and only a hub of ours resolves at all. Anything else returns
+// `None`, and `None` means "leave the window where it is": the browser that issued the link is the
+// one that owns the fallback.
 
 /// Scheme of the installable app's deep link, registered against the single app identity
-/// `com.erplora.app` (ADR-0160).
+/// `com.erplora.app`.
 pub const DEEP_LINK_SCHEME: &str = "erplora";
 
 /// The only action of the grammar: `erplora://hub/<host>`.
@@ -241,10 +241,10 @@ const HUB_DOMAIN_SUFFIX: &str = ".erplora.com";
 const ERPLORA_DOMAIN: &str = "erplora.com";
 
 /// Stripe's hosted checkout, matched by EXACT host. The assistant's paid upgrade is its own Stripe
-/// subscription (ADR-0033) and the SaaS answers it with this page directly — there is no
-/// erplora.com page in between to send the browser to. Without it the assistant's «See plans» could
-/// only fail inside the installed app (hub#1914). No other Stripe host, and no suffix match: the
-/// dashboard or a look-alike is not a checkout the till starts.
+/// subscription and the SaaS answers it with this page directly — there is no erplora.com page in
+/// between to send the browser to. Without it the assistant's «See plans» could only fail inside
+/// the installed app. No other Stripe host, and no suffix match: the dashboard or a look-alike is
+/// not a checkout the till starts.
 const STRIPE_CHECKOUT_HOST: &str = "checkout.stripe.com";
 
 /// The two sites of the AEAT's QR check: the real one and its test one (`QR_HOSTS` of
@@ -270,9 +270,9 @@ fn is_aeat_qr_check(url: &tauri::Url) -> bool {
 ///
 /// The apex has no leading dot to strip, which is exactly why it is excluded: `erplora.com` also
 /// serves marketing, billing and a third-party checkout, and is deliberately kept out of the
-/// hardware capability (ADR-0221). Auras are matched by WILDCARD and never enumerated: hubs live at
-/// `{slug}.{aura}.erplora.com` with auras by letter on Hetzner and by number on the AWS fallback,
-/// so a list would turn "open a new aura" into "ship a new app to every till".
+/// hardware capability. Auras are matched by WILDCARD and never enumerated: hubs live at
+/// `{slug}.{aura}.erplora.com`, so a list would turn "open a new aura" into "ship a new app to
+/// every till".
 ///
 /// Expects an already-lowercased host — for `https` the URL parser guarantees it, and
 /// [`hub_url_for_host`] lowercases the opaque host of a deep link before asking.
@@ -304,8 +304,8 @@ fn is_dns_label(label: &str) -> bool {
 
 /// The trust boundary: which destinations the app is willing to open for a link.
 ///
-/// Mirrors `remote.urls` of the hardware capability (`https://*.erplora.com/*` + loopback dev,
-/// ADR-0221) on purpose. A destination the capabilities would not trust must not be reachable
+/// Mirrors `remote.urls` of the hardware capability (`https://*.erplora.com/*` plus loopback for
+/// development) on purpose. A destination the capabilities would not trust must not be reachable
 /// through a link either — and the reverse would be just as bad: opening a page that cannot
 /// `invoke` leaves a till that looks fine and cannot print.
 ///
@@ -326,7 +326,7 @@ fn hub_url_for_host(raw_host: &str) -> Option<String> {
         }
     }
 
-    // Production: the same rule the capture applies to what it is willing to remember (hub#335).
+    // Production: the same rule the capture applies to what it is willing to remember.
     if !is_hub_domain(&host) {
         return None;
     }
@@ -337,9 +337,9 @@ fn hub_url_for_host(raw_host: &str) -> Option<String> {
 /// not a destination of ours → **do not navigate**.
 ///
 /// The destination is rebuilt from the host alone, so query and fragment are ignored by
-/// construction and no parameter can smuggle a second URL in. The `?shell=1` marker is the
-/// existing capture contract (ADR-0159): navigating with it is what makes the shell remember this
-/// hub as `hub.url`, so a link opens the app AND leaves it pointing at the right hub next time.
+/// construction and no parameter can smuggle a second URL in. The `?shell=1` marker is the capture
+/// contract: navigating with it is what makes the shell remember this hub as `hub.url`, so a link
+/// opens the app AND leaves it pointing at the right hub next time.
 pub fn resolve_deep_link(raw: &str) -> Option<String> {
     let url: tauri::Url = raw.trim().parse().ok()?;
     if url.scheme() != DEEP_LINK_SCHEME {
@@ -375,32 +375,31 @@ pub fn deep_link_from_args<I: IntoIterator<Item = String>>(args: I) -> Option<St
     args.into_iter().find_map(|arg| resolve_deep_link(&arg))
 }
 
-// ── The way OUT: the user's own browser (hub#475) ────────────────────────────────────────────────
+// ── The way OUT: the user's own browser ──────────────────────────────────────────────────────────
 
 /// The address `openExternal` may hand to the SYSTEM browser, normalized — or `None`.
 ///
 /// The web app has one door out of the till, and behind it are the buttons that CHARGE: the module
-/// checkout that ADR-0114 §4 moved to the SaaS *because Google Play does not allow paying for
-/// digital goods inside the app*, the plans page, the billing portal, the plan-limit upsell. In the
-/// browser that door is a new tab; inside the installed app it was `window.open`, which opens
-/// nothing at all — no plugin is exposed to the page and the webview spawns no window.
+/// checkout, which lives on the SaaS website *because Google Play does not allow paying for digital
+/// goods inside the app*, the plans page, the billing portal, the plan-limit upsell. In the browser
+/// that door is a new tab; inside the installed app `window.open` opens nothing at all — no plugin
+/// is exposed to the page and the webview spawns no window.
 ///
 /// Letting the page ask for a browser is a frontier of its own: an unchecked opener turns the till
 /// into a launcher for any address the page names — a phishing page wearing the trust of an
 /// installed app, a `file://` path handed to whatever the desktop associates with it, or a custom
-/// scheme that starts another program. So the destination is checked here, like ADR-0221 checks who
-/// may drive the hardware and ADR-0225 what a link may open.
+/// scheme that starts another program. So the destination is checked here, just as the hardware
+/// capability checks who may drive the hardware and [`resolve_deep_link`] what a link may open.
 ///
 /// **The apex is IN, and that is the difference from the other two boundaries.** [`is_hub_domain`]
 /// and [`trusted_hub_origin`] refuse `erplora.com` on purpose, because they answer "may this page
 /// open the cash drawer / become this till's home?". This one answers "may the user's browser be
-/// sent here?" — and the apex is the SaaS, where all eight destinations live. A visit grants
+/// sent here?" — and the apex is the SaaS, where those paid destinations live. A visit grants
 /// nothing: the page opens in the browser's own sandbox, with no `invoke` and no way back in.
 pub fn external_browser_url(raw: &str) -> Option<String> {
-    // EQUIVALENT UNDER MUTATION, and kept anyway (same call as `resolve_deep_link`): the WHATWG
-    // parser already strips leading and trailing spaces, so dropping `trim` changes no outcome —
-    // `hands_the_browser_a_PARSED_address_not_the_page_s_text` passes either way. It stays because
-    // reading "trim, then parse" should not require knowing that clause of the URL spec.
+    // The WHATWG parser already strips leading and trailing spaces, so `trim` changes no outcome.
+    // It stays so that the code reads "trim, then parse" without relying on that clause of the URL
+    // spec.
     let url: tauri::Url = raw.trim().parse().ok()?;
 
     // Credentials are the oldest confusion trick there is, and the dangerous half is the one the
@@ -414,7 +413,7 @@ pub fn external_browser_url(raw: &str) -> Option<String> {
     let host = url.host_str()?;
     let allowed = match url.scheme() {
         // Everything we serve: the SaaS at the apex plus every hub, auras by wildcard.
-        // Plus Stripe's hosted checkout, where the assistant's upgrade is paid (hub#1914), and the
+        // Plus Stripe's hosted checkout, where the assistant's upgrade is paid, and the
         // AEAT's public check of a VeriFactu QR (app#20): only a link, nothing is sent to the AEAT.
         "https" => {
             host == ERPLORA_DOMAIN
@@ -433,7 +432,7 @@ pub fn external_browser_url(raw: &str) -> Option<String> {
     allowed.then(|| url.to_string())
 }
 
-// ── The way DOWN: a file the user can find afterwards (hub#480) ──────────────────────────────────
+// ── The way DOWN: a file the user can find afterwards ────────────────────────────────────────────
 
 /// Longest leaf name a file system will take: 255 bytes on ext4, APFS and NTFS alike.
 const MAX_FILE_NAME_BYTES: usize = 255;
@@ -450,7 +449,7 @@ pub struct SavedDownload {
     /// On the desktop it is the absolute path, because that is what the user's file manager opens.
     /// On Android there is no path to show: the file lives in the public Downloads **collection**
     /// and `MediaStore` names it `content://media/external/downloads/1234`, so what travels is the
-    /// folder and the name — `Download/factura-2026-0042.pdf` (hub#499).
+    /// folder and the name — `Download/factura-2026-0042.pdf`.
     ///
     /// Either way it is not a detail: inside the installed app there is no download shelf, no
     /// notification and no Downloads button, so this string is the ONLY trace the user gets that
@@ -467,8 +466,8 @@ pub struct SavedDownload {
 /// there is `getExternalFilesDir(DIRECTORY_DOWNLOADS)` —
 /// `/storage/emulated/0/Android/data/com.erplora.app/files/Download` — and Android 11 closed
 /// `Android/data` to the system Files app and to every third-party file manager. Writing there and
-/// answering "saved to …" would be hub#475 all over again, only now with a success message on top:
-/// the file exists, the user cannot get to it, and nothing says so.
+/// answering "saved to …" would be a failed save with a success message on top: the file exists,
+/// the user cannot get to it, and nothing says so.
 ///
 /// Anything else is refused rather than assumed. A platform nobody here has reasoned about does not
 /// get the benefit of the doubt about where its files end up.
@@ -503,7 +502,7 @@ pub fn reachable_downloads_dir(
 /// user opens in their own file manager. Android has no such folder for us — what `download_dir()`
 /// resolves is app-scoped storage Android 11 closed to every file manager — but it does have a
 /// public **Downloads collection**, which is not a path at all: a row in `MediaStore` that the Files
-/// app browses and that the shell can only reach through Kotlin (hub#499).
+/// app browses and that the shell can only reach through Kotlin.
 #[derive(Debug, PartialEq, Eq)]
 pub enum SaveTarget {
     /// A folder on this device's file system, which the user can open.
@@ -516,8 +515,8 @@ pub enum SaveTarget {
 ///
 /// Android is answered **before** the resolved path is even looked at, and that order is the point:
 /// Android does hand back a Downloads folder, it is simply one no file manager will open, so a
-/// decision made from that value would keep writing the file where the user cannot reach it
-/// (hub#480). Everything else falls through to [`reachable_downloads_dir`], which keeps the two
+/// decision made from that value would keep writing the file where the user cannot reach it.
+/// Everything else falls through to [`reachable_downloads_dir`], which keeps the two
 /// remaining answers apart: a phone with nowhere to save gets [`ShellError::DownloadsUnreachable`],
 /// which the page turns into a sentence the user can act on, and a desktop that resolved no
 /// Downloads folder at all gets a plain failure — putting the phone sentence in front of that user
@@ -598,19 +597,19 @@ pub fn free_download_path(
     })
 }
 
-// ── Estado del shell: captura y persistencia del hub_url (ADR-0159) ──────────────────────────────
+// ── Shell state: capturing and persisting hub_url ────────────────────────────────────────────────
 
-/// Normaliza la base del SaaS: sin espacios ni `/` final.
+/// Normalizes the SaaS base URL: no surrounding spaces and no trailing `/`.
 fn normalize_base(base: &str) -> String {
     base.trim().trim_end_matches('/').to_string()
 }
 
-/// URL del onboarding del SaaS que carga el primer arranque.
+/// URL of the SaaS onboarding that the first start loads.
 fn onboarding_url(base: &str) -> String {
     format!("{}/shell/", normalize_base(base))
 }
 
-/// Base del SaaS: env [`ENV_SAAS_URL`] o el default horneado.
+/// SaaS base URL: the [`ENV_SAAS_URL`] environment variable or the baked-in default.
 fn saas_base_url() -> String {
     normalize_base(
         &std::env::var(ENV_SAAS_URL)
@@ -627,8 +626,8 @@ fn saas_base_url() -> String {
 /// start from then on. So the destination is checked, not merely parsed — a hub of ours, or the
 /// loopback of this machine, and nothing else.
 ///
-/// It is deliberately the SAME rule as [`hub_url_for_host`] (what a deep link may open, ADR-0225)
-/// and as `capabilities/*.json` (what may drive the hardware, ADR-0221); `tests/remote_acl.rs`
+/// It is deliberately the SAME rule as [`hub_url_for_host`] (what a deep link may open) and as
+/// `capabilities/*.json` (what may drive the hardware); `tests/remote_acl.rs`
 /// asserts the capture and the capabilities agree origin by origin. They have to: remembering an
 /// origin the capabilities refuse produces a till that looks fine and cannot print, because every
 /// `invoke` from it — down to `device_context` — is rejected by Tauri's ACL.
@@ -637,14 +636,13 @@ fn saas_base_url() -> String {
 /// case left to reject: only `http`/`https` get here, and both are special schemes whose origin is
 /// always a tuple.
 fn trusted_hub_origin(url: &tauri::Url) -> Option<String> {
-    // EQUIVALENT UNDER MUTATION, and kept anyway: replacing this `?` with any default changes no
-    // outcome, because the scheme gate below only ever lets `http`/`https` through and neither
-    // parses without a host — so the `None` branch is unreachable from here. It stays so the
-    // function is total on its own terms instead of by depending on the order of the two checks.
+    // The `None` branch is unreachable: the scheme gate below only lets `http`/`https` through, and
+    // neither parses without a host. The `?` stays so the function is total on its own terms
+    // instead of depending on the order of the two checks.
     let host = url.host_str()?;
     let allowed = match url.scheme() {
         "https" => is_hub_domain(host) || is_loopback_host(host),
-        // The cloud hub is always https; plain http is the development exemption.
+        // A deployed hub is always https; plain http is the development exemption.
         "http" => is_loopback_host(host),
         _ => false,
     };
@@ -654,12 +652,12 @@ fn trusted_hub_origin(url: &tauri::Url) -> Option<String> {
     Some(url.origin().ascii_serialization())
 }
 
-/// Capture contract (ADR-0159): when the navigation carries the `?shell=1` marker **and** the
-/// destination is one of ours ([`trusted_hub_origin`]), returns the ORIGIN to persist as `hub_url`.
+/// Capture contract: when the navigation carries the `?shell=1` marker **and** the destination is
+/// one of ours ([`trusted_hub_origin`]), returns the ORIGIN to persist as `hub_url`.
 ///
 /// The marker says "remember me", not "trust me": it rides on the URL being navigated to, and
 /// `on_navigation` only refuses pages of the SaaS, and only in the Play copy
-/// ([`navigation_verdict`], hub#1915) — so without the second filter one link is enough to leave the
+/// ([`navigation_verdict`]) — so without the second filter one link is enough to leave the
 /// till booting on somebody else's page, for good.
 pub fn shell_capture_origin(url: &tauri::Url) -> Option<String> {
     let has_marker = url.query_pairs().any(|(k, v)| k == "shell" && v == "1");
@@ -669,88 +667,88 @@ pub fn shell_capture_origin(url: &tauri::Url) -> Option<String> {
     let captured = trusted_hub_origin(url);
     if captured.is_none() {
         log::warn!(
-            "shell: {} pide ser recordado y no es un hub nuestro; no se captura",
+            "shell: {} asks to be remembered and is not one of our hubs; not captured",
             url.origin().ascii_serialization()
         );
     }
     captured
 }
 
-/// Lee el `hub.url` persistido, reducido a su ORIGEN y pasado por [`trusted_hub_origin`].
+/// Reads the persisted `hub.url`, reduced to its ORIGIN and passed through [`trusted_hub_origin`].
 ///
-/// Se revalida al LEER, no solo al escribir, porque proteger la captura solo protege a los TPV que
-/// aún no han capturado nada: el que ya corrió una build sin el filtro lleva el origen ajeno en el
-/// fichero, y una actualización que se lo crea otra vez no arregla justo el caso que importa. Es
-/// además un fichero de texto en el directorio de datos del usuario: nada impide editarlo.
+/// It is revalidated on READ, not only on write, because guarding the capture only protects the
+/// tills that have not captured anything yet: one that already ran a build without the filter
+/// carries the foreign origin in the file, and an update that trusts it again does not fix exactly
+/// the case that matters. It is also a text file in the user's data directory: nothing stops
+/// anyone from editing it.
 fn load_hub_url(cache_dir: &Path) -> Option<String> {
     let raw = std::fs::read_to_string(cache_dir.join(HUB_URL_FILE)).ok()?;
     // No `is_empty` guard: an empty (or blank) file does not parse as a URL, so the `?` below is
     // the same rejection written once instead of twice.
     //
-    // The `trim` is EQUIVALENT UNDER MUTATION — the WHATWG parser strips leading and trailing C0
-    // and space itself, so dropping it changes no outcome today. It stays because `hub.url` is OUR
-    // file format: normalizing it here says so, instead of leaning on a parsing detail of a
-    // dependency to make our own writes readable.
+    // The WHATWG parser strips leading and trailing C0 and space itself, so the `trim` changes no
+    // outcome today. It stays because `hub.url` is OUR file format: normalizing it here says so,
+    // instead of leaning on a parsing detail of a dependency to make our own writes readable.
     let trimmed = raw.trim();
     let parsed: tauri::Url = trimmed.parse().ok()?;
     let trusted = trusted_hub_origin(&parsed);
     if trusted.is_none() {
         log::warn!(
-            "shell: el hub recordado ({trimmed}) no es un hub nuestro; vuelvo al onboarding"
+            "shell: the remembered hub ({trimmed}) is not one of ours; back to the onboarding"
         );
     }
     trusted
 }
 
-/// Persiste el origen capturado como `hub.url` (crea `cache_dir` si no existe).
+/// Persists the captured origin as `hub.url` (creating `cache_dir` if it does not exist).
 fn persist_hub_url(cache_dir: &Path, origin: &str) -> Result<(), ShellError> {
     std::fs::create_dir_all(cache_dir).map_err(|e| ShellError::Io(e.to_string()))?;
     std::fs::write(cache_dir.join(HUB_URL_FILE), origin).map_err(|e| ShellError::Io(e.to_string()))
 }
 
-/// Olvida el hub capturado (best-effort: no falla si no existía).
+/// Forgets the captured hub (best effort: no error if there was none).
 fn clear_hub_url(cache_dir: &Path) {
     let _ = std::fs::remove_file(cache_dir.join(HUB_URL_FILE));
 }
 
-/// Qué contesta el hub recordado cuando se le pregunta al arrancar.
+/// What the remembered hub answers when it is asked at start-up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HubProbe {
-    /// Contestó con este código HTTP.
+    /// It answered with this HTTP status.
     Status(u16),
-    /// No se pudo contactar: sin red, DNS caído, timeout.
+    /// It could not be reached: no network, DNS down, timeout.
     Unreachable,
 }
 
-/// ¿Hay que olvidar el `hub.url` recordado?
+/// Must the remembered `hub.url` be forgotten?
 ///
-/// **Solo** si el hub ya no existe. Es una decisión asimétrica a propósito: olvidarlo de más le
-/// borra al usuario su hub y le manda a rehacer el onboarding, mientras que olvidarlo de menos
-/// solo le deja una pantalla fea que se arregla sola en cuanto el hub vuelva. Ante la duda, se
-/// conserva.
+/// **Only** if the hub no longer exists. The decision is asymmetric on purpose: forgetting too
+/// eagerly deletes the user's hub and sends them through the onboarding again, while forgetting
+/// too little only leaves an ugly screen that fixes itself as soon as the hub is back. When in
+/// doubt, it is kept.
 ///
-/// Existe porque [`forget_hub`] **no alcanza este caso**: a ese lo llama el frontend al recibir un
-/// 410 del Cloud, y si el hub fue borrado la PWA no llega a cargarse nunca — el 404 lo sirve el
-/// edge. Sin esto la app abre en «404 page not found» de forma permanente y sin salida por la UI.
-/// Medido en un Mac el 2026-08-01 con un hub que la purga de prod se había llevado por delante.
+/// It exists because [`forget_hub`] **does not reach this case**: the frontend calls it on a 410
+/// from the server, and if the hub was deleted the PWA never loads at all — the 404 is served by
+/// the edge. Without this the app opens on «404 page not found» for good, with no way out through
+/// the UI. Seen on a Mac with a hub that a production purge had removed.
 fn should_forget_hub(probe: HubProbe) -> bool {
     match probe {
-        // El hub no está. 410 es además el contrato explícito `hub_not_found` del Cloud.
+        // The hub is not there. 410 is also the server's explicit `hub_not_found` contract.
         HubProbe::Status(404) | HubProbe::Status(410) => true,
-        // Todo lo demás —vivo, redirigiendo al login, sin autenticar, caído o inalcanzable— es un
-        // hub que SÍ existe.
+        // Everything else (alive, redirecting to the login, unauthenticated, down or unreachable)
+        // is a hub that DOES exist.
         _ => false,
     }
 }
 
-/// URL inicial de la ventana, por precedencia: deep link del arranque (ADR-0196 §7) → override dev
-/// ([`ENV_SHELL_URL`]) → `hub.url` persistido (modo app) → onboarding del SaaS. Pura para poder
-/// testearla.
+/// The window's start URL, by precedence: the start-up deep link → the development override
+/// ([`ENV_SHELL_URL`]) → the persisted `hub.url` (app mode) → the SaaS onboarding. Pure so that it
+/// can be tested.
 ///
-/// El deep link va **primero** porque es lo que el usuario está pidiendo AHORA: el override es
-/// configuración estática y el hub persistido es lo de la última vez. Si ganase cualquiera de los
-/// dos, pulsar «Open Terminal» del hub B desde un TPV que recuerda el A abriría el A —el negocio
-/// equivocado— sin un solo error que lo delate.
+/// The deep link goes **first** because it is what the user is asking for NOW: the override is
+/// static configuration and the persisted hub is last time's. If either of them won, pressing
+/// «Open Terminal» on hub B from a till that remembers hub A would open A — the wrong business —
+/// without a single error to give it away.
 fn initial_url_for(
     deep_link: Option<&str>,
     override_url: Option<&str>,
@@ -770,7 +768,7 @@ fn initial_url_for(
 }
 
 /// Which pages may choose a hub (the entries of [`hub_link::HubLink`]) and which hub the window
-/// starts linked to, by the precedence of [`initial_url_for`] (hub#2504).
+/// starts linked to, by the precedence of [`initial_url_for`].
 ///
 /// The development override is an entry (it may boot at a local SaaS that chooses the hub) and is
 /// linked only when it is a hub of ours that is not the SaaS itself (a local PWA).
@@ -795,7 +793,7 @@ fn boot_link(
     (entries, linked)
 }
 
-/// What a cold start does with the link it was launched by (hub#2644).
+/// What a cold start does with the link it was launched by.
 #[derive(Debug, PartialEq, Eq)]
 enum ColdStartLink {
     /// Launched without one.
@@ -818,7 +816,7 @@ fn cold_start_link(deep_link: Option<&str>, linked: Option<&str>) -> ColdStartLi
     }
 }
 
-/// Where the window goes after forgetting the hub (hub#447).
+/// Where the window goes after forgetting the hub.
 ///
 /// Two callers, two intents. The 410 path (`choose = false`) keeps the plain onboarding: the hub
 /// is gone, the SaaS routes as it sees fit — and with a single hub that means straight back in,
@@ -834,11 +832,11 @@ fn forget_destination(base: &str, choose: bool) -> String {
     }
 }
 
-/// Olvida el hub capturado y devuelve la ventana al onboarding del SaaS. Dos llamadores (hub#447):
-/// el frontend ante un 410 `hub_not_found` (sin `choose` → onboarding a secas) y el control
-/// «cambiar de negocio» de la topbar (`choose: true` → `?choose=1`, el selector de hubs del SaaS).
-/// CONSERVA `device.id` (ancla estable de la instalación, ADR-0154 — lo exige la issue).
-/// Best-effort en la navegación (sin ventana no falla).
+/// Forgets the captured hub and sends the window back to the SaaS onboarding. Two callers: the
+/// frontend on a 410 `hub_not_found` (no `choose` → the plain onboarding) and the topbar's «switch
+/// business» control (`choose: true` → `?choose=1`, the SaaS hub picker).
+/// KEEPS `device.id`, the stable anchor of this installation.
+/// The navigation is best effort (no window is not an error).
 #[tauri::command]
 fn forget_hub(app: tauri::AppHandle, choose: Option<bool>) -> Result<(), ShellError> {
     use tauri::Manager;
@@ -860,11 +858,10 @@ fn forget_hub(app: tauri::AppHandle, choose: Option<bool>) -> Result<(), ShellEr
 
 /// `open_external_url` — hands `url` to the user's OWN browser, leaving the till where it is.
 ///
-/// This is what the web app's `openExternal` calls inside the installed app (hub#475). It is a
-/// separate program, not a tab of ours, and that is the point on two counts: the till stays exactly
-/// as the user left it while they pay, and the payment happens **outside** the app — the shape
-/// ADR-0114 §4 chose so the Android build can ship (Play does not allow digital goods to be paid
-/// for inside the app).
+/// This is what the web app's `openExternal` calls inside the installed app. It is a separate
+/// program, not a tab of ours, and that is the point on two counts: the till stays exactly as the
+/// user left it while they pay, and the payment happens **outside** the app, which is what lets the
+/// Android build ship (Play does not allow digital goods to be paid for inside the app).
 ///
 /// A refusal is returned, never swallowed: the page turns it into something the user can read. A
 /// button that does nothing when pressed is the defect this command exists to end.
@@ -884,13 +881,12 @@ fn open_external_url(app: tauri::AppHandle, url: String) -> Result<(), ShellErro
 }
 
 /// `save_download` — writes bytes the page already holds into the user's Downloads folder and
-/// answers with the path (hub#480).
+/// answers with the path.
 ///
-/// The sibling of `open_external_url`, for the other half of ADR-0255: three `window.open` calls
-/// were left behind there, and all three were about **saving a file**, not about going somewhere.
-/// Sending a browser is no answer for them — the bytes of a `/files` download, of a backup export
-/// and of an invoice PDF are fetched with the hub session attached, and a separate program has no
-/// session to fetch them again with.
+/// The sibling of `open_external_url`, for the page's downloads, which are about **saving a file**
+/// rather than going somewhere. Sending a browser is no answer for them — the bytes of a `/files`
+/// download, of a backup export and of an invoice PDF are fetched with the hub session attached,
+/// and a separate program has no session to fetch them again with.
 ///
 /// So the page keeps the bytes and the shell keeps the disk. What comes back is the **path**,
 /// because inside the installed app nothing else would say the file arrived: there is no download
@@ -901,7 +897,7 @@ fn open_external_url(app: tauri::AppHandle, url: String) -> Result<(), ShellErro
 /// `downloads_unreachable` means this device has no Downloads folder the user could open, which the
 /// page must say out loud instead of reporting a path into storage nobody can browse.
 ///
-/// ⚠️ `(async)` is not decoration (hub#499). The Android half hands the file to Kotlin through
+/// ⚠️ `(async)` is not decoration. The Android half hands the file to Kotlin through
 /// `run_mobile_plugin`, which dispatches onto Android's main looper and BLOCKS waiting for the
 /// answer; a plain `#[tauri::command]` runs on that very thread, so the till would hang forever on
 /// the press that saves its backup. The body stays synchronous — the attribute only moves it off
@@ -944,8 +940,8 @@ fn save_download(
             }
             #[cfg(not(target_os = "android"))]
             {
-                // Unreachable: `save_target` only answers this on Android. Refusing rather than
-                // claiming a save is the rule of ADR-0259 applied to a case that cannot happen.
+                // Unreachable: `save_target` only answers this on Android. Even here the command
+                // refuses rather than report a save that did not happen.
                 let _ = (&app, &file_name, &bytes);
                 Err(ShellError::DownloadsUnreachable)
             }
@@ -953,12 +949,12 @@ fn save_download(
     }
 }
 
-/// `print_document` — the system print dialog for an A4 document the page holds (hub#2006).
+/// `print_document` — the system print dialog for an A4 document the page holds.
 ///
 /// The page keeps the html, the shell keeps the dialog: on the desktop a window of its own shows
 /// the document and the OS prints it, with its printer list and «Save as PDF» ([`native_print`]);
 /// on Android the plugin renders it in a WebView of its own and opens the system print service
-/// (`PrintManager`, hub#2008). Where there is no dialog it answers `native_print_unsupported` and
+/// (`PrintManager`). Where there is no dialog it answers `native_print_unsupported` and
 /// the print door takes its usual route — a refusal, never a pretended page.
 ///
 /// ⚠️ `(async)` is load-bearing: creating a window from a synchronous command deadlocks on Windows.
@@ -986,7 +982,7 @@ fn print_document(app: tauri::AppHandle, html: String) -> Result<(), ShellError>
     }
 }
 
-/// Hands the bytes to Kotlin so they land in Android's **public** Downloads collection (hub#499).
+/// Hands the bytes to Kotlin so they land in Android's **public** Downloads collection.
 ///
 /// The file is staged in the app's own cache first and handed over as a **path**: a 5 MB export has
 /// already crossed the `invoke` boundary once as base64, and copying it onto a tablet's heap again
@@ -1034,22 +1030,22 @@ fn publish_to_android_downloads(
     }
 }
 
-/// Pregunta en segundo plano si el hub recordado sigue existiendo y, si no, lo olvida y devuelve
-/// la ventana al onboarding.
+/// Asks in the background whether the remembered hub still exists and, if it does not, forgets it
+/// and sends the window back to the onboarding.
 ///
-/// En segundo plano a propósito: la ventana ya está abierta y mostrando el hub, así que en el
-/// caso normal —el hub existe— esto no se nota. En el caso malo el usuario ve el 404 un instante
-/// y acaba en el onboarding, que es de donde puede salir. Bloquear el arranque para evitar ese
-/// parpadeo penalizaría **todos** los arranques por un caso raro.
+/// In the background on purpose: the window is already open and showing the hub, so in the normal
+/// case (the hub exists) this goes unnoticed. In the bad case the user sees the 404 for an instant
+/// and ends up on the onboarding, which is where they can get out from. Blocking the start to
+/// avoid that flicker would penalize **every** start for a rare case.
 ///
-/// Un `HEAD` basta y no descarga la PWA entera. El timeout es corto porque no hay prisa: si no
-/// contesta a tiempo se conserva el hub, que es la decisión segura ([`should_forget_hub`]).
+/// A `HEAD` is enough and does not download the whole PWA. The timeout can be short: if the hub
+/// does not answer in time it is kept, which is the safe decision ([`should_forget_hub`]).
 ///
-/// Va por el runtime **async** de Tauri y con el cliente async de reqwest, NO por
-/// `std::thread` + `reqwest::blocking`. Medido en el emulador API 37: con el cliente blocking la
-/// petición **no llegaba a salir** en Android —ni un solo `HEAD` en el servidor— así que el
-/// rescate no existía justo en la plataforma donde el usuario no puede borrar datos de la app a
-/// mano. En macOS sí funcionaba, que es lo que lo hacía fácil de dar por bueno.
+/// It runs on Tauri's **async** runtime with reqwest's async client, NOT on `std::thread` +
+/// `reqwest::blocking`. Measured on the API 37 emulator: with the blocking client the request
+/// **never left** the device on Android (not a single `HEAD` reached the server), so the rescue did
+/// not exist on exactly the platform where the user cannot clear the app's data by hand. On macOS
+/// it did work, which is what made it easy to take for granted.
 fn spawn_hub_liveness_check(app: tauri::AppHandle, cache_dir: PathBuf, origin: String) {
     tauri::async_runtime::spawn(async move {
         use tauri::Manager;
@@ -1062,12 +1058,12 @@ fn spawn_hub_liveness_check(app: tauri::AppHandle, cache_dir: PathBuf, origin: S
             Ok(c) => match c.head(&url).send().await {
                 Ok(r) => HubProbe::Status(r.status().as_u16()),
                 Err(e) => {
-                    log::warn!("shell: no se pudo consultar el hub recordado ({origin}): {e}");
+                    log::warn!("shell: could not reach the remembered hub ({origin}): {e}");
                     HubProbe::Unreachable
                 }
             },
             Err(e) => {
-                log::warn!("shell: no se pudo crear el cliente HTTP: {e}");
+                log::warn!("shell: could not build the HTTP client: {e}");
                 HubProbe::Unreachable
             }
         };
@@ -1075,7 +1071,7 @@ fn spawn_hub_liveness_check(app: tauri::AppHandle, cache_dir: PathBuf, origin: S
             return;
         }
 
-        log::info!("shell: el hub recordado ({origin}) ya no existe ({probe:?}); vuelvo al onboarding");
+        log::info!("shell: the remembered hub ({origin}) is gone ({probe:?}); back to the onboarding");
         clear_hub_url(&cache_dir);
         forget_linked_hub(&app);
         if let Some(window) = app.get_webview_window("main") {
@@ -1086,7 +1082,7 @@ fn spawn_hub_liveness_check(app: tauri::AppHandle, cache_dir: PathBuf, origin: S
     });
 }
 
-/// The device stops answering the hub it was linked to (hub#2504).
+/// The device stops answering the hub it was linked to.
 fn forget_linked_hub<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     use tauri::Manager;
     if let Some(link) = app.try_state::<hub_link::HubLink>() {
@@ -1094,13 +1090,13 @@ fn forget_linked_hub<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
-/// A link the system handed the app (ADR-0196 §7).
+/// A link the system handed the app.
 ///
 /// A link to the linked hub just takes the window there. A link to any other hub would hand it the
-/// printer, the drawer and the card reader and make it the business the app boots on (hub#2504), and
-/// anyone can send one — an email, a web page, a message — so the person in front of the device is
-/// asked first, by the system's own dialog (hub#2644): «Open» links it and goes there, anything else
-/// leaves the device as it was. With nobody to ask, the link is refused, never followed.
+/// printer, the drawer and the card reader and make it the business the app boots on, and anyone
+/// can send one — an email, a web page, a message — so the person in front of the device is asked
+/// first, by the system's own dialog: «Open» links it and goes there, anything else leaves the
+/// device as it was. With nobody to ask, the link is refused, never followed.
 ///
 /// `target` comes out of [`resolve_deep_link`], already a hub of ours; it is checked again here so
 /// this function does not lean on its caller for what it links.
@@ -1144,28 +1140,28 @@ fn open_hub_from_link<R: tauri::Runtime>(app: &tauri::AppHandle<R>, target: &str
     );
 }
 
-/// Lleva la ventana principal a `url`. Best-effort a propósito: sin ventana (o con una URL que no
-/// parsea) no hay nada que dirigir, y un enlace no puede tumbar la app.
+/// Takes the main window to `url`. Best effort on purpose: without a window (or with a URL that
+/// does not parse) there is nothing to steer, and a link must not bring the app down.
 fn navigate_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &str) {
     use tauri::Manager;
     let Some(window) = app.get_webview_window("main") else {
-        log::warn!("shell: llega un enlace pero aún no hay ventana que dirigir ({url})");
+        log::warn!("shell: a link arrived but there is no window to steer yet ({url})");
         return;
     };
     match url.parse::<tauri::Url>() {
         Ok(parsed) => {
             if let Err(e) = window.navigate(parsed) {
-                log::warn!("shell: no se pudo abrir el enlace ({url}): {e}");
+                log::warn!("shell: could not open the link ({url}): {e}");
             }
         }
-        Err(e) => log::warn!("shell: destino de enlace ilegible ({url}): {e}"),
+        Err(e) => log::warn!("shell: unreadable link destination ({url}): {e}"),
     }
 }
 
-/// The retry button of the offline page (hub#1716).
+/// The retry button of the offline page.
 ///
-/// The button used to be `location.reload()`, which on the bundled fallback page reloads THE
-/// FALLBACK PAGE: the only control on the only screen the user could reach led back to itself.
+/// A plain `location.reload()` on the bundled fallback page would reload THE FALLBACK PAGE: the
+/// only control on the only screen the user can reach would lead back to itself.
 /// Retry has to happen on this side, because this is the side that can ask the network and move
 /// the window. Answers whether the target is reachable so the page can say "still nothing" instead
 /// of pretending it did something.
@@ -1181,8 +1177,8 @@ async fn shell_retry(
     Ok(reachability == connectivity::Reachability::Online)
 }
 
-/// Crea la ventana principal apuntando a [`initial_url_for`] y registra el `on_navigation` que
-/// captura `?shell=1` → persiste el origen como `hub.url` (una sola escritura por cambio).
+/// Creates the main window on [`initial_url_for`] and registers the `on_navigation` handler that
+/// captures `?shell=1` and persists the origin as `hub.url` (a single write per change).
 fn open_main_window(app: &tauri::App, cache_dir: Option<PathBuf>) -> tauri::Result<()> {
     use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
@@ -1190,17 +1186,17 @@ fn open_main_window(app: &tauri::App, cache_dir: Option<PathBuf>) -> tauri::Resu
     let override_url = std::env::var(ENV_SHELL_URL)
         .ok()
         .filter(|v| !v.trim().is_empty());
-    // Arranque EN FRÍO por deep link: en Windows y Linux el sistema contesta a un enlace lanzando
-    // el ejecutable otra vez con la URL como argumento, así que aquí es donde llega. En macOS/iOS/
-    // Android llega como evento y lo recoge `on_open_url` (ver `run`).
+    // COLD start by deep link: on Windows and Linux the system answers a link by launching the
+    // executable again with the URL as an argument, so this is where it arrives. On macOS, iOS and
+    // Android it arrives as an event and `on_open_url` picks it up (see `run`).
     let deep_link = deep_link_from_args(std::env::args());
-    // The second gate in front of the commands (hub#2504): only the linked hub drives the device.
+    // The second gate in front of the commands: only the linked hub drives the device.
     let (entries, linked) = boot_link(
         override_url.as_deref(),
         persisted.as_deref(),
         &saas_base_url(),
     );
-    // Only a link to the linked hub boots on it; one to another hub asks first (hub#2644).
+    // Only a link to the linked hub boots on it; one to another hub asks first.
     let cold = cold_start_link(deep_link.as_deref(), linked.as_deref());
     let opens = match &cold {
         ColdStartLink::Open(target) => Some(target.clone()),
@@ -1215,20 +1211,20 @@ fn open_main_window(app: &tauri::App, cache_dir: Option<PathBuf>) -> tauri::Resu
     let url = match initial.parse::<tauri::Url>() {
         Ok(u) => WebviewUrl::External(u),
         Err(e) => {
-            // Degradado: página estática empaquetada (shell-dist). No debería pasar salvo un
-            // ERPLORA_SHELL_URL/ERPLORA_SAAS_URL malformado.
-            eprintln!("shell: URL inicial inválida ({initial}): {e}; cargo la página degradada");
+            // Degraded: the bundled static page (shell-dist). It should not happen except with a
+            // malformed ERPLORA_SHELL_URL/ERPLORA_SAAS_URL.
+            eprintln!("shell: invalid start URL ({initial}): {e}; loading the degraded page");
             WebviewUrl::App("index.html".into())
         }
     };
 
-    // Si se arranca contra un hub recordado, hay que comprobar que sigue existiendo — pero DESPUÉS
-    // de abrir la ventana, no antes: bloquear el arranque de un TPV por una petición de red sería
-    // peor que la pantalla que se intenta evitar.
+    // When the window boots on a remembered hub, it has to be checked that the hub still exists —
+    // but AFTER opening the window, not before: blocking a till's start on a network request would
+    // be worse than the screen this tries to avoid.
     //
     // Not when the window boots on a link's hub: this check ends up navigating to the onboarding,
     // and would take away exactly what the person just asked for. A link to ANOTHER hub boots on the
-    // remembered one, so that one is checked as usual while the person is asked (hub#2644).
+    // remembered one, so that one is checked as usual while the person is asked.
     if override_url.is_none() && opens.is_none() {
         if let (Some(dir), Some(origin)) = (cache_dir.clone(), persisted.clone()) {
             spawn_hub_liveness_check(app.handle().clone(), dir, origin);
@@ -1262,7 +1258,7 @@ fn open_main_window(app: &tauri::App, cache_dir: Option<PathBuf>) -> tauri::Resu
         .title("ERPlora")
         .inner_size(1280.0, 800.0)
         .min_inner_size(960.0, 600.0)
-        // The hardware waits for the page to have LOADED (hub#2504): the window's URL flips at the
+        // The hardware waits for the page to have LOADED: the window's URL flips at the
         // start of a navigation, while the page that started it still runs until the new one commits.
         .on_page_load(|window, payload| {
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
@@ -1272,27 +1268,27 @@ fn open_main_window(app: &tauri::App, cache_dir: Option<PathBuf>) -> tauri::Resu
             }
         })
         .on_navigation(move |nav| {
-            // hub#1915: the Play copy follows only the SaaS pages that cannot take money. First,
+            // The Play copy follows only the SaaS pages that cannot take money. First,
             // so a refused page is neither remembered as the hub nor watched by the guard below.
             let verdict = navigation_verdict(distribution_channel(), &saas_base, nav);
             if verdict != NavigationVerdict::Allow {
                 refuse_navigation(&refusals, verdict, &saas_base, nav);
                 return false;
             }
-            // `?shell=1` links a hub only when the SaaS chose it, or it is the linked one (hub#2504).
+            // `?shell=1` links a hub only when the SaaS chose it, or it is the linked one.
             let captured = refusals.try_state::<hub_link::HubLink>().and_then(|link| link.follow(nav));
             if let (Some(dir), Some(origin)) = (cache_dir.as_deref(), captured) {
                 if let Ok(mut guard) = last.lock() {
                     if guard.as_deref() != Some(origin.as_str()) {
                         match persist_hub_url(dir, &origin) {
                             Ok(()) => *guard = Some(origin),
-                            Err(e) => eprintln!("shell: no se pudo persistir hub.url: {e}"),
+                            Err(e) => eprintln!("shell: could not persist hub.url: {e}"),
                         }
                     }
                 }
             }
             // Wherever the webview goes on its own — a link, a redirect, the login chain — that is
-            // the page the guard has to keep alive (hub#1716). Our own bundled page is filtered
+            // the page the guard has to keep alive. Our own bundled page is filtered
             // out inside `remote_target`, or the offline screen would end up watching itself.
             if let Some(target) = connectivity::remote_target(nav) {
                 watched.set_target(target);
@@ -1301,9 +1297,9 @@ fn open_main_window(app: &tauri::App, cache_dir: Option<PathBuf>) -> tauri::Resu
         })
         .build()?;
 
-    // From here on, a load that never lands has an answer (hub#1716).
+    // From here on, a load that never lands has an answer.
     spawn_connectivity_guard(window, nav_state);
-    // With the window up, a link to another hub gets its question (hub#2644).
+    // With the window up, a link to another hub gets its question.
     match cold {
         ColdStartLink::Ask(target) => open_hub_from_link(app.handle(), &target),
         ColdStartLink::None | ColdStartLink::Open(_) => {}
@@ -1311,9 +1307,9 @@ fn open_main_window(app: &tauri::App, cache_dir: Option<PathBuf>) -> tauri::Resu
     Ok(())
 }
 
-/// The notice for a page the Play copy refused (hub#1915): English source plus its `es`
-/// translation (ADR-0055/0199). It names no other place to go on purpose — sending the person to
-/// finish on the website is the very communication Google Play forbids.
+/// The notice for a page the Play copy refused: English source plus its `es` translation. It names
+/// no other place to go on purpose — sending the person to finish on the website is the very
+/// communication Google Play forbids.
 const REFUSAL_NOTICE_EN: &str = "This page is not available in the app.";
 const REFUSAL_NOTICE_ES: &str = "Esta página no está disponible en la aplicación.";
 
@@ -1366,7 +1362,7 @@ fn refuse_navigation(
 
     // Origin and path, never the query: it can carry a one-time code.
     log::warn!(
-        "shell: the {} copy refused {}{} ({verdict:?}, hub#1915)",
+        "shell: the {} copy refused {}{} ({verdict:?})",
         distribution_channel(),
         target.origin().ascii_serialization(),
         target.path()
@@ -1384,17 +1380,17 @@ fn refuse_navigation(
     });
 }
 
-// ── Camino de hardware: handlers `invoke` → erplora-peripherals ──────────────────────────────────
+// ── Hardware path: `invoke` handlers → erplora-peripherals ───────────────────────────────────────
 //
-// El shell ES el bridge (no hay proceso bridge aparte, §2.7): el hardware se expone por handlers
-// `invoke` que delegan en `erplora-peripherals`. El contrato de datos lo heredó de las frames WS
-// del bridge standalone (retirado en hub#340) y no cambió: `getDevices` devuelve el array de
-// `protocol::Device` y `discoverPrinters` el outcome `PrinterDiscovery` (serde-serializado igual
-// que `BridgeDevice`/`PrinterDiscovery` del SDK); `print`/`testPrint`/`openDrawer` no devuelven nada.
+// The shell IS the bridge (there is no separate bridge process): the hardware is exposed through
+// `invoke` handlers that delegate to `erplora-peripherals`. The data contract matches the SDK:
+// `getDevices` returns the array of `protocol::Device` and `discoverPrinters` the
+// `PrinterDiscovery` outcome (serialized by serde exactly like the SDK's
+// `BridgeDevice`/`PrinterDiscovery`); `print`/`testPrint`/`openDrawer` return nothing.
 //
-// El `Watchdog` del registry corre como tarea async del shell (auto-recuperación de IP por DHCP),
-// y la `PrintQueue` con reintentos drena en segundo plano. Los outcomes y eventos del watchdog se
-// loguean; el canal hacia la UI se cablearía con eventos Tauri en una fase posterior.
+// The registry's `Watchdog` runs as an async task of the shell (it recovers a device whose IP DHCP
+// changed), and the `PrintQueue` drains with retries in the background. Job outcomes and watchdog
+// events are only logged; nothing forwards them to the UI.
 
 use erplora_peripherals::discovery::{self, LocalNetworkAccess, PrinterDiscovery};
 use erplora_peripherals::drawer;
@@ -1403,25 +1399,24 @@ use erplora_peripherals::protocol::Device;
 use erplora_peripherals::queue::{JobOutcome, PrintJob, PrintQueue, RetryPolicy};
 use erplora_peripherals::registry::DeviceRegistry;
 
-/// Estado de hardware compartido entre handlers `invoke`: registro persistente de dispositivos +
-/// cola de impresión con reintentos. Vive en el estado gestionado de Tauri (`app.manage`). El
-/// registro y la cola van tras `Arc` para que las tareas de fondo (watchdog + worker de la cola)
-/// compartan las mismas instancias que los handlers `invoke`.
+/// Hardware state shared by the `invoke` handlers: the persistent device registry plus the print
+/// queue with retries. It lives in Tauri's managed state (`app.manage`). Registry and queue sit
+/// behind `Arc` so that the background tasks (watchdog and queue worker) share the same instances
+/// as the `invoke` handlers.
 struct PeripheralsState {
     registry: std::sync::Arc<DeviceRegistry>,
     queue: std::sync::Arc<PrintQueue>,
 }
 
-/// Construye el estado de hardware y **lanza** las tareas de fondo en el runtime tokio actual:
-///   - worker de la `PrintQueue` (envío con reintentos; cada `JobOutcome` se loguea),
-///   - `Watchdog` del registry (health-check + recovery por MAC ante cambio de IP DHCP).
-/// Heredado de `spawn_queue_worker`/`spawn_watchdog` del bridge standalone (retirado en hub#340).
+/// Builds the hardware state and **spawns** the background tasks on the current tokio runtime:
+///   - the `PrintQueue` worker (sending with retries; every `JobOutcome` is logged),
+///   - the registry's `Watchdog` (health check plus recovery by MAC when DHCP changes an IP).
 fn build_peripherals_state(devices_path: PathBuf) -> PeripheralsState {
     let registry = std::sync::Arc::new(DeviceRegistry::load(devices_path));
     let queue = std::sync::Arc::new(PrintQueue::new(RetryPolicy::default()));
 
-    // Worker de la cola de impresión: drena y reintenta; loguea cada outcome. `async_runtime::spawn`
-    // usa el runtime tokio global de Tauri, así que funciona desde el `setup` hook.
+    // Print queue worker: drains and retries, logging every outcome. `async_runtime::spawn` uses
+    // Tauri's global tokio runtime, so it works from the `setup` hook.
     let worker_queue = queue.clone();
     tauri::async_runtime::spawn(async move {
         let (outcomes_tx, mut outcomes_rx) = tokio::sync::mpsc::unbounded_channel::<JobOutcome>();
@@ -1429,19 +1424,19 @@ fn build_peripherals_state(devices_path: PathBuf) -> PeripheralsState {
             while let Some(outcome) = outcomes_rx.recv().await {
                 match outcome {
                     JobOutcome::Completed { job_id } => {
-                        eprintln!("peripherals: trabajo de impresión completado ({job_id:?})")
+                        eprintln!("peripherals: print job completed ({job_id:?})")
                     }
                     JobOutcome::Failed { job_id, error } => {
-                        eprintln!("peripherals: trabajo de impresión fallido ({job_id:?}): {error}")
+                        eprintln!("peripherals: print job failed ({job_id:?}): {error}")
                     }
                 }
             }
         });
         worker_queue.run(outcomes_tx).await;
-        eprintln!("peripherals: worker de la cola de impresión terminado (cola cerrada)");
+        eprintln!("peripherals: print queue worker stopped (queue closed)");
     });
 
-    // Watchdog del registry: auto-recuperación de dispositivos tras cambio de IP por DHCP.
+    // Registry watchdog: recovers devices after DHCP changes their IP.
     let watchdog_registry = registry.clone();
     tauri::async_runtime::spawn(async move {
         use erplora_peripherals::registry::{Watchdog, WatchdogConfig, WatchdogEvent};
@@ -1449,13 +1444,13 @@ fn build_peripherals_state(devices_path: PathBuf) -> PeripheralsState {
         tauri::async_runtime::spawn(async move {
             while let Some(ev) = events_rx.recv().await {
                 match ev {
-                    // `key` y no `mac`: es la identidad estable del dispositivo y siempre existe
-                    // (la MAC es `None` cuando ARP no resuelve — siempre en Android).
+                    // `key` rather than `mac`: it is the device's stable identity and always exists
+                    // (the MAC is `None` when ARP does not resolve, which is always on Android).
                     WatchdogEvent::Recovered(d) => {
-                        eprintln!("peripherals: dispositivo recuperado {} ({})", d.name, d.key)
+                        eprintln!("peripherals: device recovered {} ({})", d.name, d.key)
                     }
                     WatchdogEvent::Lost(d) => {
-                        eprintln!("peripherals: dispositivo perdido {} ({})", d.name, d.key)
+                        eprintln!("peripherals: device lost {} ({})", d.name, d.key)
                     }
                 }
             }
@@ -1467,8 +1462,8 @@ fn build_peripherals_state(devices_path: PathBuf) -> PeripheralsState {
     PeripheralsState { registry, queue }
 }
 
-/// Error de los handlers de hardware. Se serializa como string para el frontend (igual que el
-/// `Event::Error` del bridge standalone se mapea a un rechazo de la promesa en el SDK).
+/// Error of the hardware handlers. It is serialized as a string for the frontend, where the SDK
+/// turns it into a rejected promise.
 #[derive(Debug, thiserror::Error)]
 pub enum HardwareError {
     #[error("{0}")]
@@ -1481,10 +1476,10 @@ impl Serialize for HardwareError {
     }
 }
 
-/// Refusal of `erplora_add_network_printer` (hub#1924): the stable `code` the page branches on
-/// next to the message for the log. `HardwareError` travels as a bare string, and the two answers
-/// this command can give send the owner to opposite places — fix the typed address, or go check
-/// the printer — so the page must be able to tell them apart without parsing prose (ADR-0055).
+/// Refusal of `erplora_add_network_printer`: the stable `code` the page branches on next to the
+/// message for the log. `HardwareError` travels as a bare string, and the two answers this command
+/// can give send the owner to opposite places — fix the typed address, or go check the printer —
+/// so the page must be able to tell them apart without parsing prose.
 #[derive(Debug, Serialize)]
 struct AddPrinterError {
     code: &'static str,
@@ -1500,28 +1495,28 @@ impl From<erplora_peripherals::PeripheralError> for AddPrinterError {
     }
 }
 
-/// `erplora_bridge_status` — el `IpcBridgeTransport.detect()` lo invoca para saber si el canal de
-/// hardware existe (en el shell siempre existe: el shell ES el bridge). Devuelve la versión.
+/// `erplora_bridge_status` — `IpcBridgeTransport.detect()` calls it to learn whether the hardware
+/// channel exists (in the shell it always does: the shell IS the bridge). Returns the version.
 #[tauri::command]
 fn erplora_bridge_status() -> serde_json::Value {
     serde_json::json!({ "version": bridge_status_version() })
 }
 
-/// La versión que la app declara al resto del sistema (la pantalla de impresión la enseña).
+/// The version the app declares to the rest of the system (the printing screen shows it).
 ///
-/// Sale de `tauri.conf.json`, que es lo que **sella la release** (`tauri-release.yml` escribe ahí
-/// el tag antes de construir). `CARGO_PKG_VERSION` no lo sella nadie: el `Cargo.toml` de este shell
-/// vale `0.0.0` en todas las builds, así que una app 1.0.0 instalada se presentaba como
-/// «Impresora lista · v0.0.0.» (hub#862).
+/// It comes from `tauri.conf.json`, which is what **stamps the release** (`tauri-release.yml`
+/// writes the tag there before building). Nobody stamps `CARGO_PKG_VERSION`: this shell's
+/// `Cargo.toml` says `0.0.0` in every build, so an installed 1.0.0 app would introduce itself as
+/// «Impresora lista · v0.0.0.».
 ///
-/// Se lee la conf con `include_str!` y no `AppHandle::package_info()` para que esto sea una función
-/// pura y comprobable en un test de unidad — el mismo fichero que lee `generate_context!`.
+/// The conf is read with `include_str!` rather than `AppHandle::package_info()` so that this is a
+/// pure function a unit test can check — it is the same file `generate_context!` reads.
 fn bridge_status_version() -> String {
     tauri_conf_version(include_str!("../tauri.conf.json"))
         .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
 }
 
-/// El campo `version` de una `tauri.conf.json`, o `None` si no hay uno legible.
+/// The `version` field of a `tauri.conf.json`, or `None` when there is no readable one.
 fn tauri_conf_version(conf: &str) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(conf)
         .ok()?
@@ -1582,7 +1577,7 @@ fn bluetooth_printer_info(
     }
 }
 
-/// Folds the bonded Bluetooth printers into the network discovery outcome (ADR-0204, hub#388).
+/// Folds the bonded Bluetooth printers into the network discovery outcome.
 ///
 /// One list on purpose: "which printers can this device print on?" is ONE question to the person
 /// setting up a till, whatever transport each answer arrives by. Deduplicated by id, so a
@@ -1590,7 +1585,7 @@ fn bluetooth_printer_info(
 ///
 /// A `PermissionDenied` outcome stays a refusal WITHOUT printers: an answer that both names a
 /// missing permission and lists printers would give the screen two contradictory instructions at
-/// once. Discovery asks for both printer permissions up front (hub#758), so that state is one
+/// once. Discovery asks for both printer permissions up front, so that state is one
 /// "allow" away from resolving itself.
 fn merge_bluetooth_printers(
     outcome: PrinterDiscovery,
@@ -1610,7 +1605,7 @@ fn merge_bluetooth_printers(
     }
 }
 
-/// Folds the machine's USB print queues into the discovery outcome (hub#1083).
+/// Folds the machine's USB print queues into the discovery outcome.
 ///
 /// Same rule as the Bluetooth merge, and for the same reason: "which printers can this device
 /// print on?" is ONE question to the person setting up a till, whatever cable each answer arrives
@@ -1638,7 +1633,7 @@ fn merge_usb_printers(
 }
 
 /// Puts the machine's own print queues into the device registry, so the owner can say which one
-/// prints the kitchen's tickets (hub#1536).
+/// prints the kitchen's tickets.
 ///
 /// The network and Bluetooth halves of discovery already register what they find; this is the
 /// third. A queue has neither MAC nor socket, so it enters by its `printer_id` — the door
@@ -1663,13 +1658,13 @@ fn register_discovered_queues(
     }
 }
 
-/// `erplora_discover_printers` — re-escanea la red (mDNS + subred), lista las impresoras
-/// Bluetooth EMPAREJADAS (solo Android, ADR-0204), registra y devuelve las impresoras. Espejo de
-/// `Command::DiscoverPrinters` del bridge.
+/// `erplora_discover_printers` — rescans the network (mDNS + subnet), lists the PAIRED Bluetooth
+/// printers (Android only), registers and returns the printers. Mirrors the bridge's
+/// `Command::DiscoverPrinters`.
 ///
-/// Devuelve el OUTCOME (`{status, …}`), no el array pelado: sin permiso de red local no hay lista
-/// vacía que devolver, hay una razón — y «conecta una impresora» y «da permiso a la app» son
-/// instrucciones opuestas para el usuario (hub#338).
+/// Returns the OUTCOME (`{status, …}`), not a bare array: without the local network permission
+/// there is no empty list to return, there is a reason — and «connect a printer» and «give the app
+/// permission» are opposite instructions for the user.
 #[tauri::command]
 async fn erplora_discover_printers(
     app: tauri::AppHandle,
@@ -1695,7 +1690,7 @@ async fn erplora_discover_printers(
         let _ = state.registry.register(Some(&p.mac), "", 0, &p.name, "bluetooth");
     }
 
-    // The machine's own USB print queues (hub#1083; desktop only — Android has no queue to ask).
+    // The machine's own USB print queues (desktop only — Android has no queue to ask).
     // `spawn_blocking` because asking CUPS spawns a client and waits for it: on a wedged `cupsd`
     // that wait runs to its timeout, and doing it on the async runtime would stall every other
     // command for as long as it lasted.
@@ -1720,11 +1715,11 @@ async fn erplora_discover_printers(
     let usb = Vec::new();
 
     // Registered like their network and bluetooth siblings, so roles (kitchen/bar/receipt) can be
-    // assigned to them (hub#1536); the printer_id is the key, ip/port stay empty — the watchdog
-    // only monitors `network`, so a queue never enters the health probe or the ARP recovery sweep.
+    // assigned to them; the printer_id is the key, ip/port stay empty — the watchdog only monitors
+    // `network`, so a queue never enters the health probe or the ARP recovery sweep.
     register_discovered_queues(&state.registry, &usb);
 
-    // Printers the owner typed by address (hub#1924) stay listed even when the sweep cannot see
+    // Printers the owner typed by address stay listed even when the sweep cannot see
     // them — that is why they were typed.
     let outcome = discovery::with_manual_printers(outcome, &state.registry);
 
@@ -1734,10 +1729,10 @@ async fn erplora_discover_printers(
     ))
 }
 
-/// `erplora_add_network_printer` — adds a network printer by the address the owner TYPED
-/// (hub#1924): the way in when the scan cannot see it (another subnet, an isolated Wi-Fi, mDNS
-/// blocked by the router). It connects first and only a printer that answers is saved; the next
-/// discovery keeps listing it. Returns the printer as the scan would have.
+/// `erplora_add_network_printer` — adds a network printer by the address the owner TYPED: the way
+/// in when the scan cannot see it (another subnet, an isolated Wi-Fi, mDNS blocked by the router).
+/// It connects first and only a printer that answers is saved; the next discovery keeps listing
+/// it. Returns the printer as the scan would have.
 #[tauri::command]
 async fn erplora_add_network_printer(
     state: tauri::State<'_, PeripheralsState>,
@@ -1753,25 +1748,16 @@ async fn erplora_add_network_printer(
     .await?)
 }
 
-/// `erplora_get_devices` — contenido del registro persistente de dispositivos (con sus roles).
+/// `erplora_get_devices` — the contents of the persistent device registry (with their roles).
 #[tauri::command]
 fn erplora_get_devices(state: tauri::State<'_, PeripheralsState>) -> Vec<Device> {
     state.registry.get_all()
 }
 
-/// `erplora_print` — renders the ESC/POS document and **queues** it for sending with retries (same
-/// flow as the bridge's `Command::Print`). Errors before the enqueue (bad printer_id/payload) come
-/// back to the caller; the outcome of the send arrives through the queue's worker (log).
-///
-/// **An unknown `document_type` is refused, not printed as `Generic`** (hub#501). This is the end of
-/// the chain: the queue in the hub already checks the vocabulary, but a document that got past it —
-/// a job written by hand, a producer talking straight to this command — would otherwise reach the
-/// paper as a nameless key/value dump, and a kitchen order that comes out wrong is only discovered
-/// when the plate is missing. Failing here turns that into a `failed` the print host reports.
-/// Sends already-rendered bytes to a bonded SPP printer through the Android plugin (ADR-0204).
+/// Sends already-rendered bytes to a bonded SPP printer through the Android plugin.
 ///
 /// Direct, not queued: the `PrintQueue` is the NETWORK path (its jobs carry a socket target).
-/// Phase 1 gives bluetooth the simple failure mode — the error comes straight back to the caller
+/// Bluetooth gets the simple failure mode on purpose — the error comes straight back to the caller
 /// (the print host reports `failed`), instead of retrying against a printer whose only health
 /// signal IS the connect.
 fn bluetooth_send(
@@ -1789,9 +1775,9 @@ fn bluetooth_send(
         })
 }
 
-/// Sends already-rendered bytes to the printer behind an OS print queue (hub#1083).
+/// Sends already-rendered bytes to the printer behind an OS print queue.
 ///
-/// Direct, not queued — the same phase-1 shape as `bluetooth_send`, and the reasoning is in
+/// Direct, not queued — the same shape as `bluetooth_send`, and the reasoning is in
 /// `erplora_peripherals::usb::send_raw`: [`PrintQueue`] is the NETWORK path, its jobs carry a
 /// socket target, and widening it is a real change to the one piece of the print chain that
 /// already works. The failure stays visible: the error comes back to the caller and the print host
@@ -1802,8 +1788,8 @@ fn usb_send(target: &discovery::UsbTarget, payload: &[u8]) -> Result<(), Hardwar
     Ok(())
 }
 
-/// Android has no OS print queue to hand bytes to, and USB Host there was declined on purpose
-/// (hub#1083): the SPP transport of ADR-0204 already covers the cheap printer on a tablet.
+/// Android has no OS print queue to hand bytes to, and USB Host there is left out on purpose: the
+/// Bluetooth SPP transport already covers the cheap printer on a tablet.
 ///
 /// This says so instead of quietly doing nothing. A hub configured on the desktop till and then
 /// opened on a tablet keeps the same `printer_id`, so this IS reachable — and a ticket that
@@ -1819,10 +1805,10 @@ fn usb_send(target: &discovery::UsbTarget, _payload: &[u8]) -> Result<(), Hardwa
     ))
 }
 
-/// Sends a document to a network printer and answers with what happened to the paper (hub#2494):
-/// `Ok` once it is on the printer, the unreachable error once the queue's retries ran out. Before,
-/// the answer came on the hand-over to the in-memory queue, so a switched-off printer lost the
-/// ticket with nobody told — the till heard «done», and so did the hub for a job from its queue.
+/// Sends a document to a network printer and answers with what happened to the paper: `Ok` once
+/// it is on the printer, the unreachable error once the queue's retries ran out. Answering on the
+/// hand-over to the in-memory queue instead would let a switched-off printer lose the ticket with
+/// nobody told — the till would hear «done», and so would the hub for a job from its queue.
 async fn print_to_network(
     queue: &PrintQueue,
     target: discovery::NetworkTarget,
@@ -1833,10 +1819,21 @@ async fn print_to_network(
     Ok(())
 }
 
-/// ⚠️ `async` is load-bearing (ADR-0204): the bluetooth arm crosses into Kotlin through
+/// `erplora_print` — renders the ESC/POS document and sends it (same command as the bridge's
+/// `Command::Print`): through the [`PrintQueue`] and its retries for a network printer, directly
+/// for a Bluetooth or USB one. Every failure, a bad printer_id or payload included, comes back to
+/// the caller.
+///
+/// **An unknown `document_type` is refused, not printed as `Generic`**. This is the end of the
+/// chain: the queue in the hub already checks the vocabulary, but a document that got past it —
+/// a job written by hand, a producer talking straight to this command — would otherwise reach the
+/// paper as a nameless key/value dump, and a kitchen order that comes out wrong is only discovered
+/// when the plate is missing. Failing here turns that into a `failed` the print host reports.
+///
+/// ⚠️ `async` is load-bearing: the bluetooth arm crosses into Kotlin through
 /// `run_mobile_plugin`, which dispatches onto Android's main looper and BLOCKS for the answer — a
 /// plain command runs on that very thread and the till would hang on the press that prints. And the
-/// network arm awaits the paper (hub#2494), retries included, which only an async command can do.
+/// network arm awaits the paper, retries included, which only an async command can do.
 #[tauri::command]
 async fn erplora_print(
     app: tauri::AppHandle,
@@ -1863,9 +1860,9 @@ async fn erplora_print(
     Ok(())
 }
 
-/// `erplora_test_print` — prints a test page on the given printer (over SPP when it is Bluetooth,
-/// ADR-0204). `async` for the same reasons as `erplora_print`: «Probar» on a switched-off network
-/// printer now says it did not print (hub#2494).
+/// `erplora_test_print` — prints a test page on the given printer (over SPP when it is Bluetooth).
+/// `async` for the same reasons as `erplora_print`: «Probar» on a switched-off network printer
+/// says it did not print.
 #[tauri::command]
 async fn erplora_test_print(
     app: tauri::AppHandle,
@@ -1888,9 +1885,9 @@ async fn erplora_test_print(
     Ok(())
 }
 
-/// `erplora_open_drawer` — abre el cajón vía kick ESC/POS por el socket de la impresora (o por el
-/// transporte SPP si la impresora es Bluetooth, ADR-0204 — el kick son bytes ESC/POS como
-/// cualquier otro documento).
+/// `erplora_open_drawer` — opens the cash drawer with an ESC/POS kick over the printer's socket (or
+/// over the SPP transport when the printer is Bluetooth: the kick is ESC/POS bytes like any other
+/// document).
 #[tauri::command]
 async fn erplora_open_drawer(
     app: tauri::AppHandle,
@@ -1912,9 +1909,9 @@ async fn erplora_open_drawer(
     Ok(())
 }
 
-// ── «Start on login» (ADR-0204 §7, hub#389) ──────────────────────────────────────────────────────
+// ── «Start on login» ─────────────────────────────────────────────────────────────────────────────
 //
-// The print queue lives in the hub (ADR-0196 §6) and this device drains it: if nobody opened the
+// The print queue lives in the hub and this device drains it: if nobody opened the
 // app, the tickets wait. On a dedicated desktop till, starting with the session guarantees there
 // is always a print host. Opt-in, OFF by default — and the OS owns the state (LaunchAgent /
 // registry / autostart dir), we keep NO persistence of our own. Desktop only: the plugin does not
@@ -1965,7 +1962,7 @@ fn autostart_is_enabled(app: tauri::AppHandle) -> Result<bool, ShellError> {
     #[cfg(not(desktop))]
     {
         let _ = app;
-        Err(ShellError::Io("autostart is desktop-only (ADR-0204 §7)".into()))
+        Err(ShellError::Io("autostart is desktop-only".into()))
     }
 }
 
@@ -1979,7 +1976,7 @@ fn autostart_enable(app: tauri::AppHandle) -> Result<bool, ShellError> {
     #[cfg(not(desktop))]
     {
         let _ = app;
-        Err(ShellError::Io("autostart is desktop-only (ADR-0204 §7)".into()))
+        Err(ShellError::Io("autostart is desktop-only".into()))
     }
 }
 
@@ -1993,12 +1990,12 @@ fn autostart_disable(app: tauri::AppHandle) -> Result<bool, ShellError> {
     #[cfg(not(desktop))]
     {
         let _ = app;
-        Err(ShellError::Io("autostart is desktop-only (ADR-0204 §7)".into()))
+        Err(ShellError::Io("autostart is desktop-only".into()))
     }
 }
 
-/// `erplora_set_device_role` — asigna rol (receipt/kitchen/bar/label) y devuelve el registro
-/// actualizado. Espejo de `Command::SetDeviceRole`.
+/// `erplora_set_device_role` — assigns a role (receipt/kitchen/bar/label) and returns the updated
+/// registry. Mirrors the bridge's `Command::SetDeviceRole`.
 #[tauri::command]
 fn erplora_set_device_role(
     state: tauri::State<'_, PeripheralsState>,
@@ -2009,7 +2006,7 @@ fn erplora_set_device_role(
     Ok(state.registry.get_all())
 }
 
-/// `erplora_set_device_name` — renombra un dispositivo y devuelve el registro actualizado.
+/// `erplora_set_device_name` — renames a device and returns the updated registry.
 #[tauri::command]
 fn erplora_set_device_name(
     state: tauri::State<'_, PeripheralsState>,
@@ -2020,7 +2017,7 @@ fn erplora_set_device_name(
     Ok(state.registry.get_all())
 }
 
-/// `erplora_remove_device` — elimina un dispositivo del registro y devuelve el registro actualizado.
+/// `erplora_remove_device` — removes a device from the registry and returns the updated registry.
 #[tauri::command]
 fn erplora_remove_device(
     state: tauri::State<'_, PeripheralsState>,
@@ -2030,10 +2027,10 @@ fn erplora_remove_device(
     Ok(state.registry.get_all())
 }
 
-// ── The badge, read off the device's own NFC reader (hub#988) ───────────────────────────────────
+// ── The badge, read off the device's own NFC reader ─────────────────────────────────────────────
 //
 // The counter reads badges through a USB reader that behaves as a keyboard, and the shell catches
-// the burst by its speed (`badge-scanner.ts`, hub#993). A tablet has no USB reader — and has had a
+// the burst by its speed (`badge-scanner.ts`). A tablet has no USB reader — and has had a
 // reader inside it all along, unused. This is the second origin of the SAME badge path: what comes
 // back is the same kind of string the wedge types, and the web hands it to the very subscribers the
 // wedge feeds. No screen above learns where a card came from.
@@ -2042,7 +2039,7 @@ fn erplora_remove_device(
 ///
 /// The three NFC refusals are kept apart all the way through because there are three different
 /// things to do about them: buy a reader, switch NFC on, use another card. Collapsing them would
-/// send a user with no chip at all into the settings screen looking for a toggle (hub#338).
+/// send a user with no chip at all into the settings screen looking for a toggle.
 fn nfc_shell_error(error: tauri_plugin_erplora_android::Error) -> ShellError {
     use tauri_plugin_erplora_android::Error as PluginError;
     match error {
@@ -2101,17 +2098,16 @@ fn erplora_nfc_read(
 /// the kitchen order — an order comes in and the kitchen has to find out even with the tablet on
 /// another view or locked. A toast inside the app does not reach anyone there.
 ///
-/// The SHELL exposes it because in Tauri the shell **is** the bridge (ADR-0050 §2.7); the
-/// standalone binary (retired in hub#340) did it with `notify_rust` for the «PWA in Chrome» case.
+/// The SHELL exposes it because in Tauri the shell **is** the hardware bridge.
 ///
-/// `id` is the handle of the tap (hub#2305): the notification plugin reports a tap with the id of
+/// `id` is the handle of the tap: the notification plugin reports a tap with the id of
 /// the notice on Android and iOS alike, and the page remembers which screen that id leads to. A
 /// page older than this shell sends none and the notice goes out under the plugin's own id.
 ///
-/// `path` is the screen itself (hub#2360), for the taps that do not reach the page that sent the
-/// notice: on the computer the shell shows the notice itself and keeps the click. On Android it
-/// travels in `extra`, but the plugin never stores the notice on the intent of its tap, which comes
-/// back with the id only (hub#1039): Kotlin writes the screen down under the id before the notice
+/// `path` is the screen itself, for the taps that do not reach the page that sent the notice: on
+/// the computer the shell shows the notice itself and keeps the click. On Android it travels in
+/// `extra`, but the plugin never stores the notice on the intent of its tap, which comes back with
+/// the id only: Kotlin writes the screen down under the id before the notice
 /// goes out, and hands it back with the tap.
 ///
 /// **Never fails upwards.** If the user denied the permission or the platform cannot show it, it is
@@ -2155,7 +2151,7 @@ fn notice_builder<R: tauri::Runtime>(
     builder
 }
 
-/// `erplora_take_notice_tap` — the tap the page was not there to hear (hub#2360), handed over once:
+/// `erplora_take_notice_tap` — the tap the page was not there to hear, handed over once:
 /// a click on the computer, or the tap that started the app on Android. `null` when there is none.
 #[tauri::command]
 fn erplora_take_notice_tap(app: tauri::AppHandle) -> Option<serde_json::Value> {
@@ -2199,7 +2195,7 @@ fn take_notice_tap<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<serde
     launch_tap_payload(app.erplora_android().take_notice_tap())
 }
 
-/// Writes down the screen a notice leads to under the number it goes out with (hub#1039), through
+/// Writes down the screen a notice leads to under the number it goes out with, through
 /// `remember`. A notice under no number the plugin can hold goes out under the plugin's own, which
 /// nothing was written under. Never fails upwards: a screen that is not written down only means
 /// that the tap opens the app without it.
@@ -2216,12 +2212,12 @@ fn remember_notice_target<E: std::fmt::Display>(
 }
 
 /// The id the plugin can hold (`i32`), or none: an id out of range must not stop the notice, only
-/// lose its tap's destination (hub#2305).
+/// lose its tap's destination.
 fn notice_id(id: Option<i64>) -> Option<i32> {
     id.and_then(|id| i32::try_from(id).ok())
 }
 
-/// Another launch of the app, handed over by single-instance: a click on a notice (hub#2409), or a
+/// Another launch of the app, handed over by single-instance: a click on a notice, or a
 /// link to a hub.
 #[cfg(desktop)]
 fn on_second_launch<R: tauri::Runtime>(app: &tauri::AppHandle<R>, argv: Vec<String>) {
@@ -2241,12 +2237,12 @@ fn app_commands() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static
         forget_hub,
         open_external_url,
         save_download,
-        // The system print dialog for an A4 document (hub#2006).
+        // The system print dialog for an A4 document.
         print_document,
-        // The way out when the network dies under the window (hub#1716).
+        // The way out when the network dies under the window.
         shell_retry,
-        // Datos: NO van por `invoke` (ADR-0050) — la PWA habla HTTP+WS con su hub cloud.
-        // Camino de hardware: impresoras de red ESC/POS + cajón → peripherals.
+        // Data does NOT go through `invoke`: the PWA talks HTTP and WebSocket to its hub.
+        // Hardware path: ESC/POS network printers and the cash drawer → peripherals.
         erplora_bridge_status,
         erplora_discover_printers,
         erplora_get_devices,
@@ -2258,11 +2254,11 @@ fn app_commands() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static
         erplora_set_device_name,
         erplora_remove_device,
         erplora_notify,
-        // The tap the page was not there to hear (hub#2360).
+        // The tap the page was not there to hear.
         erplora_take_notice_tap,
-        // La placa por NFC (hub#988): la segunda vía de la MISMA puerta que el lector-teclado.
+        // The badge over NFC: the second way through the SAME door as the keyboard-wedge reader.
         erplora_nfc_read,
-        // «Start on login» (hub#389): desktop-only in effect — on mobile they answer an
+        // «Start on login»: desktop-only in effect — on mobile they answer an
         // error, and the settings toggle never renders there.
         autostart_is_enabled,
         autostart_enable,
@@ -2274,14 +2270,14 @@ fn app_commands() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static
 pub fn run() {
     let builder = tauri::Builder::default();
 
-    // Escritorio: el sistema contesta a un `erplora://` LANZANDO el ejecutable otra vez. Sin esto,
-    // pulsar un enlace con la app abierta arrancaría un SEGUNDO TPV encima del primero (dos
-    // ventanas, dos colas de impresión, dos watchdogs). Con esto, la segunda instancia muere al
-    // nacer y le pasa sus argumentos a la que ya está viva, que es la que navega.
+    // Desktop: the system answers an `erplora://` link by LAUNCHING the executable again. Without
+    // this, pressing a link with the app open would start a SECOND till on top of the first (two
+    // windows, two print queues, two watchdogs). With it, the second instance dies at birth and
+    // hands its arguments to the one already running, which is the one that navigates.
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| on_second_launch(app, argv)));
 
-    // «Start on login» (ADR-0204 §7, hub#389): `init` WITHOUT calling `enable()` — the plugin
+    // «Start on login»: `init` WITHOUT calling `enable()` — the plugin
     // registers the commands and nothing else, so a fresh install stays OFF until the user opts
     // in from the settings toggle. Desktop only: the plugin has no Android/iOS support.
     #[cfg(desktop)]
@@ -2291,7 +2287,7 @@ pub fn run() {
     ));
 
     builder
-        // The A4 document of `print_document` (hub#2006), served from memory to its print window
+        // The A4 document of `print_document`, served from memory to its print window
         // with a CSP that runs no code. Any other path is a 404.
         .register_uri_scheme_protocol(PRINT_SCHEME, |ctx, request| {
             use tauri::Manager;
@@ -2301,72 +2297,73 @@ pub fn run() {
         })
         .plugin(hub_link::notification_plugin())
         .plugin(hub_link::android_plugin())
-        // The user's own browser (hub#475). Registered for its RUST api only: no `opener:*`
+        // The user's own browser. Registered for its RUST api only: no `opener:*`
         // permission is granted to any origin (`tests/remote_acl.rs`), so the page cannot reach the
         // plugin's own commands — which take any address, and two of which open FILES. What the
         // page gets is `open_external_url`, which checks the destination first.
         .plugin(tauri_plugin_opener::init())
-        // Deep link `erplora://` (ADR-0196 §7): registro del esquema por plataforma + entrega de la
-        // URL. Va DESPUÉS de single-instance a propósito: el orden que documenta el propio plugin.
+        // Deep link `erplora://`: registers the scheme per platform and delivers the URL. It goes
+        // AFTER single-instance on purpose: that is the order the plugin itself documents.
         .plugin(tauri_plugin_deep_link::init())
         .setup(|app| {
             use tauri::Manager;
             use tauri_plugin_deep_link::DeepLinkExt;
 
-            // Enlace con la app YA abierta (macOS, iOS y Android lo entregan como evento; en
-            // escritorio lo reinyecta single-instance). El de arranque en frío no pasa por aquí:
-            // ese llega por argumentos y lo resuelve `open_main_window`.
+            // A link with the app ALREADY open (macOS, iOS and Android deliver it as an event; on
+            // desktop single-instance hands it over). The cold-start link does not pass through
+            // here: it arrives in the arguments and `open_main_window` resolves it.
             //
-            // Un enlace que NO resuelve no hace nada, a propósito: el fallback es del navegador que
-            // lo lanzó, y navegar «a algo» sería peor que quedarse quieto.
+            // A link that does NOT resolve does nothing, on purpose: the fallback belongs to the
+            // browser that launched it, and navigating «somewhere» would be worse than staying put.
             let handle = app.handle().clone();
             app.deep_link().on_open_url(move |event| {
-                // Mismo filtro que el arranque en frío: un solo enlace por gesto y, si llegaran
-                // varios, manda el primero que resuelva.
+                // Same filter as the cold start: one link per gesture and, should several arrive,
+                // the first one that resolves wins.
                 let urls: Vec<String> = event.urls().into_iter().map(String::from).collect();
-                // A notice link is a click on a notice: single-instance hands it over (hub#2409).
+                // A notice link is a click on a notice: single-instance hands it over.
                 if notice_tap::click_from_args(urls.iter().cloned()).is_some() {
                     return;
                 }
                 match deep_link_from_args(urls) {
                     Some(target) => open_hub_from_link(&handle, &target),
-                    None => log::warn!("shell: enlace ignorado, no apunta a un hub nuestro"),
+                    None => log::warn!("shell: link ignored, it does not lead to a hub of ours"),
                 }
             });
 
-            // Windows y Linux aprenden el esquema al INSTALAR (registro / handler `.desktop`), así
-            // que en una ejecución de desarrollo —sin instalador— no está registrado y el enlace no
-            // se puede ni probar. Registrarlo aquí solo afecta a esa ejecución.
+            // Windows and Linux learn the scheme at INSTALL time (registry / `.desktop` handler),
+            // so in a development run (no installer) it is not registered and the link cannot even
+            // be tried. Registering it here only affects that run.
             #[cfg(any(windows, target_os = "linux"))]
             if let Err(e) = app.deep_link().register_all() {
-                log::warn!("shell: no se pudo registrar el esquema {DEEP_LINK_SCHEME}://: {e}");
+                log::warn!("shell: could not register the {DEEP_LINK_SCHEME}:// scheme: {e}");
             }
 
-            // Raíz de datos por-instalación: device.id + hub.url + devices.json. Si no se puede
-            // resolver, el shell arranca igualmente (sin persistencia) — cliente fino, sin BD.
+            // Per-installation data root: device.id + hub.url + devices.json. If it cannot be
+            // resolved the shell starts anyway, without persistence: it is a thin client with no
+            // database.
             let cache_dir = match app.path().app_data_dir() {
                 Ok(dir) => {
                     if let Err(e) = std::fs::create_dir_all(&dir) {
-                        eprintln!("shell: no se pudo crear app_data_dir ({}): {e}", dir.display());
+                        eprintln!("shell: could not create app_data_dir ({}): {e}", dir.display());
                     }
                     Some(dir)
                 }
                 Err(e) => {
-                    eprintln!("shell: app_data_dir no disponible: {e}");
+                    eprintln!("shell: app_data_dir unavailable: {e}");
                     None
                 }
             };
-            // Estado de hardware: registro de dispositivos + cola de impresión + watchdog.
+            // Hardware state: device registry + print queue + watchdog.
             let devices_path = cache_dir
                 .as_deref()
                 .map(|d| d.join(DEVICES_FILE))
                 .unwrap_or_else(|| PathBuf::from(DEVICES_FILE));
             app.manage(build_peripherals_state(devices_path));
             app.manage(PrintDocuments::default());
-            // The notice tap the page was not there to hear, until it claims it (hub#2360).
+            // The notice tap the page was not there to hear, until it claims it.
             app.manage(notice_tap::KeptNoticeTap::default());
             // A tap on Android while the page listens: Kotlin keeps it with its screen and the page
-            // is told to claim it (hub#1039) — the plugin's own report of it says nothing.
+            // is told to claim it — the plugin's own report of it says nothing.
             #[cfg(target_os = "android")]
             {
                 use tauri_plugin_erplora_android::ErploraAndroidExt as _;
@@ -2375,14 +2372,14 @@ pub fn run() {
                     log::warn!("notice: the taps on the notices cannot be watched ({e})");
                 }
             }
-            // Who asks before a link links another hub (hub#2644): before the window, so a cold
-            // start by such a link already has somebody to ask.
+            // Who asks before a link links another hub: before the window, so a cold start by such
+            // a link already has somebody to ask.
             app.manage(link_consent::native(app.handle().clone()));
             // Single window: the SaaS onboarding or the captured hub (app mode).
             if let Err(e) = open_main_window(app, cache_dir) {
-                eprintln!("no se pudo crear la ventana principal: {e}");
+                eprintln!("could not create the main window: {e}");
             }
-            // Started by a click on a notice with the app closed (Windows, hub#2409): the tap waits
+            // Started by a click on a notice with the app closed (Windows): the tap waits
             // for the page, which claims it at boot.
             #[cfg(desktop)]
             notice_tap::answer_link(app.handle(), std::env::args());
@@ -2393,20 +2390,20 @@ pub fn run() {
         .expect("error while running ERPlora shell");
 }
 
-// ── Tests (TDD, ADR-0159) ────────────────────────────────────────────────────────────────────────
+// ── Tests ────────────────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // ── hub#2494: a ticket that does not come out is an error for whoever printed it ────────────
+    // ── A ticket that does not come out is an error for whoever printed it ──────────────────────
     //
-    // The network arm answered `Ok` as soon as the bytes were in the in-memory queue: with the
-    // printer switched off the till heard nothing and the device draining the hub's queue
-    // confirmed «printed». Now it waits for the paper, retries included.
+    // Answering `Ok` as soon as the bytes are in the in-memory queue would leave the till hearing
+    // nothing with the printer switched off, and the device draining the hub's queue confirming
+    // «printed». The network arm waits for the paper, retries included.
 
     #[test]
-    fn a_switched_off_network_printer_is_an_error_for_whoever_printed_hub2494() {
+    fn a_switched_off_network_printer_is_an_error_for_whoever_printed() {
         let queue = std::sync::Arc::new(PrintQueue::new(RetryPolicy {
             max_attempts: 1,
             backoff_ms: 0,
@@ -2440,16 +2437,16 @@ mod tests {
     }
 
     #[test]
-    fn every_network_print_waits_for_the_paper_hub2494() {
+    fn every_network_print_waits_for_the_paper() {
         // `erplora_print` and `erplora_test_print` («Probar») both go through `print_to_network`;
-        // a hand-over that answers on the enqueue is the bug coming back.
+        // a hand-over that answers on the enqueue would report a print before the paper is out.
         let source = include_str!("lib.rs");
         let shell = source.split("\n#[cfg(test)]\nmod tests").next().unwrap_or_default();
         assert!(!shell.contains("queue.enqueue("), "a network print answers on the hand-over again");
         assert_eq!(shell.matches("print_to_network(&state.queue").count(), 2, "print and test print");
     }
 
-    // ── hub#2305: the id a tap on a notice comes back with ───────────────────────────────────────
+    // ── The id a tap on a notice comes back with ─────────────────────────────────────────────────
     //
     // The plugin takes an `i32`. An id the page sends out of that range must not stop the notice:
     // it goes out under the plugin's own id, and only the tap loses its destination.
@@ -2480,7 +2477,7 @@ mod tests {
         format!("{:?}", notice_builder(app.handle(), "New booking", "Ana · 10:00", id, path))
     }
 
-    // ── hub#2360: the screen travels with the notice ─────────────────────────────────────────────
+    // ── The screen travels with the notice ───────────────────────────────────────────────────────
     //
     // A tap that STARTS the app on Android reaches a page that never saw the notice go out, so its
     // memory of ids is empty. The notice carries its screen in `extra`, which Android hands back
@@ -2546,7 +2543,7 @@ mod tests {
         assert_eq!(clicked_desktop_notice(Some(i64::from(i32::MAX) + 1), Some("/m/kds")), None);
     }
 
-    // hub#2409: on Windows a click on a notice — on screen or later in the Action Center, with the
+    // On Windows a click on a notice — on screen or later in the Action Center, with the
     // app open or closed — comes back as a launch of the app with the notice's link.
 
     #[cfg(desktop)]
@@ -2610,7 +2607,7 @@ mod tests {
         assert_eq!(launch_tap_payload(Err("plugin gone")), None);
     }
 
-    // ── hub#1039: on Android a tap comes back with the notice's number only ──────────────────────
+    // ── On Android a tap comes back with the notice's number only ────────────────────────────────
 
     #[test]
     fn a_kept_tap_without_its_notice_opens_the_screen_the_app_wrote_down() {
@@ -2654,9 +2651,9 @@ mod tests {
     }
 
     #[test]
-    fn on_android_the_shell_writes_down_each_notice_and_tells_the_page_a_tap_waits_hub1039() {
+    fn on_android_the_shell_writes_down_each_notice_and_tells_the_page_a_tap_waits() {
         // Android-only lines the desktop build never compiles: each one going missing leaves the tap
-        // on a notice where it was, with the app open (hub#1039).
+        // on a notice where it was, with the app open.
         let source = include_str!("lib.rs");
         let shell = source.split("\n#[cfg(test)]\nmod tests").next().unwrap_or_default();
         let body_of = |start: &str| shell.split(start).nth(1).unwrap_or_default().split("\n}\n").next().unwrap_or_default();
@@ -2692,7 +2689,7 @@ mod tests {
         assert!(built.contains("New booking") && built.contains("Ana · 10:00"), "{built}");
     }
 
-    // ── hub#1924: adding a printer by typing its address ─────────────────────────────────────────
+    // ── Adding a printer by typing its address ───────────────────────────────────────────────────
     //
     // The screen has to tell a typo from a printer that did not answer, in the user's language. A
     // bare string (what `HardwareError` sends) cannot be branched on without parsing prose, so this
@@ -2714,7 +2711,7 @@ mod tests {
     }
 
     fn url(s: &str) -> tauri::Url {
-        s.parse().expect("url de test válida")
+        s.parse().expect("valid test url")
     }
 
     fn tempdir() -> PathBuf {
@@ -2723,7 +2720,7 @@ mod tests {
         dir
     }
 
-    // ── ADR-0204 §7 / hub#389: «Start on login» — OFF by default, the OS owns the state ──────
+    // ── «Start on login» — OFF by default, the OS owns the state ─────────────────────────────
     //
     // Behind a seam because the real switch writes a LaunchAgent / registry key / autostart
     // file: a unit test that ENABLED it would leave the developer's machine starting a till at
@@ -2756,7 +2753,7 @@ mod tests {
 
     #[test]
     fn autostart_is_off_until_somebody_turns_it_on() {
-        // The DoD sequence, end to end: default disabled → enable → is_enabled → disable.
+        // The whole sequence: default disabled → enable → is_enabled → disable.
         let switch = FakeAutostart::off();
         assert_eq!(switch.is_enabled(), Ok(false), "opt-in means the default is OFF");
         assert_eq!(apply_autostart(&switch, true), Ok(true));
@@ -2767,14 +2764,14 @@ mod tests {
 
     #[test]
     fn the_reported_state_is_what_the_os_says_not_what_was_asked() {
-        // No persistence of our own (ADR-0204 §7): the OS owns the state, so the answer must be
+        // No persistence of our own: the OS owns the state, so the answer must be
         // read BACK after the change. A switch that quietly failed to change must be reported as
         // it is — a toggle that shows ON while the OS says OFF is a till that never starts.
         let stuck = FakeAutostart { enabled: std::cell::Cell::new(false), stuck: true };
         assert_eq!(apply_autostart(&stuck, true), Ok(false));
     }
 
-    // ── ADR-0204 / hub#388: bonded Bluetooth printers join discovery ─────────────────────────
+    // ── Bonded Bluetooth printers join discovery ─────────────────────────────────────────────
     //
     // The LAN sweep and the bonded list are two halves of ONE question — "which printers can
     // this device print on?" — so they come back as one list. The merge is pure so the emulator
@@ -2805,10 +2802,10 @@ mod tests {
 
     #[test]
     fn a_blocked_lan_scan_stays_blocked_and_carries_no_printers() {
-        // Phase-1 limit, stated on purpose: with the LAN permission denied the outcome is the
+        // A limit, stated on purpose: with the LAN permission denied the outcome is the
         // permission refusal, and the bonded list does NOT ride along — an outcome that both
         // names a missing permission and lists printers would give the screen two contradictory
-        // instructions at once. The permission prompt for discovery asks for both (hub#758), so
+        // instructions at once. The permission prompt for discovery asks for both, so
         // this state is one "allow" away from resolving itself.
         let merged = merge_bluetooth_printers(
             PrinterDiscovery::PermissionDenied {
@@ -2833,7 +2830,7 @@ mod tests {
         );
     }
 
-    // ── hub#1083: the machine's USB print queues join discovery ──────────────────────────────
+    // ── The machine's USB print queues join discovery ────────────────────────────────────────
     //
     // The USB thermal printer is the cheapest in the catalogue and the one a single-till bar or
     // salon actually buys. It reaches us through the OS print queue, so the merge is pure and
@@ -2852,7 +2849,7 @@ mod tests {
     }
 
     #[test]
-    fn hub1083_a_usb_queue_joins_the_scanned_list() {
+    fn a_usb_queue_joins_the_scanned_list() {
         let merged =
             merge_usb_printers(PrinterDiscovery::Scanned { printers: vec![] }, vec![a_usb_printer()]);
         let printers = merged.scanned_printers().expect("still a scanned outcome");
@@ -2862,7 +2859,7 @@ mod tests {
     }
 
     #[test]
-    fn hub1083_a_usb_queue_already_listed_is_not_duplicated() {
+    fn a_usb_queue_already_listed_is_not_duplicated() {
         let once =
             merge_usb_printers(PrinterDiscovery::Scanned { printers: vec![] }, vec![a_usb_printer()]);
         let twice = merge_usb_printers(once, vec![a_usb_printer()]);
@@ -2874,7 +2871,7 @@ mod tests {
     }
 
     #[test]
-    fn hub1083_a_blocked_scan_stays_blocked_and_carries_no_usb_queues() {
+    fn a_blocked_scan_stays_blocked_and_carries_no_usb_queues() {
         let merged = merge_usb_printers(
             PrinterDiscovery::PermissionDenied {
                 permission: "android.permission.ACCESS_LOCAL_NETWORK".into(),
@@ -2884,14 +2881,14 @@ mod tests {
         assert_eq!(merged.scanned_printers(), None);
     }
 
-    // ── hub#1536: a discovered queue is a DEVICE, so the owner can say it is the kitchen's ───
+    // ── A discovered queue is a DEVICE, so the owner can say it is the kitchen's ─────────────
     //
-    // Listing the queue was hub#1083; without an entry in the registry it can be printed to but
+    // Listing the queue is not enough: without an entry in the registry it can be printed to but
     // never named, so a venue with a USB printer at the counter and a network one in the kitchen
     // can only tell the hub about one of the two.
 
     #[test]
-    fn hub1536_a_discovered_usb_queue_enters_the_device_registry() {
+    fn a_discovered_usb_queue_enters_the_device_registry() {
         let registry = DeviceRegistry::load(tempdir().join("devices.json"));
         let second = erplora_peripherals::protocol::PrinterInfo {
             id: "usb:EPSON_TM".into(),
@@ -2914,7 +2911,7 @@ mod tests {
     }
 
     #[test]
-    fn hub1536_a_queue_that_cannot_be_registered_does_not_cost_the_others_theirs() {
+    fn a_queue_that_cannot_be_registered_does_not_cost_the_others_theirs() {
         // A discovery is a batch: one id the registry refuses must not take the working printer
         // down with it, or a single odd queue would leave the till with no roles at all.
         let registry = DeviceRegistry::load(tempdir().join("devices.json"));
@@ -2930,13 +2927,12 @@ mod tests {
         assert_eq!(keys, ["usb:Star_TSP143"], "the good one is registered anyway");
     }
 
-    // ── hub#447: forgetting BY CHOICE lands on the chooser, forgetting on a 410 does not ─────
+    // ── Forgetting BY CHOICE lands on the chooser, forgetting on a 410 does not ──────────────
     //
     // `/shell/` redirects a single-hub user straight back into their hub — correct after a 410
     // (the hub is gone, the SaaS will route somewhere sane), useless for «I want to pick»: the
     // owner with two businesses and one tablet would bounce right back into the one they were
-    // trying to leave. `?choose=1` is the SaaS's own affordance for forcing the list; this is
-    // the caller the SaaS was waiting for.
+    // trying to leave. `?choose=1` is the SaaS's own affordance for forcing the list.
 
     #[test]
     fn forgetting_by_choice_lands_on_the_chooser() {
@@ -2956,7 +2952,7 @@ mod tests {
         );
     }
 
-    // ── hub#2504: which hub the window starts linked to, and the wiring of the gate ─────────────
+    // ── Which hub the window starts linked to, and the wiring of the gate ───────────────────────
 
     #[test]
     fn a_fresh_install_starts_linked_to_nothing_and_lets_the_saas_choose() {
@@ -2971,7 +2967,7 @@ mod tests {
         assert_eq!(linked.as_deref(), Some("https://panaderia.a.erplora.com"));
     }
 
-    // ── hub#2644: a link to another hub waits for the person's word ─────────────────────────────
+    // ── A link to another hub waits for the person's word ───────────────────────────────────────
 
     #[test]
     fn a_cold_start_by_a_link_to_another_hub_boots_on_the_linked_one_and_asks() {
@@ -3149,12 +3145,12 @@ mod tests {
         );
         assert!(
             body_of("pub fn run() {").contains(".plugin(hub_link::android_plugin())"),
-            "run() registers the Android plugin without the gate (hub#2642)"
+            "run() registers the Android plugin without the gate"
         );
         assert!(
             body_of("pub fn run() {").contains(".plugin(hub_link::notification_plugin())")
                 && !shell.contains(".plugin(tauri_plugin_notification::init())"),
-            "run() registers the notification plugin without the gate (hub#2658)"
+            "run() registers the notification plugin without the gate"
         );
         let window = body_of("fn open_main_window(");
         assert!(window.contains("app.manage(hub_link)"), "the window opens with no link state");
@@ -3175,7 +3171,7 @@ mod tests {
             body_of("pub fn run() {").contains("Some(target) => open_hub_from_link(&handle, &target)"),
             "a link with the app open navigates without linking its hub"
         );
-        // hub#2644: the person is asked by the system's own dialog, set up before the window
+        // The person is asked by the system's own dialog, set up before the window
         // exists, and a cold start by a link to another hub goes through that same question.
         let setup = body_of("pub fn run() {").split(".setup(|app| {").nth(1).unwrap_or_default();
         let asker = setup.find("app.manage(link_consent::native(app.handle().clone()))");
@@ -3191,10 +3187,10 @@ mod tests {
         );
     }
 
-    // ── shell_capture_origin: el contrato del marcador ?shell=1 ──────────────────────────────
+    // ── shell_capture_origin: the contract of the ?shell=1 marker ────────────────────────────
 
     #[test]
-    fn capture_requiere_el_marcador_shell_1() {
+    fn capture_requires_the_shell_1_marker() {
         assert_eq!(shell_capture_origin(&url("https://demo.erplora.com/")), None);
         assert_eq!(
             shell_capture_origin(&url("https://demo.erplora.com/?shell=2")),
@@ -3207,7 +3203,7 @@ mod tests {
     }
 
     #[test]
-    fn capture_devuelve_el_origen_https() {
+    fn capture_returns_the_https_origin() {
         assert_eq!(
             shell_capture_origin(&url("https://demo.erplora.com/pos?shell=1&x=2")),
             Some("https://demo.erplora.com".to_string())
@@ -3215,10 +3211,10 @@ mod tests {
     }
 
     #[test]
-    fn capture_http_solo_loopback() {
-        // http remoto NO se captura (el hub cloud es siempre https).
+    fn capture_accepts_http_only_on_loopback() {
+        // Remote http is NOT captured (a deployed hub is always https).
         assert_eq!(shell_capture_origin(&url("http://evil.com/?shell=1")), None);
-        // loopback sí (desarrollo local: runtime :8787 / Vite :5173).
+        // Loopback is (local development: runtime :8787 / Vite :5173).
         assert_eq!(
             shell_capture_origin(&url("http://127.0.0.1:8787/?shell=1")),
             Some("http://127.0.0.1:8787".to_string())
@@ -3230,31 +3226,30 @@ mod tests {
     }
 
     #[test]
-    fn capture_rechaza_esquemas_no_http() {
+    fn capture_refuses_non_http_schemes() {
         assert_eq!(shell_capture_origin(&url("tauri://localhost/?shell=1")), None);
         assert_eq!(shell_capture_origin(&url("file:///tmp/x?shell=1")), None);
     }
 
-    // ── hub#335: the marker says "remember me"; it does not say WHO may ask ───────────────────
+    // ── The marker says "remember me"; it does not say WHO may ask ────────────────────────────
     //
-    // `?shell=1` was the whole capture contract, so ANY https origin that carried it became the
-    // origin this installation boots at, for good. The shell blocks no navigation to a foreign
-    // host (`on_navigation` refuses only SaaS pages, in the Play copy — hub#1915), so one link is
-    // enough: an open redirect on the SaaS,
-    // an injection into the third-party checkout the same window loads, or simply a link a user
-    // taps. From then on the till opens full-screen, chrome-less and titled "ERPlora" on somebody
-    // else's page, and the operator types the hub password into it.
+    // If `?shell=1` were the whole capture contract, ANY https origin that carried it would become
+    // the origin this installation boots at, for good. The shell blocks no navigation to a foreign
+    // host (`on_navigation` refuses only SaaS pages, in the Play copy), so one link would be
+    // enough: an open redirect on the SaaS, an injection into the third-party checkout the same
+    // window loads, or simply a link a user taps. From then on the till would open full-screen,
+    // chrome-less and titled "ERPlora" on somebody else's page, and the operator would type the
+    // hub password into it.
     //
-    // The destination rule is therefore the SAME one the deep link already applies (ADR-0225) and
-    // the same one `capabilities/*.json` declares (ADR-0221): only a hub of ours, or the loopback
-    // of this machine. The three must agree — an origin the capabilities refuse is a till that
-    // looks fine and cannot print, which is the failure `remote_acl.rs` exists to prevent.
+    // The destination rule is therefore the SAME one the deep link applies and the same one
+    // `capabilities/*.json` declares: only a hub of ours, or the loopback of this machine. The
+    // three must agree — an origin the capabilities refuse is a till that looks fine and cannot
+    // print, which is the failure `remote_acl.rs` exists to prevent.
 
     #[test]
     fn capture_refuses_an_origin_that_is_not_a_hub_of_ours() {
-        // The one the old suite ENSHRINED: `capture_conserva_el_puerto_no_default` asserted that
-        // `https://hub.example.com:8443/?shell=1` was captured. Preserving a non-default port is
-        // right; treating a stranger's domain as this till's hub never was.
+        // A captured origin keeps a non-default port, but a stranger's domain with one is still
+        // not this till's hub.
         assert_eq!(
             shell_capture_origin(&url("https://hub.example.com:8443/?shell=1")),
             None
@@ -3265,7 +3260,7 @@ mod tests {
     #[test]
     fn capture_refuses_the_saas_apex() {
         // `erplora.com` is where the app BOOTS, not a hub — and it is deliberately kept out of the
-        // hardware capability (ADR-0221). Remembering it would pin the till to the marketing site
+        // hardware capability. Remembering it would pin the till to the marketing site
         // on every cold start, with the onboarding one redirect further away than before.
         assert_eq!(shell_capture_origin(&url("https://erplora.com/?shell=1")), None);
         assert_eq!(
@@ -3292,8 +3287,8 @@ mod tests {
 
     #[test]
     fn capture_accepts_every_shape_a_real_cloud_hub_takes() {
-        // Lettered aura (Hetzner) and numbered aura (AWS fallback) — TWO labels under the
-        // registrable domain. A rule that only allowed one would kill the app in production.
+        // A lettered aura and a numbered aura — TWO labels under the registrable domain. A rule
+        // that only allowed one would kill the app in production.
         assert_eq!(
             shell_capture_origin(&url("https://panaderia.a.erplora.com/pos?shell=1&x=2")),
             Some("https://panaderia.a.erplora.com".to_string())
@@ -3314,7 +3309,7 @@ mod tests {
         );
     }
 
-    // ── hub#335: an install poisoned by an older build must not stay poisoned ─────────────────
+    // ── An install poisoned by an older build must not stay poisoned ──────────────────────────
 
     #[test]
     fn a_persisted_origin_that_is_not_a_hub_of_ours_is_refused_on_load() {
@@ -3331,7 +3326,8 @@ mod tests {
     #[test]
     fn a_persisted_value_that_is_not_even_a_url_is_refused_on_load() {
         // `hub.url` is a plain file in the user's data dir: nothing stops it being edited, or
-        // truncated by a crash. `initial_url_for` used to hand whatever it said to the webview.
+        // truncated by a crash. Without the check `initial_url_for` would hand whatever it said
+        // to the webview.
         let dir = tempdir();
         std::fs::write(dir.join(HUB_URL_FILE), "not a url").expect("write");
         assert_eq!(load_hub_url(&dir), None);
@@ -3350,7 +3346,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // ── hub#335: a user with SEVERAL hubs ─────────────────────────────────────────────────────
+    // ── A user with SEVERAL hubs ──────────────────────────────────────────────────────────────
 
     #[test]
     fn capturing_a_second_hub_replaces_the_first() {
@@ -3365,7 +3361,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // ── persistencia de hub.url ──────────────────────────────────────────────────────────────
+    // ── Persisting hub.url ───────────────────────────────────────────────────────────────────
 
     #[test]
     fn hub_url_roundtrip_persist_load_clear() {
@@ -3375,12 +3371,12 @@ mod tests {
         assert_eq!(load_hub_url(&dir), Some("https://demo.erplora.com".to_string()));
         clear_hub_url(&dir);
         assert_eq!(load_hub_url(&dir), None);
-        clear_hub_url(&dir); // best-effort: repetir no falla
+        clear_hub_url(&dir); // best effort: clearing again does not fail
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn load_hub_url_ignora_vacios_y_recorta() {
+    fn load_hub_url_ignores_blank_files_and_trims() {
         let dir = tempdir();
         std::fs::write(dir.join(HUB_URL_FILE), "  \n").expect("write");
         assert_eq!(load_hub_url(&dir), None);
@@ -3390,18 +3386,18 @@ mod tests {
     }
 
     #[test]
-    fn persist_hub_url_crea_el_directorio() {
+    fn persist_hub_url_creates_the_directory() {
         let dir = tempdir().join("anidado");
         persist_hub_url(&dir, "https://b.erplora.com").expect("persist");
         assert_eq!(load_hub_url(&dir), Some("https://b.erplora.com".to_string()));
         let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
-    // ── URL inicial: precedencia override dev → hub persistido → onboarding ──────────────────
+    // ── Start URL: precedence dev override → persisted hub → onboarding ──────────────────────
 
     #[test]
-    fn initial_url_precedencia() {
-        // Override de desarrollo gana siempre.
+    fn initial_url_precedence() {
+        // The development override wins over the persisted hub.
         assert_eq!(
             initial_url_for(
                 None,
@@ -3411,12 +3407,12 @@ mod tests {
             ),
             "http://127.0.0.1:8001/shell/"
         );
-        // Hub persistido → modo app (origen + "/").
+        // Persisted hub → app mode (origin + "/").
         assert_eq!(
             initial_url_for(None, None, Some("https://demo.erplora.com"), "https://erplora.com"),
             "https://demo.erplora.com/"
         );
-        // Nada persistido → onboarding del SaaS.
+        // Nothing persisted → the SaaS onboarding.
         assert_eq!(
             initial_url_for(None, None, None, "https://erplora.com"),
             "https://erplora.com/shell/"
@@ -3451,52 +3447,53 @@ mod tests {
         );
     }
 
-    // ── El hub recordado ya no existe: la app NO puede quedarse tapiada ──────────────────────
+    // ── The remembered hub no longer exists: the app must NOT be walled in ───────────────────
 
     #[test]
-    fn un_hub_borrado_se_olvida_al_arrancar() {
-        // Medido en un Mac el 2026-08-01: `hub.url` apuntaba a un hub que la purga de prod había
-        // borrado, y la app abría en «404 page not found» — para siempre y SIN salida. El
-        // `forget_hub` que ya existe no sirve aquí: lo invoca el frontend al recibir un 410, y en
-        // este caso la PWA no llega a cargarse nunca porque el 404 lo sirve el edge.
+    fn a_deleted_hub_is_forgotten_at_start() {
+        // Seen on a Mac: `hub.url` pointed at a hub a production purge had deleted, and the app
+        // opened on «404 page not found» — for good and with NO way out. The existing `forget_hub`
+        // does not help here: the frontend calls it on a 410, and in this case the PWA never loads
+        // at all because the 404 is served by the edge.
         assert!(should_forget_hub(HubProbe::Status(404)));
-        // 410 es el contrato explícito de `hub_not_found` del Cloud.
+        // 410 is the server's explicit `hub_not_found` contract.
         assert!(should_forget_hub(HubProbe::Status(410)));
     }
 
     #[test]
-    fn un_hub_vivo_no_se_olvida() {
+    fn a_live_hub_is_not_forgotten() {
         assert!(!should_forget_hub(HubProbe::Status(200)));
-        // El hub redirige al login: existe.
+        // The hub redirects to the login: it exists.
         assert!(!should_forget_hub(HubProbe::Status(302)));
     }
 
     #[test]
-    fn no_estar_autenticado_no_es_que_el_hub_no_exista() {
-        // Confundirlo echaría al usuario al onboarding cada vez que le caduca la sesión.
+    fn being_unauthenticated_does_not_mean_the_hub_is_gone() {
+        // Confusing the two would throw the user back to the onboarding every time a session
+        // expires.
         assert!(!should_forget_hub(HubProbe::Status(401)));
         assert!(!should_forget_hub(HubProbe::Status(403)));
     }
 
     #[test]
-    fn un_hub_caido_no_se_olvida() {
-        // Caído ≠ inexistente. Olvidarlo por una caída de 30 s le borraría al usuario su hub y le
-        // obligaría a rehacer el onboarding, que es MUCHO peor que esperar.
+    fn a_hub_that_is_down_is_not_forgotten() {
+        // Down ≠ gone. Forgetting it over a 30-second outage would delete the user's hub and send
+        // them through the onboarding again, which is FAR worse than waiting.
         for s in [500, 502, 503, 504] {
-            assert!(!should_forget_hub(HubProbe::Status(s)), "{s} no debe olvidar el hub");
+            assert!(!should_forget_hub(HubProbe::Status(s)), "{s} must not forget the hub");
         }
     }
 
     #[test]
-    fn sin_red_no_se_olvida_nada() {
-        // Un TPV arranca en locales con wifi malo, con el router reiniciándose o con el portátil
-        // aún sin asociar. Borrar el hub por no poder contactarlo sería catastrófico: el hub está
-        // perfectamente vivo y el usuario acabaría en el onboarding sin entender por qué.
+    fn no_network_forgets_nothing() {
+        // A till starts in venues with bad Wi-Fi, with the router rebooting or with the laptop not
+        // yet associated. Deleting the hub for not reaching it would be catastrophic: the hub is
+        // perfectly alive and the user would end up on the onboarding without knowing why.
         assert!(!should_forget_hub(HubProbe::Unreachable));
     }
 
     #[test]
-    fn onboarding_url_normaliza_la_base() {
+    fn onboarding_url_normalizes_the_base() {
         assert_eq!(onboarding_url("https://erplora.com"), "https://erplora.com/shell/");
         assert_eq!(
             initial_url_for(None, None, None, "https://erplora.com/"),
@@ -3505,19 +3502,19 @@ mod tests {
         assert_eq!(normalize_base("  https://erplora.com/  "), "https://erplora.com");
     }
 
-    // ── identidad de dispositivo ─────────────────────────────────────────────────────────────
+    // ── Device identity ──────────────────────────────────────────────────────────────────────
 
     #[test]
-    fn ensure_device_id_estable_entre_llamadas() {
+    fn ensure_device_id_is_stable_across_calls() {
         let dir = tempdir();
-        let a = ensure_device_id(&dir).expect("primera");
-        let b = ensure_device_id(&dir).expect("segunda");
+        let a = ensure_device_id(&dir).expect("first");
+        let b = ensure_device_id(&dir).expect("second");
         assert_eq!(a, b);
         assert!(!a.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // ── hub#338: "the OS won't let me look" is not "there are no printers" ───────────────────
+    // ── "The OS won't let me look" is not "there are no printers" ────────────────────────────
     //
     // The shell is where the two states are told apart, because it is the only layer that can ask
     // Android what it granted. Get this wrong in either direction and the till hands the user the
@@ -3592,7 +3589,7 @@ mod tests {
         );
     }
 
-    // ── hub#988: the badge can also arrive by NFC ────────────────────────────────────────────
+    // ── The badge can also arrive by NFC ─────────────────────────────────────────────────────
     //
     // The plugin owns the radio; the shell owns the WORD that reaches the page. Three refusals
     // arrive from Kotlin and three different things are done about them — buy a reader, switch NFC
@@ -3665,33 +3662,33 @@ mod tests {
         assert_eq!(nfc_read_timeout(Some(5_000)), 5_000);
     }
 
-    // ── hub#862: la app decía ser la «v0.0.0» ────────────────────────────────────────────────
-    // La pantalla de impresión enseña la versión que contesta `erplora_bridge_status`, y contestaba
-    // `CARGO_PKG_VERSION` — que NADIE sella: la release (`tauri-release.yml`) escribe la versión en
-    // `tauri.conf.json`, y el `Cargo.toml` de este shell se queda en 0.0.0 para siempre. Así que una
-    // app 1.0.0 instalada se presentaba como «Impresora lista · v0.0.0.» y no había forma de saber
-    // desde dentro qué binario estaba corriendo.
+    // ── The app must not introduce itself as «v0.0.0» ────────────────────────────────────────
+    // The printing screen shows the version `erplora_bridge_status` answers. NOBODY stamps
+    // `CARGO_PKG_VERSION`: the release (`tauri-release.yml`) writes the version into
+    // `tauri.conf.json`, and this shell's `Cargo.toml` stays at 0.0.0 for good. Answering it would
+    // make an installed 1.0.0 app introduce itself as «Impresora lista · v0.0.0.», with no way to
+    // tell from inside which binary is running.
 
     #[test]
-    fn la_version_del_estado_no_es_la_del_crate() {
-        // Si esto falla es que alguien empezó a sellar el Cargo.toml — buena noticia, pero entonces
-        // este test ya no prueba nada y hay que decidir cuál de las dos versiones manda.
+    fn the_status_version_is_not_the_crate_version() {
+        // If this fails somebody started stamping Cargo.toml — good news, but then this test no
+        // longer proves anything and it has to be decided which of the two versions wins.
         assert_eq!(env!("CARGO_PKG_VERSION"), "0.0.0");
         assert_ne!(bridge_status_version(), "0.0.0");
     }
 
     #[test]
-    fn la_version_sale_de_tauri_conf_json() {
+    fn the_version_comes_from_tauri_conf_json() {
         assert_eq!(
             tauri_conf_version(r#"{"productName":"ERPlora","version":"1.2.3"}"#),
             Some("1.2.3".to_string())
         );
-        // Una conf ilegible no puede tumbar la pantalla de ajustes: se contesta que no se sabe.
+        // An unreadable conf must not bring the settings screen down: the answer is "unknown".
         assert_eq!(tauri_conf_version("{ no es json"), None);
         assert_eq!(tauri_conf_version(r#"{"version":42}"#), None);
     }
 
-    // ── hub#1915: what the window does with a page the Play copy refuses ────────────────────────
+    // ── What the window does with a page the Play copy refuses ──────────────────────────────────
 
     /// A real window on Tauri's mock runtime, which records `navigate()` and answers `url()` with
     /// it — so the answer to a refusal is asserted as a MOVE (or its absence), not as a bool.
@@ -3727,7 +3724,7 @@ mod tests {
     #[test]
     fn the_refusal_notice_speaks_both_languages_and_names_no_other_place_to_go() {
         let script = refusal_notice_script();
-        // ADR-0055/0199: the English source and its Spanish translation, picked the way the
+        // The English source and its Spanish translation, picked the way the
         // bundled offline page picks them (Spanish unless the device says otherwise).
         assert!(script.contains(REFUSAL_NOTICE_EN), "{script}");
         assert!(script.contains(REFUSAL_NOTICE_ES), "{script}");

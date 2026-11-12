@@ -1,14 +1,14 @@
-//! Guard for the shell's COMMAND SURFACE and for what ADR-0154 took out of it (hub#336).
+//! Guard for the shell's COMMAND SURFACE and for what must stay out of it.
 //!
-//! ADR-0154 turned the product cloud-first: the hub runs in production, the shell is a thin client
-//! (ADR-0159) and the webview talks HTTP+WS to a REMOTE hub. Three things died with that pivot and
-//! are already gone from the code — the embedded runtime (`erplora_server::serve` on loopback
-//! `:8787` plus its local SQLite), the `validate_entitlement` invoke (an offline RS256 gate with a
-//! cached token and a grace window), and `frontendDist` pointing at the hub web app's `dist/`.
+//! The hub runs on the server, the shell is a thin client and the webview talks HTTP+WS to a
+//! REMOTE hub. Three things therefore have no place in this app: an embedded runtime (a hub server
+//! on loopback `:8787` plus its local SQLite), a `validate_entitlement` invoke (an offline RS256
+//! gate with a cached token and a grace window), and a `frontendDist` pointing at the hub web
+//! app's `dist/`.
 //!
-//! This file is what stops them from coming back, and what keeps the pieces that survived
-//! agreeing with each other. Nothing here re-tests the hardware handlers: those ARE the reason the
-//! app exists and are deliberately untouched.
+//! This file is what keeps them out, and what keeps the pieces that remain agreeing with each
+//! other. Nothing here re-tests the hardware handlers: those ARE the reason the app exists and are
+//! deliberately untouched.
 //!
 //! ## Why the command surface needs a test at all
 //!
@@ -25,8 +25,8 @@
 //! not a guard, and drifting either way fails SILENTLY in opposite directions:
 //!
 //! - **declared but not handled** — a permission is generated and handed to an origin for a
-//!   command that does not exist. Dead grant surface. This is exactly what `validate_entitlement`
-//!   was: still registered in `build.rs` long after the gate itself was deleted.
+//!   command that does not exist. Dead grant surface: what a command left in `build.rs` after its
+//!   handler was deleted turns into.
 //! - **handled but not declared** — no `allow-<cmd>` exists, so Tauri's ACL refuses the command
 //!   from every remote origin. **Dev does not show this**: a local origin with no app manifest
 //!   skips the gate, so it works on the laptop and the till simply never prints.
@@ -253,8 +253,7 @@ fn the_build_manifest_and_the_invoke_handler_declare_the_same_commands() {
         declared_but_missing.is_empty(),
         "build.rs declares commands that lib.rs does not implement: {declared_but_missing:?}.\n\
          Each one makes `tauri-build` emit an `allow-<cmd>` permission for a command that does not \
-         exist, so a capability can hand an origin a grant that leads nowhere. This is how \
-         `validate_entitlement` outlived its own gate (ADR-0154, hub#336)."
+         exist, so a capability can hand an origin a grant that leads nowhere."
     );
 
     let wired_but_undeclared: Vec<_> = wired.difference(&declared).collect();
@@ -262,7 +261,7 @@ fn the_build_manifest_and_the_invoke_handler_declare_the_same_commands() {
         wired_but_undeclared.is_empty(),
         "lib.rs wires commands that build.rs does not declare: {wired_but_undeclared:?}.\n\
          Without an `allow-<cmd>` permission Tauri's ACL refuses the command from EVERY remote \
-         origin, and the shell only ever loads remote origins (ADR-0159). Dev hides it — a local \
+         origin, and the shell only ever loads remote origins. Dev hides it — a local \
          origin with no app manifest skips the gate — so this ships green and the till never prints."
     );
 }
@@ -296,17 +295,16 @@ fn every_command_permission_a_capability_grants_exists() {
     }
 }
 
-// ── What ADR-0154 removed stays removed ──────────────────────────────────────────────────────────
+// ── What a thin client must not carry ────────────────────────────────────────────────────────────
 
 #[test]
 fn the_shell_declares_no_entitlement_or_device_enrollment_command() {
-    // The gate that ADR-0154 deleted, by the names it went under. Entitlement is NOT gone from the
-    // product — it moved to where the truth already was: the runtime revalidates paid modules
-    // against the Cloud (`crates/server/src/entitlement.rs`, ADR-0114 §6) and the web app resolves
-    // it over HTTP (`apps/web/src/lib/entitlement.ts`). What died is the shell's OWN copy: an
-    // offline RS256 check over a token cached in `app_data_dir` with a grace window. A thin client
-    // that re-decides entitlement locally is a second, weaker answer to a question the Cloud
-    // already answers — and the weaker answer is the one an attacker gets to edit on disk.
+    // A local entitlement gate, by the names it would go under. Entitlement belongs to the
+    // product, but it is decided on the server, where the truth is, and the web app resolves it
+    // over HTTP. What must not exist is the shell's OWN copy: an offline RS256 check over a token
+    // cached in `app_data_dir` with a grace window. A thin client that re-decides entitlement
+    // locally is a second, weaker answer to a question the server already answers — and the
+    // weaker answer is the one an attacker gets to edit on disk.
     let forbidden = [
         "validate_entitlement",
         "enroll_device",
@@ -319,22 +317,21 @@ fn the_shell_declares_no_entitlement_or_device_enrollment_command() {
     for command in forbidden {
         assert!(
             !declared.contains(command),
-            "build.rs declares `{command}`, which ADR-0154 removed from the shell (hub#336). \
-             Entitlement is decided by the Cloud and enforced by the runtime, not re-litigated \
-             inside the till."
+            "build.rs declares `{command}`, which does not belong in the shell. Entitlement is \
+             decided and enforced by the server, not re-litigated inside the till."
         );
         assert!(
             !wired.contains(command),
-            "lib.rs wires `{command}`, which ADR-0154 removed from the shell (hub#336)."
+            "lib.rs wires `{command}`, which does not belong in the shell."
         );
     }
 }
 
 #[test]
 fn the_shell_does_not_link_the_hub_runtime_or_its_database() {
-    // ADR-0154/0159: the hub runs in the cloud and the webview reaches it over HTTP+WS. The shell
-    // linking the runtime would mean a second hub — with its own database and its own migrations —
-    // living inside the till, which is the local product that the pivot retired.
+    // The hub runs on the server and the webview reaches it over HTTP+WS. The shell linking the
+    // runtime would mean a second hub — with its own database and its own migrations — living
+    // inside the till.
     let forbidden = [
         ("erplora-server", "the hub runtime (Axum on loopback :8787)"),
         ("erplora-runtime", "the module dispatcher"),
@@ -350,9 +347,9 @@ fn the_shell_does_not_link_the_hub_runtime_or_its_database() {
     for (crate_name, what) in forbidden {
         assert!(
             !deps.contains(crate_name),
-            "apps/tauri depends on `{crate_name}` ({what}). The shell is a THIN client (ADR-0159): \
-             it renders a remote hub and drives local hardware. Embedding the runtime brings back \
-             the local product ADR-0154 retired."
+            "the shell depends on `{crate_name}` ({what}). The shell is a THIN client: it renders \
+             a remote hub and drives local hardware. Embedding the runtime would put a second hub, \
+             with its own database, inside the till."
         );
     }
 
@@ -367,7 +364,7 @@ fn the_shell_does_not_link_the_hub_runtime_or_its_database() {
         for symbol in ["erplora_server", "erplora_db", "erplora_cloud_client"] {
             assert!(
                 !raw.contains(symbol),
-                "{file} references `{symbol}`: the embedded runtime is back in the shell (hub#336)."
+                "{file} references `{symbol}`: the embedded runtime is back in the shell."
             );
         }
     }
@@ -375,10 +372,10 @@ fn the_shell_does_not_link_the_hub_runtime_or_its_database() {
 
 #[test]
 fn the_bundle_ships_the_shell_fallback_page_not_the_hub_web_app() {
-    // `frontendDist` used to point at `../../web/dist`, i.e. the whole hub PWA was baked into the
-    // installer. Under ADR-0154 the PWA is served BY THE HUB, so a baked copy is a second, stale
-    // frontend that ships on a release cadence instead of the hub's. What stays bundled is the
-    // small degraded page the window falls back to when there is no hub to load yet.
+    // The PWA is served BY THE HUB, so a copy baked into the installer (`frontendDist` pointing at
+    // the web app's `dist/`) is a second, stale frontend that ships on a release cadence instead of
+    // the hub's. What stays bundled is the small degraded page the window falls back to when there
+    // is no hub to load yet.
     let config = tauri_config();
     let declared = config["build"]["frontendDist"]
         .as_str()
@@ -387,7 +384,7 @@ fn the_bundle_ships_the_shell_fallback_page_not_the_hub_web_app() {
     assert_eq!(
         declared, "../shell-dist",
         "frontendDist must stay the shell's own fallback page. Pointing it back at the hub web \
-         app bakes a stale copy of the PWA into every installer (ADR-0154, hub#336)."
+         app bakes a stale copy of the PWA into every installer."
     );
 
     let resolved = manifest_dir().join(declared);
@@ -406,25 +403,25 @@ fn the_bundle_ships_the_shell_fallback_page_not_the_hub_web_app() {
     assert!(
         !canonical.contains("/apps/web/"),
         "frontendDist resolves into the hub web app ({canonical}): the installer would bundle the \
-         PWA again (ADR-0154, hub#336)."
+         PWA again."
     );
 
     // The page is committed, not generated. A build step that produces it from the web workspace
-    // is the same resurrection wearing a different hat.
+    // is the same baked copy wearing a different hat.
     if let Some(before) = config["build"]["beforeBuildCommand"].as_str() {
         assert!(
             !before.contains("@erplora/web"),
             "beforeBuildCommand builds the hub web app ({before:?}): the bundle would ship the PWA \
-             again (ADR-0154, hub#336)."
+             again."
         );
     }
 }
 
-// ── The way out to the browser stays wired to its own boundary (hub#475) ─────────────────────────
+// ── The way out to the browser stays wired to its own boundary ───────────────────────────────────
 
 #[test]
 fn the_external_opener_is_registered_and_checks_before_it_opens() {
-    // `open_external_url` is three lines, and both of them can be deleted by someone tidying up:
+    // `open_external_url` is a few lines, and two of them can be deleted by someone tidying up:
     //
     // - drop `external_browser_url(...)` and the till becomes a launcher for whatever address the
     //   page names — a `file://` path handed to the desktop, a custom scheme that starts another
@@ -440,16 +437,16 @@ fn the_external_opener_is_registered_and_checks_before_it_opens() {
         .find("fn open_external_url")
         .map(|at| &source[at..])
         .and_then(|rest| rest.find("\n}").map(|end| &rest[..end]))
-        .expect("src/lib.rs no longer defines `open_external_url` (hub#475)");
+        .expect("src/lib.rs no longer defines `open_external_url`");
 
     assert!(
         command.contains("external_browser_url"),
         "`open_external_url` no longer checks its destination: it hands whatever the page sent \
-         straight to the operating system (hub#475, ADR-0255)."
+         straight to the operating system."
     );
     assert!(
         source.contains("tauri_plugin_opener::init()"),
         "the opener plugin is not registered: `open_external_url` compiles and panics on the \
-         missing `Opener` state the first time a till tries to buy anything (hub#475)."
+         missing `Opener` state the first time a till tries to buy anything."
     );
 }

@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Manifest MSIX para el canal Microsoft Store (ADR-0136).
+  MSIX manifest for the Microsoft Store channel.
 
-  Los tokens __MSIX_*__ los sustituye scripts/pack-msix.ps1 en build-time con los valores
-  REALES de Partner Center (Product identity de la ficha reservada «ERPlora»):
-    __MSIX_IDENTITY_NAME__       → Package/Identity/Name        (p.ej. "12345Erplora.ERPlora")
-    __MSIX_PUBLISHER__           → Package/Identity/Publisher   (p.ej. "CN=xxxxxxxx-...-...")
+  scripts/pack-msix.ps1 replaces the __MSIX_*__ tokens at build time with the REAL values from
+  Partner Center (the product identity of the reserved «ERPlora» listing):
+    __MSIX_IDENTITY_NAME__       → Package/Identity/Name        (e.g. "12345Erplora.ERPlora")
+    __MSIX_PUBLISHER__           → Package/Identity/Publisher   (e.g. "CN=xxxxxxxx-...-...")
     __MSIX_PUBLISHER_DISPLAY__   → PublisherDisplayName
-    __MSIX_VERSION__             → versión 4 partes (Store exige revisión .0)
+    __MSIX_VERSION__             → four-part version (the Store requires revision .0)
 
-  El MSIX se sube SIN FIRMAR: la Store lo re-firma con su certificado tras la certificación.
-  El exe se empaqueta tal cual sale de `tauri build` (post-build puro; no cambia Tauri).
+  The MSIX is uploaded UNSIGNED: the Store signs it again with its own certificate after
+  certification. The exe is packed exactly as `tauri build` leaves it.
 -->
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
@@ -31,7 +31,7 @@
   </Properties>
 
   <Dependencies>
-    <!-- 10.0.17763 = Windows 10 1809, mínimo de MSIX moderno + WebView2 Evergreen. -->
+    <!-- 10.0.17763 = Windows 10 1809, the minimum for modern MSIX + WebView2 Evergreen. -->
     <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
   </Dependencies>
 
@@ -49,9 +49,9 @@
         Square44x44Logo="Assets\Square44x44Logo.png"
         BackgroundColor="transparent" />
       <Extensions>
-        <!-- erplora:// (ADR-0196 §7): los enlaces a un hub y el clic en un aviso desde el Centro de
-             actividades (hub#2409). El .exe/.msi lo registran al instalar; la copia de la Store
-             solo tiene lo que declara aquí. Windows lanza ERPlora.exe con el enlace como argumento. -->
+        <!-- erplora://: links to a hub and a click on a notice in the Action Center. The .exe/.msi
+             register it at install time; the Store copy only has what is declared here. Windows
+             starts ERPlora.exe with the link as its argument. -->
         <uap:Extension Category="windows.protocol">
           <uap:Protocol Name="erplora">
             <uap:DisplayName>ERPlora</uap:DisplayName>
@@ -62,9 +62,9 @@
   </Applications>
 
   <Capabilities>
-    <!-- App Win32 empaquetada (Tauri): full trust; el modelo de permisos real es el del runtime. -->
+    <!-- Packaged Win32 app (Tauri): full trust; the real permission model is the runtime's. -->
     <rescap:Capability Name="runFullTrust" />
-    <!-- SaaS (marketplace/AI/entitlement) + hardware POS en LAN (ESC/POS TCP:9100, §2.7). -->
+    <!-- The SaaS and the hub, plus the POS hardware on the LAN (ESC/POS over TCP 9100). -->
     <Capability Name="internetClient" />
     <Capability Name="privateNetworkClientServer" />
   </Capabilities>

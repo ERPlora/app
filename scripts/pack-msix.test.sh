@@ -5,17 +5,14 @@
 #
 # Run:  scripts/pack-msix.test.sh
 #
-# Why a shell test for a PowerShell script: the MSIX leg only ever runs on a
-# Windows runner, behind the `vars.MSIX_IDENTITY_NAME` gate, which is still
-# empty. That gate is why hub#577 went unnoticed for months — the packer wrote
-# `erplora-bridge.msix` while the workflow uploaded `erplora-app.msix` with
-# `if-no-files-found: error`, so the step could never have worked. Nothing
-# executed it, so nothing said so.
+# Why a shell test for a PowerShell script: the MSIX leg only runs on a Windows
+# runner, behind the `vars.MSIX_IDENTITY_NAME` gate, so a packer that writes a
+# different file from the one the workflow uploads would go unnoticed: nothing
+# executes it, so nothing says so.
 #
-# These tests do NOT run `winapp pack`. They check the things that made that
-# bug possible and that are perfectly checkable off Windows: that the names,
-# paths and tokens the workflow, the packer and the manifest exchange all agree
-# with each other and with the files actually in the repo.
+# These tests do NOT run `winapp pack`. They check what is checkable off
+# Windows: that the names, paths and tokens the workflow, the packer and the
+# manifest exchange agree with each other and with the files in the repo.
 # ─────────────────────────────────────────────────────────────────────────────
 set -uo pipefail
 
@@ -77,27 +74,25 @@ out_name="$(ps_field OutName)"
 
 echo "MSIX packaging contract"
 
-# ── 1. hub#577: the packer writes exactly the file the workflow uploads ───────
-# The original defect in one line. `if-no-files-found: error` means any drift
-# here fails the release on the first tag, not quietly.
+# ── 1. The packer writes exactly the file the workflow uploads ────────────────
+# `if-no-files-found: error` means any drift here fails the release on the
+# first tag, not quietly.
 upload_path="$(msix_upload_path)"
 [ -n "$out_name" ] && [ "$upload_path" = "dist-msix/$out_name" ] \
     && ok "the workflow uploads the file the packer writes ($out_name)" \
     || bad "the workflow uploads the file the packer writes" \
            "packer OutName='$out_name' but the workflow uploads '$upload_path'"
 
-# ── 2. hub#577: a single flavour, and the workflow calls it without one ───────
-# The packer used to be `-Flavor bridge`-defaulted, so calling it with no
-# flavour silently packaged the Bridge. With the Bridge retired there is one
-# artefact to build; a reintroduced flavour parameter must not be defaulted.
-# Matched on the variable, not the word: the tombstone comment that records the
-# defect names `-Flavor` on purpose and is worth keeping.
+# ── 2. A single flavour, and the workflow calls it without one ───────────────
+# There is one artefact to build. A defaulted flavour parameter would let the
+# workflow, which passes none, silently pack something else. Matched on the
+# variable, not the word, so a comment that names it does not trip the check.
 ! grep -q '\$Flavor' "$PS1" \
     && ok "the packer has no \$Flavor parameter to fall through (Bridge is gone)" \
     || bad "the packer has no \$Flavor parameter to fall through" \
-           "\$Flavor is back in pack-msix.ps1 — a defaulted flavour is what hub#577 was"
+           "\$Flavor is back in pack-msix.ps1: a defaulted flavour packs the wrong artefact"
 
-# ── 3. hub#577 §1: the exe is found whatever Tauri decides to call it ─────────
+# ── 3. The exe is found whatever Tauri decides to call it ────────────────────
 # `productName` is "ERPlora" but the cargo bin is `erplora-tauri`; Tauri renames
 # the binary after building. That rename has never been observed on a Windows
 # runner here, so the packer must locate BOTH names — it stages the file as
@@ -151,19 +146,17 @@ diff_out="$(diff <(replaced_tokens) <(manifest_tokens "$manifest_path") 2>&1)"
     || bad "the packer replaces exactly the tokens the manifest declares" \
            "$(echo "$diff_out" | tr '\n' ' ')"
 
-# ── 8. hub#465 + hub#878: the release installs the CLI, never a frontend ─────
-# hub#465 removed every JS step from this workflow on the grounds that nothing
-# needed one: `tauri-action` only builds a frontend when tauri.conf.json has a
-# `beforeBuildCommand`, and since ADR-0154 it has none. hub#878 falsified the
-# other half of that reasoning — with no `@tauri-apps/cli` dependency the action
-# falls back to `npm install -g`, which needs a writable /usr/lib/node_modules
-# and so only ever worked on GitHub-hosted runners. The Linux job of v1.1.0 died
-# there with EACCES.
+# ── 8. The release installs the CLI, never a frontend ───────────────────────
+# `tauri-action` only builds a frontend when tauri.conf.json has a
+# `beforeBuildCommand`, and it has none: `shell-dist/` is plain files. But
+# with no `@tauri-apps/cli` dependency the action falls back to
+# `npm install -g`, which needs a writable /usr/lib/node_modules and fails with
+# EACCES anywhere else than on a GitHub-hosted runner.
 #
-# So a JS install is now expected, and what this asserts is that it stays the
-# CHEAP one: the CLI only (`--filter @erplora/app`), never the web app's
-# dependency tree, in the most expensive workflow we have. The `beforeBuildCommand`
-# half stands: bring one back and the front has to be built somewhere.
+# So a JS install is expected, and this asserts it stays the CHEAP one: the CLI
+# only (`--filter @erplora/app`), never the web app's dependency tree, in the
+# most expensive workflow we have. Bring a `beforeBuildCommand` back and the
+# front has to be built somewhere.
 has_before_build="$(python3 -c "import json;print('yes' if 'beforeBuildCommand' in json.load(open('$TAURI_CONF')).get('build',{}) else 'no')")"
 install_steps="$(grep -c 'pnpm install --frozen-lockfile' "$WORKFLOW" || true)"
 unfiltered="$(grep 'pnpm install --frozen-lockfile' "$WORKFLOW" | grep -vc -- '--filter @erplora/app' || true)"
@@ -171,7 +164,7 @@ unfiltered="$(grep 'pnpm install --frozen-lockfile' "$WORKFLOW" | grep -vc -- '-
 [ "$install_steps" -ge 1 ] \
     && ok "the release installs the Tauri CLI from the workspace" \
     || bad "the release installs the Tauri CLI from the workspace" \
-           "no \`pnpm install --frozen-lockfile\` left: tauri-action would go back to \`npm install -g\` (hub#878)"
+           "no \`pnpm install --frozen-lockfile\` left: tauri-action would go back to \`npm install -g\`"
 
 if [ "$has_before_build" = no ]; then
     [ "$unfiltered" -eq 0 ] \
@@ -185,7 +178,7 @@ else
                "tauri.conf.json builds a frontend, but only the CLI is installed — the build fails on the first tag"
 fi
 
-# ── 9. hub#878: the CLI is pinned, and the same one on the three platforms ───
+# ── 9. The CLI is pinned, and the same one on the three platforms ───────────
 # `npm install -g @tauri-apps/cli@v2` also meant every release was built with
 # whatever the CLI was that morning, and possibly a different one per platform.
 # A lockfile entry is what makes two builds of the same commit comparable.
@@ -193,7 +186,7 @@ cli_pin="$(python3 -c "import json;print(json.load(open('$ROOT/package.json'))['
 case "$cli_pin" in
     [0-9]*) ok "the Tauri CLI is pinned to an exact version ($cli_pin)" ;;
     '')     bad "the Tauri CLI is pinned to an exact version" \
-                "package.json does not declare @tauri-apps/cli — the global install comes back (hub#878)" ;;
+                "package.json does not declare @tauri-apps/cli — the global install comes back" ;;
     *)      bad "the Tauri CLI is pinned to an exact version" \
                 "'$cli_pin' is a range: two builds of the same commit can use different CLIs" ;;
 esac
@@ -201,7 +194,7 @@ esac
 grep -q 'tauriScript: pnpm exec tauri' "$WORKFLOW" \
     && ok "tauri-action runs the workspace CLI (\`tauriScript\`)" \
     || bad "tauri-action runs the workspace CLI (\`tauriScript\`)" \
-           "without \`tauriScript\` the action ignores what we installed and calls \`npm install -g\` (hub#878)"
+           "without \`tauriScript\` the action ignores what we installed and calls \`npm install -g\`"
 
 echo
 printf 'passed %d, failed %d\n' "$pass" "$fail"
