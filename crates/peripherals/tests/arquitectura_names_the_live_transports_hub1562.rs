@@ -1,10 +1,8 @@
-//! The hub's own architecture doc cannot bury a printer transport this crate still ships — hub#1562.
+//! The crate's README cannot bury a printer transport this crate still ships.
 //!
-//! `ARQUITECTURA.md` kept saying "USB se sigue descartando" (§2.7) and "Transporte: solo RED/LAN
-//! (USB/Bluetooth descartados por drivers/mantenimiento)" (§14) long after hub#1083 landed the OS
-//! print queue. That doc is what a person — or an agent — reads BEFORE touching printing, so a
-//! stale sentence there does not merely age: it teaches the opposite of what the code does, and the
-//! reader has no reason to doubt it.
+//! The README is what a person — or an agent — reads BEFORE touching printing, so a stale sentence
+//! there such as "USB se sigue descartando" does not merely age: it teaches the opposite of what
+//! the code does, and the reader has no reason to doubt it.
 //!
 //! The guard is a cross-check between two independent artifacts, never a copy of the prose. The
 //! transports come from [`parse_print_target`], the crate's real front door, and the doc has to
@@ -15,16 +13,13 @@
 //! Saying USB is out on Android, on Windows, or through `libusb`/WebUSB/OPOS is true today and has
 //! to stay writable, so a sentence that names one of those is left alone. `escritorio`/`macOS`/
 //! `Linux` are deliberately NOT on that list: that is where the queue prints, so burying USB there
-//! is the regression itself. When hub#1269 lands USB on Windows, `Windows` comes off the list in
+//! is the regression itself. When USB printing lands on Windows, `Windows` comes off the list in
 //! the same commit.
 
 use erplora_peripherals::discovery::{parse_print_target, PrintTarget};
 
-/// The doc, pulled in at compile time: moving or renaming it cannot leave this test green.
-///
-/// In ERPlora/hub this was the monorepo's `ARQUITECTURA.md` (§2.7), which did not move with the
-/// app. In this repo the doc a reader opens before touching printing is this crate's README, whose
-/// transports table is the same §2.7 table (README.md of the repo root, «Tests adaptados»).
+/// The crate's README, pulled in at compile time: moving or renaming it cannot leave this test
+/// green. It holds the transports table a reader checks before touching printing.
 const ARQUITECTURA: &str = include_str!("../README.md");
 
 /// One `printer_id` per transport the crate is meant to accept today.
@@ -35,13 +30,13 @@ const SAMPLE_IDS: [&str; 3] = [
 ];
 
 /// Words this doc uses to declare a transport dead. `descart` covers descartado/descartados/
-/// descartando; the other two are how §14 used to phrase the same verdict.
+/// descartando; the other two give the same verdict by naming the network as the only transport.
 const BURIAL_WORDS: [&str; 3] = ["descart", "red-only", "solo red"];
 
 /// What narrows a burial down to something that is TRUE, and so may keep being written.
 ///
 /// Every one of these is a place USB really does not reach: Android (Kotlin, an intent-granted
-/// permission and OTG cables), Windows (hub#1269, no machine to verify it on), iOS, and the three
+/// permission and OTG cables), Windows (no machine to verify it on), iOS, and the three
 /// library routes that would each bring back a driver per OS. Desktop is absent on purpose.
 ///
 /// Matched as WHOLE WORDS, never as substrings: this doc is in Spanish, and `ios` sits inside
@@ -52,8 +47,8 @@ const LEGITIMATE_QUALIFIERS: [&str; 6] = ["android", "windows", "ios", "libusb",
 /// How the doc has to name the transport behind a parsed target.
 ///
 /// Exhaustive on purpose: a fourth `PrintTarget` variant stops this file compiling until someone
-/// says how `ARQUITECTURA.md` names it. That is the point — the doc gets updated with the code, not
-/// a month later.
+/// says how the README names it. That is the point — the doc gets updated with the code, not a
+/// month later.
 fn documented_shape(target: &PrintTarget) -> &'static str {
     match target {
         PrintTarget::Network(_) => "network:{ip}:{port}",
@@ -65,11 +60,10 @@ fn documented_shape(target: &PrintTarget) -> &'static str {
 /// The doc as CLAIMS: hard wrapping undone inside a block, but never across blocks.
 ///
 /// Undoing the wrapping is what makes a sentence split over two lines one claim. Doing it over the
-/// WHOLE file is what made §2.7 exempt itself: joining every newline glued the transports table to
-/// the prose around it into a single 858-char "sentence", and because the Bluetooth row says
-/// "solo Android", any burial written anywhere in that section inherited a qualifier it was never
-/// talking about. A qualifier only excuses the claim it sits in, so a block boundary — a blank
-/// line, a table row, a list item, a heading — ends the claim.
+/// WHOLE file would glue the transports table to the prose around it into a single "sentence", and
+/// because the Bluetooth row says "solo Android", any burial written next to the table would
+/// inherit a qualifier it was never talking about. A qualifier only excuses the claim it sits in,
+/// so a block boundary — a blank line, a table row, a list item, a heading — ends the claim.
 fn claims(doc: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut paragraph: Vec<&str> = Vec::new();
@@ -132,7 +126,7 @@ fn contains_word(haystack: &str, needle: &str) -> bool {
 }
 
 /// Whether `text` talks about USB the transport, and not about `libusb` or `WebUSB` — both of which
-/// §2.7 names precisely to say they stay out, and neither of which is what we ship.
+/// the README names precisely to say they stay out, and neither of which is what we ship.
 fn mentions_usb(text: &str) -> bool {
     contains_word(text, "USB")
 }
@@ -152,9 +146,9 @@ fn buried_claims(doc: &str) -> Vec<String> {
         .collect()
 }
 
-/// hub#1562: no sentence may declare USB dead while `parse_print_target` still takes a queue.
+/// No sentence may declare USB dead while `parse_print_target` still takes a queue.
 #[test]
-fn hub1562_arquitectura_does_not_bury_the_usb_transport() {
+fn readme_does_not_bury_the_usb_transport() {
     let usb_is_alive = parse_print_target("usb:Star_TSP100_Cutter").is_ok();
     assert!(
         usb_is_alive,
@@ -168,7 +162,7 @@ fn hub1562_arquitectura_does_not_bury_the_usb_transport() {
     assert!(
         buried.is_empty(),
         "crates/peripherals/README.md declares USB discarded while `crates/peripherals/src/usb.rs` prints \
-         through the OS queue (hub#1083). Offending sentence(s):\n  - {}\n\nA blanket verdict is \
+         through the OS queue. Offending sentence(s):\n  - {}\n\nA blanket verdict is \
          what this catches. If USB is out somewhere in particular, name it — Android, Windows, \
          `libusb`/WebUSB/OPOS — and the sentence is left alone. Desktop is not on that list.",
         buried
@@ -179,9 +173,9 @@ fn hub1562_arquitectura_does_not_bury_the_usb_transport() {
     );
 }
 
-/// hub#1562: every transport the front door still accepts has to be named in the doc.
+/// Every transport the front door still accepts has to be named in the doc.
 #[test]
-fn hub1562_arquitectura_names_every_transport_the_crate_accepts() {
+fn readme_names_every_transport_the_crate_accepts() {
     let missing: Vec<&str> = SAMPLE_IDS
         .iter()
         .filter_map(|id| parse_print_target(id).ok())
@@ -198,22 +192,20 @@ fn hub1562_arquitectura_names_every_transport_the_crate_accepts() {
     );
 }
 
-/// The guard has to catch a burial WHEREVER it is written — hub#1562.
+/// The guard has to catch a burial WHEREVER it is written.
 ///
-/// The first version of this file did not. Two holes, both found by writing the very sentence the
-/// issue is about back into `ARQUITECTURA.md` and watching the test stay green:
+/// Two easy mistakes would each let a burial through, and the cases below cover both:
 ///
-///   1. the whole file was flattened into one string before splitting on ". ", so the transports
-///      table of §2.7 and the prose around it became a single claim; the Bluetooth row's "solo
-///      Android" then excused every burial in the section — including the exact spot the stale
-///      sentence used to live;
-///   2. the qualifiers were matched as substrings, and this doc is in Spanish: `ios` is inside
-///      escenarios, cambios, servicios, varios, negocios.
+///   1. flattening the whole file into one string before splitting on ". " makes the transports
+///      table and the prose around it a single claim, and the Bluetooth row's "solo Android" then
+///      excuses every burial next to the table;
+///   2. matching the qualifiers as substrings fails on a Spanish doc: `ios` is inside escenarios,
+///      cambios, servicios, varios, negocios.
 ///
 /// So the detector is exercised against documents written on purpose, not against the doc itself:
 /// a guard checked only by the text it guards passes the day that text drifts.
 #[test]
-fn hub1562_a_burial_is_caught_wherever_it_is_written() {
+fn a_burial_is_caught_wherever_it_is_written() {
     // (case, doc, expected number of buried claims)
     let cases: [(&str, &str, usize); 8] = [
         (

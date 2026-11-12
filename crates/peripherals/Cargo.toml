@@ -1,7 +1,3 @@
-# erplora-peripherals — lógica de hardware POS reutilizable. Renderiza ESC/POS y lo entrega por el
-# transporte que nombre el printer_id: red (TCP:9100), SPP en Android y la cola RAW del SO por USB
-# en escritorio (ARQUITECTURA.md §2.7). Consumido por la app instalable (apps/tauri) — llamadas
-# in-process, sin servidor local. Implementado: el detalle por módulo, en src/lib.rs y README.md.
 [package]
 name = "erplora-peripherals"
 edition.workspace = true
@@ -17,9 +13,9 @@ tracing = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 mdns-sd = "0.11"
 if-addrs = "0.13"    # the device's own addresses: which networks to sweep, without a route out (app#17)
-oem_cp = "2"          # codificación cp437 para escpos::text
+oem_cp = "2"          # cp437 encoding for escpos::text
 
-# Inherits `[workspace.lints]` from the root manifest (hub#1242). Without these two lines the
-# crate is silently EXEMPT from the lint gate.
+# Inherits `[workspace.lints]` from the root manifest. Without these two lines the crate is
+# silently EXEMPT from the lint gate.
 [lints]
 workspace = true

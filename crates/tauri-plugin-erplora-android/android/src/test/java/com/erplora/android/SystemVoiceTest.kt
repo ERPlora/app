@@ -9,7 +9,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * The system's own voice for the assistant's «Read aloud» (round 2026-11-04a).
+ * The system's own voice for the assistant's «Read aloud».
  *
  * The Android WebView has no `speechSynthesis`, so without this the assistant is mute in the app.
  * `TextToSpeech` cannot run on the JVM, so what is pinned here is what [SystemVoice] DECIDES over a

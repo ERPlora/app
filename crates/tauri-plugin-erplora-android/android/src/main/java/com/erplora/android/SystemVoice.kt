@@ -39,12 +39,12 @@ interface SpeechEvents {
 }
 
 /**
- * The system's own voice for the assistant's «Read aloud» (round 2026-11-04a).
+ * The system's own voice for the assistant's «Read aloud».
  *
  * In a browser and on Windows (WebView2) the page reads with `speechSynthesis`; the Android WebView
- * has none (MDN BCD `webview_android: false`, crbug 40417848), so in the app the assistant was mute.
- * This reads through Android's [TextToSpeech] instead, with the voices the person has in the
- * system settings, for the `tts_*` commands of the plugin.
+ * has none (MDN BCD `webview_android: false`, crbug 40417848), so without this the assistant is mute
+ * in the app. This reads through Android's [TextToSpeech] instead, with the voices the person has in
+ * the system settings, for the `tts_*` commands of the plugin.
  *
  * - The engine is made on the first request and kept: binding to the engine's service is not free,
  *   and an app that never reads aloud never pays it. One that cannot start is shut down and made

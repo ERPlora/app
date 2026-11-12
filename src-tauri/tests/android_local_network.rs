@@ -1,10 +1,10 @@
-//! Guard for the Android permissions the till needs to reach its hardware (hub#337, ADR-0196 §9).
+//! Guard for the Android permissions the till needs to reach its hardware.
 //!
 //! Android's twin of `macos_local_network.rs`, and the same failure mode: a missing permission
 //! does not raise anything. It makes the hardware **quietly unreachable** — the sweep of port 9100
 //! becomes 254 timeouts and the till reports an empty venue while the printer sits there switched
-//! on. Since ADR-0196 the installable app is the ONLY way to the hardware, so this is the whole
-//! hardware story on Android, not a corner of it.
+//! on. The installable app is the ONLY way to the hardware, so this is the whole hardware story on
+//! Android, not a corner of it.
 //!
 //! What makes Android worse than macOS is *where the declaration lives*. `gen/android` is a
 //! **generated** project, and this is what `cargo tauri android init` actually does with it —
@@ -13,7 +13,7 @@
 //! - with the manifest present, it leaves the file **untouched**: the hand-written permissions and
 //!   comments survive, and `git status` comes back clean;
 //! - with the manifest **missing**, it writes Tauri's template back — `INTERNET` and nothing else.
-//!   Gone: the four hardware permissions and the `erplora://` intent filter (hub#345). Kept: the
+//!   Gone: the four hardware permissions and the `erplora://` intent filter. Kept: the
 //!   leanback feature and the file provider, which come from the template.
 //!
 //! So the hazard is not "someone reruns init", it is "the file is not there when init runs": a
@@ -21,8 +21,8 @@
 //! machine where it was wiped. And the loss is completely silent — the APK still builds, still
 //! installs, still runs. Only the printers stop existing.
 //!
-//! So the declaration is kept in two places on purpose (the lesson of hub#345, where Android alone
-//! needed the deep-link scheme declared twice):
+//! So the declaration is kept in two places on purpose (the same reason Android alone needs the
+//! deep-link scheme declared twice):
 //!
 //! 1. in the plugin's own Android library manifest, under `crates/`, where no generator reaches —
 //!    the manifest merger folds it back into the APK even if `gen/android` is thrown away and
@@ -35,7 +35,7 @@
 //! Why loudly, and not "it will be obvious": asking for a permission the merged manifest never
 //! declared is not answered with a dialog. Android answers DENIED immediately, forever, without
 //! showing the user anything. The till would then say "grant local network access to ERPlora in
-//! your device settings" (hub#338) and send the user looking for a toggle that does not exist.
+//! your device settings" and send the user looking for a toggle that does not exist.
 
 use std::fs;
 use std::path::PathBuf;
@@ -52,40 +52,40 @@ const REQUIRED: &[&str] = &[
     "android.permission.CHANGE_WIFI_MULTICAST_STATE",
     "android.permission.ACCESS_LOCAL_NETWORK",
     "android.permission.POST_NOTIFICATIONS",
-    // Bluetooth Classic SPP printing (ADR-0204, hub#388). Runtime permission since API 31, and
+    // Bluetooth Classic SPP printing. Runtime permission since API 31, and
     // the same silent failure as the LAN one: without it the bonded list is empty and the till
     // reports no bluetooth printers.
     "android.permission.BLUETOOTH_CONNECT",
-    // Reading the staff badge off the device's own reader (hub#988). An install-time `normal`
+    // Reading the staff badge off the device's own reader. An install-time `normal`
     // permission — no dialog, so it is not in `PermissionPolicy` — but the same "declared or
     // nothing" rule applies: without it `enableReaderMode` throws and a tablet cannot enrol a card.
     "android.permission.NFC",
-    // Staying alive to hear the next notice with the screen off (HUB_APP-F26, hub#836; the old
-    // hub's hub#2307). Both are install-time `normal` permissions, so there is no dialog either; but
-    // without them `startForeground` throws a SecurityException and Android freezes the page the
-    // moment the screen goes dark. See [`FOREGROUND_SERVICE`].
+    // Staying alive to hear the next notice with the screen off. Both are install-time `normal`
+    // permissions, so there is no dialog either; but without them `startForeground` throws a
+    // SecurityException and Android freezes the page the moment the screen goes dark. See
+    // [`FOREGROUND_SERVICE`].
     FOREGROUND_SERVICE,
     FOREGROUND_SERVICE_SPECIAL_USE,
-    // A module asking where the device is (hub#2552); the first one is `attendance`, which can
+    // A module asking where the device is; the first one is `attendance`, which can
     // require the employee to clock in near the venue. RUNTIME permissions: wry's
     // `RustWebChromeClient.onGeolocationPermissionsShowPrompt` asks for them when a page calls
     // `navigator.geolocation`. Without the declaration the request is answered DENIED with no
     // dialog, the page gets PERMISSION_DENIED, and a personal-device clock-in is rejected forever.
     "android.permission.ACCESS_FINE_LOCATION",
     "android.permission.ACCESS_COARSE_LOCATION",
-    // Dictating to the assistant (BASE-F94, hub#247): see [`DICTATION`].
+    // Dictating to the assistant: see [`DICTATION`].
     RECORD_AUDIO,
     MODIFY_AUDIO_SETTINGS,
 ];
 
-/// The foreground service that keeps the app listening with the screen off (HUB_APP-F26, hub#836).
+/// The foreground service that keeps the app listening with the screen off.
 /// Google Play takes a build with them only once Play Console has their declaration (`specialUse`,
 /// with a video of the service running): `GOOGLE-PLAY.md`, «Formularios de Play que dependen de un
 /// permiso».
 const FOREGROUND_SERVICE: &str = "android.permission.FOREGROUND_SERVICE";
 const FOREGROUND_SERVICE_SPECIAL_USE: &str = "android.permission.FOREGROUND_SERVICE_SPECIAL_USE";
 
-/// The hardware feature the NFC permission drags in behind it (hub#988).
+/// The hardware feature the NFC permission drags in behind it.
 ///
 /// This is not a permission and it is not decoration. Declaring `android.permission.NFC` makes
 /// Google Play add an **implicit** `android.hardware.nfc` requirement, and Play then hides the app
@@ -94,7 +94,7 @@ const FOREGROUND_SERVICE_SPECIAL_USE: &str = "android.permission.FOREGROUND_SERV
 /// of a convenience feature, and nothing in the build would say so.
 const NFC_FEATURE: &str = "android.hardware.nfc";
 
-/// The hardware feature the location permissions drag in behind them (hub#2552).
+/// The hardware feature the location permissions drag in behind them.
 ///
 /// Same trap as [`NFC_FEATURE`], and NOT gated by the target SDK: only the `.gps` / `.network`
 /// sub-features stop being implied at targetSdk 21, the parent `android.hardware.location` is
@@ -111,7 +111,7 @@ const OPTIONAL_FEATURES: &[&str] = &[NFC_FEATURE, LOCATION_FEATURE, MICROPHONE_F
 const RECORD_AUDIO: &str = "android.permission.RECORD_AUDIO";
 const MODIFY_AUDIO_SETTINGS: &str = "android.permission.MODIFY_AUDIO_SETTINGS";
 
-/// What a page of the business needs to dictate to the assistant (the Hub's BASE-F94, hub#247):
+/// What a page of the business needs to dictate to the assistant:
 /// exactly the pair wry's `RustWebChromeClient.onPermissionRequest` (wry 0.55.1) asks Android for
 /// when `getUserMedia({ audio: true })` arrives as `RESOURCE_AUDIO_CAPTURE`, and it grants the
 /// capture only if BOTH come back granted. `RECORD_AUDIO` is a runtime permission and
@@ -208,7 +208,6 @@ fn an_unterminated_comment_hides_everything_after_it() {
 
 // ── The generated manifest still declares what the shell asks for ───────────────────────────────
 
-// Regression test for ERPlora/hub#2552
 #[test]
 fn the_generated_manifest_declares_every_permission_the_till_needs() {
     let declared = declared_permissions(APP_MANIFEST);
@@ -318,7 +317,6 @@ fn a_manifest_that_only_talks_about_the_feature_does_not_declare_it_optional() {
     ));
 }
 
-// Regression test for ERPlora/hub#2552
 #[test]
 fn an_implied_feature_does_not_hide_the_app_from_devices_without_it() {
     // Both copies, because either one alone would let the requirement back in: the merger takes
@@ -337,8 +335,7 @@ fn an_implied_feature_does_not_hide_the_app_from_devices_without_it() {
                 "{name} declares a permission that implies {feature} without saying it is \
                  optional. Google Play adds that IMPLICIT requirement and hides the app from every \
                  device without it — the cheap counter tablets this till is for. Put back: \
-                 <uses-feature android:name=\"{feature}\" android:required=\"false\" /> \
-                 (hub#988, hub#2552, hub#247)"
+                 <uses-feature android:name=\"{feature}\" android:required=\"false\" />"
             );
         }
     }
@@ -351,7 +348,7 @@ fn the_release_build_reads_the_permissions_back_off_the_apk() {
     // Everything above reads source files. None of it proves the merger actually folded the
     // plugin's declaration into the APK — the merged manifest exists only after
     // `cargo tauri android build`, in the one artifact a customer installs. The release job
-    // already reads the app id back off that APK with `aapt dump badging` (ADR-0160); the
+    // already reads the app id back off that APK with `aapt dump badging`; the
     // permissions get the same treatment, because "the docs say the merger does it" is not a test.
     //
     // For this to bite, the job that runs it has to watch the file it reads: `test-shell.yml`
@@ -384,17 +381,15 @@ fn the_release_build_reads_the_permissions_back_off_the_apk() {
         assert!(
             RELEASE_WORKFLOW.contains(&format!("uses-feature-not-required: ?name='{feature}'")),
             "the release job never reads back whether the built APK still says {feature} is \
-             OPTIONAL, so a merged manifest that requires it would ship and narrow the listing \
-             (hub#988, hub#2552)"
+             OPTIONAL, so a merged manifest that requires it would ship and narrow the listing"
         );
     }
 }
 
 /// The location pair, on its own: the one `attendance` needs to geofence a clock-in from a
 /// personal phone. Without it the WebView answers `PERMISSION_DENIED` with no dialog.
-// Regression test for ERPlora/hub#2552
 #[test]
-fn the_location_permissions_are_declared_in_both_manifests_hub2552() {
+fn the_location_permissions_are_declared_in_both_manifests() {
     let plugin = fs::read_to_string(plugin_manifest_path()).expect("the plugin manifest");
     for (label, manifest) in [("gen/android", APP_MANIFEST), ("plugin", plugin.as_str())] {
         let declared = declared_permissions(manifest);
@@ -404,15 +399,15 @@ fn the_location_permissions_are_declared_in_both_manifests_hub2552() {
         ] {
             assert!(
                 declared.iter().any(|p| p == permission),
-                "{label} manifest does not declare {permission} (hub#2552)"
+                "{label} manifest does not declare {permission}"
             );
         }
     }
 }
 
-/// The microphone pair, in both manifests: what the assistant's dictation needs inside the app
-/// (BASE-F94, hub#247). Without it the WebView answers `getUserMedia` with `NotAllowedError` and
-/// no dialog, on every device, forever.
+/// The microphone pair, in both manifests: what the assistant's dictation needs inside the app.
+/// Without it the WebView answers `getUserMedia` with `NotAllowedError` and no dialog, on every
+/// device, forever.
 #[test]
 fn the_dictation_permissions_are_declared_in_both_manifests() {
     let plugin = fs::read_to_string(plugin_manifest_path()).expect("the plugin manifest");
@@ -423,14 +418,14 @@ fn the_dictation_permissions_are_declared_in_both_manifests() {
                 declared.iter().any(|p| p == permission),
                 "{label} manifest does not declare {permission}: wry asks Android for it when a \
                  page calls getUserMedia, and an undeclared permission is DENIED with no dialog — \
-                 the assistant's microphone never starts (BASE-F94, hub#247).\n\
+                 the assistant's microphone never starts.\n\
                  Declared right now: {declared:?}"
             );
         }
     }
 }
 
-// ── The foreground service is checked like any other permission (hub#836) ─────────────────────
+// ── The foreground service is checked like any other permission ─────────────────────────────────
 
 /// The permissions the release job's «Check hardware permissions on the APK» step loops over
 /// (`for P in … ; do`), word by word.
@@ -456,16 +451,16 @@ fn the_release_check_reads_whole_permission_names() {
     assert!(!checked.iter().any(|p| p == "android.permission.INTER"), "{checked:?}");
 }
 
-// Regression test for ERPlora/hub#836
 #[test]
-fn the_release_build_no_longer_refuses_the_listening_service_hub836() {
-    // The 1.1.34 refused any foreground service on the APK (ERPlora/app#23) with
-    // `scripts/ci/apk-foreground-service-guard.sh`. Now the app declares one on purpose, and the
-    // release has to REQUIRE it instead (above): with both steps, every build would stop there.
+fn the_release_build_does_not_refuse_the_listening_service() {
+    // The app declares a foreground service on purpose and the release REQUIRES it (above), so
+    // the step that refused any foreground service on the APK
+    // (`scripts/ci/apk-foreground-service-guard.sh`, app#23) must not come back: with both steps,
+    // every build would stop there.
     assert!(
         !RELEASE_WORKFLOW.contains("apk-foreground-service-guard"),
         "the release job still refuses an APK with a foreground service, and the app declares the \
-         listening service (HUB_APP-F26): every release would stop before publishing"
+         listening service: every release would stop before publishing"
     );
     assert!(
         !RELEASE_WORKFLOW.contains("Check no foreground service on the APK"),

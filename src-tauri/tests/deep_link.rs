@@ -1,8 +1,8 @@
-//! The `erplora://` deep link and its trust boundary (ADR-0196 §7, hub#345).
+//! The `erplora://` deep link and its trust boundary.
 //!
 //! A link is the only thing that lets a page **outside** the app steer the app. That makes it a
 //! trust boundary, not a convenience: whoever writes the link picks the destination, and the
-//! destination is a window that can open the cash drawer (ADR-0221). So the app does not open what
+//! destination is a window that can open the cash drawer. So the app does not open what
 //! the link says — it **resolves** it, and only a hub of ours resolves at all.
 //!
 //! The other half is registration. A deep link that no operating system knows about is a dead
@@ -29,7 +29,7 @@ fn a_hub_link_resolves_to_that_hub() {
 
 #[test]
 fn the_resolved_url_carries_the_capture_marker() {
-    // `?shell=1` is the existing capture contract (ADR-0159): navigating with it is what makes the
+    // `?shell=1` is the capture contract: navigating with it is what makes the
     // shell remember this hub as `hub.url`. Without it, opening the app through a link would work
     // once and be forgotten on the next cold start.
     let opened = resolve_deep_link("erplora://hub/demo.a.erplora.com").expect("a hub link resolves");
@@ -56,8 +56,8 @@ fn the_host_is_matched_case_insensitively() {
 
 #[test]
 fn any_aura_is_a_hub() {
-    // Hubs live at `{slug}.{aura}.erplora.com`, with auras by letter on Hetzner and by number on
-    // the AWS fallback. Enumerating auras would turn "open a new aura" into "ship a new app".
+    // Hubs live at `{slug}.{aura}.erplora.com`, with auras named by letter or by number.
+    // Enumerating auras would turn "open a new aura" into "ship a new app".
     for host in [
         "demo.a.erplora.com",
         "demo.b.erplora.com",
@@ -113,7 +113,7 @@ fn a_tampered_link_never_leaves_our_domain() {
 #[test]
 fn the_saas_apex_is_not_a_hub() {
     // `erplora.com` also serves marketing, billing and a third-party checkout — the widest surface
-    // the window ever loads, and deliberately kept out of the hardware capability (ADR-0221). A
+    // the window ever loads, and deliberately kept out of the hardware capability. A
     // link must not be able to steer the app there either.
     assert_eq!(resolve_deep_link("erplora://hub/erplora.com"), None);
     assert_eq!(resolve_deep_link("erplora://hub/www.erplora.com/"), hub("www.erplora.com"));

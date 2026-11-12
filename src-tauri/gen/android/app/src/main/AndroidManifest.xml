@@ -11,7 +11,7 @@
          targetSdk reaches 37: declaring it is not enough, it has to be ASKED for — and asking
          needs Kotlin, because the callback lands on the Activity. That is
          `ErploraAndroidPlugin.requestPermissions`, and the shell asks before every scan and every
-         print (hub#337).
+         print.
 
          ⚠️ THIS FILE IS GENERATED. Measured with tauri-cli 2.11.2: `cargo tauri android init`
          leaves it alone while it exists, but if it is MISSING it writes Tauri's template back —
@@ -19,7 +19,7 @@
          of this list therefore lives outside the generated project, in
          `crates/tauri-plugin-erplora-android/android/src/main/AndroidManifest.xml`; the manifest
          merger folds it back in, verified by stripping this file down to INTERNET and rebuilding.
-         Both copies are guarded by `apps/tauri/src-tauri/tests/android_local_network.rs`. -->
+         Both copies are guarded by `src-tauri/tests/android_local_network.rs`. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
@@ -28,14 +28,14 @@
          Runtime permission since Android 13. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Bluetooth Classic SPP printing (ADR-0204, hub#388): bonded list + RFCOMM socket.
+    <!-- Bluetooth Classic SPP printing: bonded list + RFCOMM socket.
          Runtime permission since Android 12; the pre-12 spelling is install-time and capped
          with maxSdkVersion. No BLUETOOTH_SCAN on purpose: pairing happens in Android's own
          settings, the till only reads the bonded list. -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
 
-    <!-- Reading the staff badge off the device's own reader (hub#988). An install-time `normal`
+    <!-- Reading the staff badge off the device's own reader. An install-time `normal`
          permission: no dialog, so it is NOT in PermissionPolicy. -->
     <uses-permission android:name="android.permission.NFC" />
 
@@ -46,14 +46,14 @@
          and the badge keeps arriving through the USB reader. -->
     <uses-feature android:name="android.hardware.nfc" android:required="false" />
 
-    <!-- Hearing the next notice with the screen off (HUB_APP-F26, hub#836): the foreground service
+    <!-- Hearing the next notice with the screen off: the foreground service
          `NoticeListeningService`, declared (with its `specialUse` type) in the plugin manifest,
          which the merger folds in. Install-time permissions; without them `startForeground`
          throws on Android 14+. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
-    <!-- Where the device is, for a module that calls `navigator.geolocation` (hub#2552); first
+    <!-- Where the device is, for a module that calls `navigator.geolocation`; first
          consumer: the `attendance` module (clock-in near the venue). Runtime permissions, asked
          by wry's `RustWebChromeClient.onGeolocationPermissionsShowPrompt`; undeclared, the
          request is DENIED with no dialog. -->
@@ -65,7 +65,7 @@
          from every device without it. The till does not need a position; only a module asks. -->
     <uses-feature android:name="android.hardware.location" android:required="false" />
 
-    <!-- Dictating to the assistant (the Hub's BASE-F94, hub#247): the page calls `getUserMedia`,
+    <!-- Dictating to the assistant: the page calls `getUserMedia`,
          and wry's `RustWebChromeClient.onPermissionRequest` asks for both and grants the
          microphone only if both come back granted. RECORD_AUDIO is a runtime permission (Android's
          own dialog, when the person taps the microphone); MODIFY_AUDIO_SETTINGS is install-time.
@@ -99,19 +99,19 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
 
-            <!-- Deep link `erplora://hub/<host>` (ADR-0196 §7). Es lo que hace que un enlace del
-                 SaaS —«Open Terminal», el correo de invitación— abra la APP en vez del navegador.
+            <!-- Deep link `erplora://hub/<host>`: what makes a link from the SaaS («Open
+                 Terminal», the invitation email) open the APP instead of the browser.
 
-                 Android solo entrega un enlace a una activity con las tres piezas juntas: acción
-                 VIEW, categoría BROWSABLE (sin ella el sistema NO se lo da a un enlace venido de
-                 un navegador o de un cliente de correo) y el `data` con el esquema. Si falta
-                 cualquiera, el intent no se entrega nunca y NADIE lo reporta: el usuario toca el
-                 enlace y no pasa nada.
+                 Android only delivers a link to an activity that has all three pieces: the VIEW
+                 action, the BROWSABLE category (without it the system does NOT hand over a link
+                 coming from a browser or a mail client) and the `data` with the scheme. If any is
+                 missing the intent is never delivered and NOBODY reports it: the person taps the
+                 link and nothing happens.
 
-                 SIN `android:autoVerify`: eso es para App Links `https`, que exigen publicar un
-                 assetlinks.json; este es un esquema propio y no se verifica contra ningún dominio.
-                 El `launchMode="singleTask"` de arriba es lo que hace que un segundo enlace
-                 reutilice la app abierta en vez de apilar otra instancia encima del TPV. -->
+                 NO `android:autoVerify`: that is for `https` App Links, which require publishing an
+                 assetlinks.json; this is our own scheme and is not verified against any domain.
+                 The `launchMode="singleTask"` above makes a second link reuse the open app instead
+                 of stacking another instance on top of the till. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

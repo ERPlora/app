@@ -1,25 +1,22 @@
-//! Contrato JSON Hub ↔ Bridge sobre WebSocket — **fuente única de verdad** del protocolo.
+//! The JSON shapes the app exchanges with the Hub's web page — the **single source of truth** for
+//! them.
 //!
-//! Espejo de `bridge/ERPlora-Bridge-desktop/erplora_bridge/protocol.py` y de `Protocol.kt`
-//! (Android). `hub/static/js/bridge.js` consume este formato sin cambios.
+//! The `invoke` handlers return the printer and device records below serialized by serde, and the
+//! Hub reads the field names exactly as they are here: renaming a field or a tag breaks the page.
 //!
-//! Cambios de superficie por la decisión red-only (§2.7) respecto al protocolo Python:
-//!   - **Eliminadas** las acciones/eventos de escáner y teclado virtual: `toggle_keyboard`,
-//!     evento `barcode`, evento `keyboard_toggled` (el escáner HID lo maneja el SO/navegador).
-//!   - `printer_id` nació `network:{ip}:{port}` a secas. Hoy son tres: `bluetooth:{mac}` volvió
-//!     con ADR-0204 (solo Android) y `usb:{queue}` con hub#1083 (solo escritorio).
+//! There are no scanner or virtual keyboard messages: an HID scanner is handled by the OS or the
+//! browser as a keyboard.
 
 use serde::{Deserialize, Serialize};
 
-/// Mensaje Hub → Bridge. Discriminado por la clave `action`.
+/// A Hub → app message, tagged by its `action` key.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum Command {
-    /// Versión del bridge + impresoras cacheadas.
+    /// The app version and the printers it has cached.
     GetStatus,
-    /// Re-escanea la red en busca de impresoras.
+    /// Scans the network for printers again.
     DiscoverPrinters,
-    /// Imprime un documento.
     Print {
         printer_id: String,
         document_type: String,
@@ -27,34 +24,34 @@ pub enum Command {
         #[serde(default)]
         job_id: Option<String>,
     },
-    /// Abre el cajón vía kick ESC/POS por el socket de la impresora.
+    /// Opens the cash drawer with an ESC/POS kick sent through the printer's socket.
     OpenDrawer {
         printer_id: String,
         #[serde(default = "default_drawer_pin")]
         pin: u8,
     },
-    /// Página de prueba.
+    /// Prints a test page.
     TestPrint { printer_id: String },
-    /// Notificación a nivel de SO.
+    /// An OS-level notification.
     SendNotification { title: String, body: String },
-    /// Contenido del registro de dispositivos.
+    /// The contents of the device registry.
     GetDevices,
-    /// Asigna rol a un dispositivo (`receipt` | `kitchen` | `bar` | `label`).
+    /// Gives a device a role (`receipt` | `kitchen` | `bar` | `label`).
     SetDeviceRole { mac: String, role: String },
-    /// Renombra un dispositivo.
     SetDeviceName { mac: String, name: String },
-    /// Elimina un dispositivo del registro.
+    /// Removes a device from the registry.
     RemoveDevice { mac: String },
 }
 
-/// Mensaje Bridge → Hub. Discriminado por la clave `event`.
+/// An app → Hub message, tagged by its `event` key.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
     Status {
         version: String,
         printers: Vec<PrinterInfo>,
-        /// Siempre `false` en red-only; se conserva por compatibilidad con `bridge.js`.
+        /// Always `false`: the scanner is not handled here. The field stays so the message keeps
+        /// its shape.
         scanner: bool,
     },
     Printers { printers: Vec<PrinterInfo> },
@@ -67,25 +64,25 @@ pub enum Event {
     Error { message: String, code: String },
 }
 
-/// Info estandarizada de una impresora (espejo de `printer_info()` en Python).
+/// A printer, in the same shape whatever transport found it.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct PrinterInfo {
-    /// `network:{ip}:{port}`, `bluetooth:{mac}` (ADR-0204) o `usb:{queue}` (hub#1083).
+    /// `network:{ip}:{port}`, `bluetooth:{mac}` or `usb:{queue}`.
     pub id: String,
     pub name: String,
-    /// Transporte: `"network"` | `"bluetooth"` | `"usb"` — el esquema de `id`, en un campo aparte
-    /// para que una pantalla pueda agrupar por cable sin parsear el id.
+    /// Transport: `"network"` | `"bluetooth"` | `"usb"` — the scheme of `id`, in a field of its own
+    /// so a screen can group by connection without parsing the id.
     #[serde(rename = "type")]
     pub kind: String,
-    /// Familia de la impresora: `"a4"` | `"unknown"`.
+    /// Printer family: `"a4"` | `"unknown"`.
     ///
-    /// El puerto 9100 es un tubo tonto: una térmica y una láser A4 de oficina **escuchan las dos
-    /// ahí**, pero hablan idiomas distintos (ESC/POS vs PCL/PostScript). Mandarle ESC/POS a una A4
-    /// escupe folios de basura, así que hay que distinguirlas.
+    /// Port 9100 is a dumb pipe: a thermal printer and an office A4 laser **both listen there**,
+    /// but they speak different languages (ESC/POS vs PCL/PostScript). Sending ESC/POS to an A4
+    /// printer spits out pages of garbage, so the two have to be told apart.
     ///
-    /// Lo único que lo delata con certeza es el anuncio mDNS **`_ipp._tcp`**: lo publican las de
-    /// oficina y las AirPrint, y prácticamente ninguna térmica ESC/POS. Lo demás —incluido lo que
-    /// solo aparece en el escaneo del 9100— se queda en `"unknown"`: **no se adivina**.
+    /// The only sure sign is the mDNS **`_ipp._tcp`** announcement: office and AirPrint printers
+    /// publish it, and practically no ESC/POS thermal printer does. Everything else — including
+    /// what only shows up in the 9100 scan — stays `"unknown"`: **it is never guessed**.
     #[serde(default = "default_printer_category")]
     pub category: String,
     /// `ready` | `busy` | `error` | `offline`.
@@ -95,35 +92,35 @@ pub struct PrinterInfo {
     pub mac: Option<String>,
 }
 
-/// Familia por defecto: desconocida. Nunca se asume "térmica" sin evidencia.
+/// The default family is unknown: a printer is never assumed to be thermal without evidence.
 pub fn default_printer_category() -> String {
     PRINTER_CATEGORY_UNKNOWN.to_string()
 }
 
-/// Impresora de oficina / A4: anuncia IPP. No admite ESC/POS crudo.
+/// An office / A4 printer: it advertises IPP and does not accept raw ESC/POS.
 pub const PRINTER_CATEGORY_A4: &str = "a4";
-/// No hay evidencia suficiente para clasificarla (p. ej. solo responde al 9100).
+/// Not enough evidence to classify it (e.g. it only answers on 9100).
 pub const PRINTER_CATEGORY_UNKNOWN: &str = "unknown";
 
-/// Entrada del registro persistente de dispositivos (espejo del dict en `network.py`).
+/// An entry of the persisted device registry.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Device {
-    /// Identidad estable del dispositivo en el registro: la MAC normalizada cuando se conoce y,
-    /// si no, el `printer_id` (`network:{ip}:{port}`).
+    /// The device's stable identity in the registry: the normalized MAC when it is known and,
+    /// otherwise, the `printer_id` (`network:{ip}:{port}`, or `usb:{queue}` for an OS queue).
     ///
-    /// La MAC no siempre está disponible: en Android **nunca** lo está (no existe el binario `arp`
-    /// y `/proc/net/arp` está restringido desde Android 10), y en escritorio falla con VPN,
-    /// contenedores o firewall. Antes de existir este campo, un dispositivo sin MAC no llegaba a
-    /// entrar en el registro, así que `get_devices` devolvía `[]` y **no se le podía asignar rol**
-    /// (cocina/barra/caja) — lo que dejaba el módulo `printing` inservible.
+    /// The MAC is not always available: on Android it **never** is (there is no `arp` binary and
+    /// `/proc/net/arp` is restricted since Android 10), and on desktop it fails behind a VPN,
+    /// containers or a firewall. Keyed by MAC alone, a device without one could not enter the
+    /// registry, `get_devices` would return `[]` and **it could not be given a role**
+    /// (kitchen/bar/till) — which would leave the `printing` module useless.
     ///
-    /// `#[serde(default)]`: los `devices.json` escritos antes de esta versión no lo traen; al
-    /// cargarlos se rellena con la clave del mapa (que era la MAC).
+    /// `#[serde(default)]`: older `devices.json` files do not carry it; on load it is filled with
+    /// the map key, which in those files is the MAC.
     #[serde(default)]
     pub key: String,
-    /// MAC real, solo si el sistema pudo resolverla por ARP. `None` no impide operar: para
-    /// identificar el dispositivo está `key`. Lo único que exige MAC es la recuperación tras un
-    /// cambio de IP por DHCP, que sin ella es imposible por definición.
+    /// The real MAC, only when the system could resolve it through ARP. `None` does not stop
+    /// anything: `key` identifies the device. The only thing that needs the MAC is recovering
+    /// after a DHCP change of IP, which is impossible without it by definition.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mac: Option<String>,
     pub ip: String,
@@ -137,7 +134,7 @@ pub struct Device {
     pub last_seen: String,
     /// `online` | `offline`.
     pub status: String,
-    /// The owner typed its address by hand (hub#1924) instead of the scan finding it. A typed
+    /// The owner typed its address by hand instead of the scan finding it. A typed
     /// printer usually sits where the scan cannot look — another subnet, an isolated Wi-Fi — so it
     /// is listed from the registry on every discovery, or it would vanish at the next «Re-scan».
     /// Scanned printers are not, so a printer found once and gone now does not linger forever.

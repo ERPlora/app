@@ -24,39 +24,32 @@ import app.tauri.plugin.Plugin
 import java.io.File
 import java.util.Locale
 
-/**
- * Permisos de runtime del TPV en Android.
- *
- * Existe porque **declararlos en el manifest no basta**, y su ausencia no da ningún error:
- *
- *  - sin `ACCESS_LOCAL_NETWORK` (API 37+) el barrido del puerto 9100 son 254 **timeouts**, así que
- *    el descubrimiento devuelve una lista vacía y parece que el local no tiene impresoras;
- *  - sin `POST_NOTIFICATIONS` (API 33+) la notificación no aparece, y la comanda entra en cocina
- *    sin que nadie se entere.
- *
- * Los dos fallan **en silencio**, que es lo peor que puede pasarle a un TPV: el usuario no ve un
- * error, ve un producto que «no funciona». Verificado en el emulador API 37 antes de existir este
- * plugin — `discover_printers` devolvía `[]` sin la menor queja hasta conceder el permiso con `adb`.
- *
- * Es además el vehículo por el que el shell puede llevar código Kotlin a Android: aquí irá lo que
- * Rust no alcanza (`NsdManager`, quiosco, Bluetooth SPP si algún día vuelve).
- *
- * La clase es pegamento: toda decisión vive en las funciones puras del companion, probadas en la
- * JVM sin emulador.
- */
-/** The channel Rust hands `watchNoticeTaps` (hub#1039). */
+/** The channel Rust hands `watchNoticeTaps`. */
 @InvokeArg
 class WatchNoticeTapsArgs {
     lateinit var handler: Channel
 }
 
+/**
+ * The till's Kotlin side on Android: runtime permissions, Bluetooth and NFC, downloads, printing,
+ * the notices and the system voice.
+ *
+ * Declaring a permission in the manifest is not enough, and a missing one gives no error at all:
+ *
+ *  - without `ACCESS_LOCAL_NETWORK` (API 37+) the port 9100 sweep is 254 **timeouts**, so discovery
+ *    returns an empty list and the venue looks as if it had no printers;
+ *  - without `POST_NOTIFICATIONS` (API 33+) the notification never shows, and the order reaches the
+ *    kitchen without anybody noticing.
+ *
+ * The class is glue: the decisions live in pure functions, tested on the JVM without an emulator.
+ */
 @TauriPlugin(
-    // El ALIAS ES el string del permiso, a propósito: lo que devuelve `check_permissions` se lee
-    // igual que lo que dice `dumpsys`, sin una segunda nomenclatura que mantener.
+    // The ALIAS IS the permission string, on purpose: what `check_permissions` returns reads the
+    // same as what `dumpsys` says, with no second naming scheme to maintain.
     //
-    // Declararlos aquí NO es decorativo: `requestPermissionForAliases` resuelve el alias contra
-    // esta anotación y, si no lo encuentra, **no hace nada** — ni diálogo ni excepción, y el
-    // `invoke` queda colgado para siempre. Hay un test que lo verifica contra `PermissionPolicy`.
+    // Declaring them here is NOT decoration: `requestPermissionForAliases` resolves the alias
+    // against this annotation and, when it is not found, **does nothing** — no dialog, no
+    // exception, and the `invoke` hangs forever. A test checks it against `PermissionPolicy`.
     permissions = [
         Permission(strings = [PermissionPolicy.POST_NOTIFICATIONS], alias = PermissionPolicy.POST_NOTIFICATIONS),
         Permission(strings = [PermissionPolicy.ACCESS_LOCAL_NETWORK], alias = PermissionPolicy.ACCESS_LOCAL_NETWORK),
@@ -65,25 +58,25 @@ class WatchNoticeTapsArgs {
 )
 class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
 
-    /** Keeps the page running while listening for notices (HUB_APP-F26); `null` until the WebView loads. */
+    /** Keeps the page running while listening for notices; `null` until the WebView loads. */
     private var pageKeeper: PageKeeper? = null
 
     /**
-     * Round 2026-11-04a — the system's voice for the assistant's «Read aloud» (the Android WebView
+     * The system's voice for the assistant's «Read aloud» (the Android WebView
      * has no `speechSynthesis`). Its engine is made on the first `tts_*` request, never before.
      */
     private val systemVoice = SystemVoice { events -> AndroidSpeechEngine(activity.applicationContext, events) }
 
     /**
-     * hub#2360 — a new page is loading: the tap that STARTED the app waits for it. The notification
+     * A new page is loading: the tap that STARTED the app waits for it. The notification
      * plugin reports that tap as `actionPerformed` from its own `load`, before the page listens, and
      * Tauri drops an event nobody is listening to: the tap opened the app on its first screen
      * instead of the notice's. A tap that reaches a dead process through `onNewIntent` is kept by
      * `MainActivity` into the same box.
      *
-     * HUB_APP-F26 (hub#836) — the same WebView gets its `PageKeeper`, which `keep_listening` switches on/off.
+     * The same WebView gets its `PageKeeper`, which `keep_listening` switches on and off.
      *
-     * hub#247, hub#2552 — only our own pages get the microphone and the position: the origin check
+     * Only our own pages get the microphone and the position: the origin check
      * goes in front of wry's client on the next turn of the looper. Tauri calls this `load` from wry's
      * `on_webview_created`, after wry's `setWebChromeClient`; the `post` keeps it that way whatever
      * the order becomes.
@@ -102,8 +95,8 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /**
-     * `take_notice_tap` (hub#2360) — hands the kept tap over, once:
-     * `{ tap: {id, notification, path} | null }`, `path` being the screen the app wrote down (hub#1039).
+     * `take_notice_tap` — hands the kept tap over, once:
+     * `{ tap: {id, notification, path} | null }`, `path` being the screen the app wrote down.
      */
     @Command
     fun takeNoticeTap(invoke: Invoke) {
@@ -122,7 +115,7 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /**
-     * `rememberNotice` (hub#1039) — writes down the screen a notice leads to, as it goes out: the
+     * `rememberNotice` — writes down the screen a notice leads to, as it goes out: the
      * notification plugin never stores the notice on the intent of its tap, which comes back with
      * the notice's number only. Only Rust calls it (`ErploraAndroid::remember_notice`, from
      * `erplora_notify`): it is in neither `build.rs` nor the default permissions.
@@ -137,7 +130,7 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /**
-     * `watchNoticeTaps` (hub#1039) — the channel through which a tap that waits for a page already
+     * `watchNoticeTaps` — the channel through which a tap that waits for a page already
      * listening is told to Rust, which tells the page; the page claims it with `takeNoticeTap`. The
      * plugin's own `actionPerformed` for that tap says neither the number nor the screen. Only Rust
      * calls it, once, at start-up (`ErploraAndroid::watch_notice_taps`).
@@ -150,10 +143,10 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /**
-     * `leave_app` (hub#1906) — the app goes to the background, which is what the system Back does
+     * `leave_app` — the app goes to the background, which is what the system Back does
      * on a root screen since Android 12 (the task moves back; nothing is finished or killed).
      *
-     * Needed because the shell now HOLDS the Back button through Tauri's `onBackButtonPress`: with a
+     * Needed because the shell HOLDS the Back button through Tauri's `onBackButtonPress`: with a
      * listener registered, Tauri no longer leaves on its own when the WebView has no history, and
      * its own `exit` command has no permission a capability could grant.
      */
@@ -164,7 +157,7 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /**
-     * `open_app_settings` (hub#1886) — opens ERPlora's own page in the device settings.
+     * `open_app_settings` — opens ERPlora's own page in the device settings.
      *
      * Refused twice, Android stops showing a permission dialog for the life of the install, and
      * from then on that page is the only place to turn it back on. Sending the owner to look for it
@@ -186,13 +179,12 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /**
-     * `keep_listening` (HUB_APP-F26, hub#836; the old hub's hub#2307) — keeps the app running with the
-     * screen off so the notices born in the page still arrive (`on: true`, with the words of the
+     * `keep_listening` — keeps the app running with the screen off so the notices born in the page still arrive (`on: true`, with the words of the
      * ongoing notification), or lets Android reclaim it again (`on: false`). See [NoticeListening].
      *
      * Android refuses to start a foreground service from the background (12+); the page only asks
      * while somebody is using it, and a refusal is REJECTED so the page can log it — the notices keep
-     * working with the app on screen, as before.
+     * working while the app is on screen.
      */
     @Command
     fun keepListening(invoke: Invoke) {
@@ -225,7 +217,7 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /**
-     * `askToOpenHub` (hub#2644) — «Open <hub> on this device?» before a link links another hub.
+     * `askToOpenHub` — «Open <hub> on this device?» before a link links another hub.
      *
      * Only Rust calls it (`ErploraAndroid::ask_to_open_hub`): it is in neither `build.rs` nor the
      * default permissions, so no page can show it. The words come in both languages and the
@@ -266,18 +258,18 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
 
     /**
      * The page is what listens; with its activity gone, the service would only keep a notification
-     * saying «listening» over nothing (HUB_APP-F26). A configuration change recreates the page, which
+     * saying «listening» over nothing. A configuration change recreates the page, which
      * asks again on its boot.
      */
     override fun onDestroy(activity: AppCompatActivity) {
         pageKeeper?.setListening(false)
         NoticeListeningService.stop(activity)
-        // Round 2026-11-04a: what was being read answers, and the engine's service is unbound.
+        // What was being read answers, and the engine's service is unbound.
         systemVoice.shutdown()
     }
 
     /**
-     * `tts_available` (round 2026-11-04a) — whether the system voice reads `language` (`es-ES`):
+     * `tts_available` — whether the system voice reads `language` (`es-ES`):
      * `{ available }`. The page reads with it when it does, else with the browser's voice if any.
      */
     @Command
@@ -287,7 +279,7 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /**
-     * `tts_speak` (round 2026-11-04a) — reads `text` in `language` (`es-ES`), ending what was being
+     * `tts_speak` — reads `text` in `language` (`es-ES`), ending what was being
      * read. Resolves once read or stopped; rejects with [SystemVoice.TTS_UNAVAILABLE] or
      * [SystemVoice.TTS_FAILED], the codes the page branches on.
      */
@@ -308,7 +300,7 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
         )
     }
 
-    /** `tts_stop` (round 2026-11-04a) — silences the system voice; the pending `tts_speak` resolves. */
+    /** `tts_stop` — silences the system voice; the pending `tts_speak` resolves. */
     @Command
     fun ttsStop(invoke: Invoke) {
         systemVoice.stop()
@@ -316,10 +308,10 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /**
-     * `check_permissions` — qué hay concedido AHORA, sin molestar al usuario.
+     * `check_permissions` — what is granted NOW, without bothering the user.
      *
-     * `@PermissionCallback` no es opcional ni heredado: es también el callback que cierra el
-     * `request_permissions` de abajo cuando el usuario responde.
+     * `@PermissionCallback` is neither optional nor inherited: it is also the callback that closes
+     * the `request_permissions` below when the user answers.
      */
     @Command
     @PermissionCallback
@@ -328,15 +320,14 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /**
-     * `request_permissions` — asks for what is missing, scoped to the OPERATION that asks
-     * (hub#758).
+     * `request_permissions` — asks for what is missing, scoped to the OPERATION that asks.
      *
      * The caller names the permissions it is about to use in `args.permissions`; only those are
-     * requested. Unscoped, the plugin asked for its whole batch, so tapping «Re-scan» popped the
-     * local-network dialog and then — with no visible relation to anything — the notifications
-     * one: an opportunistic-looking request the user rightly denies. A call WITHOUT the argument
-     * (a web older than the scope) still gets the whole batch: the two halves ship separately and
-     * an old web must not break.
+     * requested. Asking for the whole batch would pop the notifications dialog right after the
+     * local-network one on «Re-scan», with no visible relation to anything: an opportunistic-looking
+     * request the user rightly denies. A call WITHOUT the argument (a web older than the scope)
+     * still gets the whole batch: the app and the web ship separately and an old web must not
+     * break.
      *
      * Idempotent: if everything in scope is already granted it resolves at once, with no dialog.
      * That matters because the PWA calls this before every discovery.
@@ -362,20 +353,19 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
         requestPermissionForAliases(missing.toTypedArray(), invoke, "checkPermissions")
     }
 
-    /** The scope the caller sent, or `null` when it sent none (a web older than hub#758). */
+    /** The scope the caller sent, or `null` when it sent none (a web older than the scope). */
     private fun requestedPermissions(invoke: Invoke): List<String>? {
         val requested = invoke.getArgs().optJSONArray("permissions") ?: return null
         return (0 until requested.length()).mapNotNull { requested.optString(it, null) }
     }
 
     /**
-     * `save_to_downloads` — puts a file the shell already wrote where the USER can find it
-     * (hub#499).
+     * `save_to_downloads` — puts a file the shell already wrote where the USER can find it.
      *
      * The only way a business gets its own data off the tablet it keeps it on: the backup, an
-     * invoice PDF, a document out of `/files`. Until this existed the shell refused on Android,
-     * because the folder Tauri calls Downloads is app-scoped storage that Android 11 closed to
-     * every file manager — a file written there exists and cannot be reached (hub#480, ADR-0259).
+     * invoice PDF, a document out of `/files`. The folder Tauri calls Downloads is app-scoped
+     * storage that Android 11 closed to every file manager — a file written there exists and
+     * cannot be reached.
      *
      * The bytes arrive as a PATH, not as a payload: the shell has already staged them in its own
      * cache, so a multi-megabyte export crosses the JNI boundary once instead of being copied onto
@@ -414,18 +404,18 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
             invoke.resolve(JSObject().put("location", location))
         } catch (e: Exception) {
             // Resolved-with-nothing would read as a save that happened. The page has to be able to
-            // say the file did NOT arrive — that is the whole lesson of hub#475.
+            // say the file did NOT arrive.
             invoke.reject(e.message ?: e.toString(), e)
         }
     }
 
     /**
-     * `print_html` — the system print screen with an A4 document, printer or «Save as PDF»
-     * (hub#2008). The rendering and the `PrintManager` call are [HtmlPrinter]'s.
+     * `print_html` — the system print screen with an A4 document, printer or «Save as PDF».
+     * The rendering and the `PrintManager` call are [HtmlPrinter]'s.
      *
      * Resolves once the print screen has been asked for — the same moment the desktop answers,
      * because what the user does in it (print, save, cancel) is the system's. Anything that stops
-     * it from opening REJECTS: a resolve there would read as a document handed over (hub#475).
+     * it from opening REJECTS: a resolve there would read as a document handed over.
      */
     @Command
     fun printHtml(invoke: Invoke) {
@@ -443,14 +433,14 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /**
-     * `bluetooth_bonded_printers` — the bonded devices that look like printers (ADR-0204).
+     * `bluetooth_bonded_printers` — the bonded devices that look like printers.
      *
      * The BONDED list, never a scan: pairing belongs to Android's own settings (its UI, its PIN
      * handling), and reading the list needs only `BLUETOOTH_CONNECT` — no `BLUETOOTH_SCAN`
      * dialog. Adapter absent or off answers an EMPTY list, not an error: a venue with no
      * bluetooth is a normal venue. A SecurityException (permission denied) rejects with
      * [BLUETOOTH_PERMISSION_DENIED], because "no permission" and "no printers" send the user in
-     * opposite directions (the hub#338 lesson).
+     * opposite directions.
      */
     @Command
     fun bluetoothBondedPrinters(invoke: Invoke) {
@@ -485,11 +475,11 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /**
-     * `bluetooth_print` — sends already-rendered ESC/POS bytes to a bonded printer over RFCOMM
-     * (ADR-0204). Transport only: the rendering happened in Rust, the payload arrives base64.
+     * `bluetooth_print` — sends already-rendered ESC/POS bytes to a bonded printer over RFCOMM.
+     * Transport only: the rendering happened in Rust, the payload arrives base64.
      *
      * The socket work runs off the main thread — RFCOMM connect blocks for seconds — and the
-     * outcome is reported honestly: a ticket that did not come out REJECTS (hub#475), so the
+     * outcome is reported honestly: a ticket that did not come out REJECTS, so the
      * print host reports `failed` instead of swallowing the job.
      */
     @Command
@@ -532,12 +522,10 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     /**
-     * `nfcRead` — opens NFC reader mode and answers with the badge of the first card tapped
-     * (hub#988).
+     * `nfcRead` — opens NFC reader mode and answers with the badge of the first card tapped.
      *
      * The counter reads badges through a USB reader that types the number like a keyboard; a
-     * tablet has no such reader and, until this existed, could not enrol or read a card at all
-     * even though the hardware was already inside it. What comes back is the same KIND of string
+     * tablet has no such reader, but often has NFC inside it. What comes back is the same KIND of string
      * the wedge types (`NfcBadge.toBadge`), so the shell hands it to the very subscribers the
      * keyboard path feeds: one badge path, two origins.
      *
@@ -552,7 +540,7 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
      *
      * The three refusals stay apart on purpose: no reader, reader switched off, and a card that
      * randomises its id are three different things to do about it, and one shared "it did not
-     * work" would send a user to a settings toggle their tablet does not have (hub#338).
+     * work" would send a user to a settings toggle their tablet does not have.
      */
     @Command
     fun nfcRead(invoke: Invoke) {
@@ -627,24 +615,23 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
 
     companion object {
         /**
-         * The code a bluetooth operation is refused under when `BLUETOOTH_CONNECT` is denied
-         * (ADR-0204). Mirror of `BLUETOOTH_PERMISSION_DENIED` on the Rust side — same trip as
+         * The code a bluetooth operation is refused under when `BLUETOOTH_CONNECT` is denied.
+         * Mirror of `BLUETOOTH_PERMISSION_DENIED` on the Rust side — same trip as
          * `downloads_unreachable`: Kotlin rejects with a code, Tauri renders `[code] - message`,
          * Rust recognises it out of the text.
          */
         const val BLUETOOTH_PERMISSION_DENIED = "bluetooth_permission_denied"
 
-        /** Los que hay que pedir: los requeridos que aún no están concedidos. */
+        /** What has to be asked for: the required permissions not granted yet. */
         @JvmStatic
         fun pendingOf(required: List<String>, granted: Set<String>): List<String> =
             required.filterNot { it in granted }
 
         /**
          * What a request may actually ask for: the caller's scope, clamped to what THIS Android
-         * requires (hub#758).
+         * requires.
          *
-         * `null` (no scope sent — a web older than the scope) keeps the old behavior and asks for
-         * everything. The intersection is not decoration: the policy stays the single authority
+         * `null` (no scope sent — a web older than the scope) asks for everything. The intersection is not decoration: the policy stays the single authority
          * on what can be asked, so a scope cannot smuggle in a permission this API level does not
          * know — requesting one can hang the dialog on some vendors.
          */
@@ -653,8 +640,8 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
             if (requested == null) required else required.filter { it in requested }
 
         /**
-         * Estado a devolver a la PWA. Solo incluye los permisos que la versión de Android conoce:
-         * de los demás no se puede afirmar nada, así que informar de ellos sería mentir.
+         * The state handed to the page. Only the permissions this Android version knows: nothing
+         * can be said about the others, so reporting them would be a lie.
          */
         @JvmStatic
         fun statusOf(required: List<String>, granted: Set<String>): Map<String, Boolean> =
