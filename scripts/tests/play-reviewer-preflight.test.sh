@@ -1,54 +1,52 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
 # Behaviour test for `scripts/ci/play-reviewer-preflight.py` — the control that answers, BEFORE
-# the app is sent to Google, whether the review account really gets inside a living business
-# (ERPlora/hub#1718).
+# the app is sent to Google, whether the review account really gets inside a living business.
 #
 # WHY THE CONTROL EXISTS. The instructions handed to Google promise that signing in with the test
-# account shows the app working. On 2026-09-09 that was measured and it was FALSE: the account
-# reached the empty «Crea tu negocio gratis» screen, and then — once a hub existed — an EMPTY hub,
-# «Aquí aparecerán tus apps», zero modules. A reviewer who cannot see the app rejects it, and a
-# rejection costs another whole round.
+# account shows the app working. If the account reaches the empty «Crea tu negocio gratis» screen,
+# or an EMPTY hub («Aquí aparecerán tus apps», zero modules), the reviewer cannot see the app and
+# rejects it, and a rejection costs another whole round.
 #
-# WHICH PLATFORM. Since 2026-10-14 `erplora.com` is saas-next and the hubs are hub-next at
-# `https://<slug>.erplora.com`. The fake servers below speak THEIR contract, read from their code:
+# WHICH PLATFORM. `erplora.com` is the SaaS and the hubs live at `https://<slug>.erplora.com`. The
+# fake servers below speak THEIR contract, read from their code:
 #
 #   · sign-in    allauth.headless, browser client: GET `/_allauth/browser/v1/config` hands out the
 #                `csrftoken` cookie; POST `/_allauth/browser/v1/auth/login` wants it back as
 #                `X-CSRFToken` with a same-origin `Origin`, and answers `meta.is_authenticated` plus
-#                the `sessionid` cookie (saas-next `config/urls.py`, allauth `headless/internal`).
-#   · businesses GET `/api/hubs/businesses` with that session (`hubs.business.list`, saas-next
+#                the `sessionid` cookie (the SaaS's `config/urls.py`, allauth `headless/internal`).
+#   · businesses GET `/api/hubs/businesses` with that session (`hubs.business.list`, the SaaS's
 #                `hubs/api.py`): `rows[]` with `slug`, `status`, `can_open`, `open_blocked_reason`.
-#   · hub up     GET `<hub>/readyz` → `{"status": "ok"}` (hub-next `base/health.py`).
+#   · hub up     GET `<hub>/readyz` → `{"status": "ok"}` (the hub's `base/health.py`).
 #   · the jump   GET `<hub>/auth/login` → 302 to the SaaS `/hub-login/?…&state=` with the
 #                `hub_login_state` cookie; the SaaS answers a form with a one-time `code`; POST
-#                `<hub>/auth/callback` opens the hub's session (hub-next `base/auth_views.py`,
-#                saas-next `accounts/handoff.py`). The same door the reviewer's «Open» goes through.
-#   · modules    GET `<hub>/api/me` with that session → `apps[]` (hub-next `base/queries.py`).
+#                `<hub>/auth/callback` opens the hub's session (the hub's `base/auth_views.py`,
+#                the SaaS's `accounts/handoff.py`). The same door the reviewer's «Open» goes through.
+#   · modules    GET `<hub>/api/me` with that session → `apps[]` (the hub's `base/queries.py`).
 #
 # WHAT THE CONTROL MUST NOT BECOME, and why each one is worse than having no control at all:
 #
 #   · skipping when unconfigured  → the check quietly stops happening and the submission goes out
 #                                   unproven. Missing configuration is a LOUD red naming the
 #                                   variables to set.
-#   · a hardcoded slug            → it keeps passing after the `.env` points somewhere else, which
-#                                   is how a stale `PLAY_REVIEWER_HUB` survived while its address
-#                                   answered 404 (09/09).
+#   · a hardcoded slug            → it keeps passing after the `.env` points somewhere else, and a
+#                                   stale `PLAY_REVIEWER_HUB` survives while its address answers
+#                                   404.
 #   · a stub that says yes to all → the fake SaaS CHECKS email + password, the CSRF pair and the
 #                                   Origin on the login, and demands the session on the list; the
 #                                   fake hub demands the state cookie on the callback and its own
 #                                   session on `/api/me`, and refuses any cookie of the SaaS. With a
 #                                   stub that accepted anything, «send no password» or «list without
-#                                   the session» survived as mutants (rv-1885).
+#                                   the session» would survive as mutants.
 #   · trusting «the hub exists»   → a hub with zero modules is the shell Google saw: the modules
 #                                   the account sees inside are what separates «a hub» from «an app».
 #   · trusting «status 200»       → the verdict is the body, not the HTTP code.
 #   · creating the account        → in allauth.headless the sign-up is its own door
 #                                   (`POST …/auth/signup`); the sign-in (`POST …/auth/login`) never
-#                                   creates an account (saas-next `accounts/doors.py`). The control
+#                                   creates an account (the SaaS's `accounts/doors.py`). The control
 #                                   posts only to the sign-in, whatever `is_open_for_signup` says
 #                                   (app#7), and the fake SaaS logs any sign-up it would receive.
-#   · hiding the mailed code      → saas-next asks every password sign-in for the code it mails
+#   · hiding the mailed code      → the SaaS asks every password sign-in for the code it mails
 #                                   (401, pending `login_by_code`, or `verify_email` for an address
 #                                   not yet proven). Google's reviewer cannot read that mailbox, so
 #                                   it is its own red, `code_required`, naming what the SaaS lacks.
@@ -86,7 +84,7 @@ FAKE_PASSWORD='s3cr3t-not-a-real-one-8f2c'
 FAKE_SLUG='negocio-de-prueba'
 GHOST_SLUG='hub-que-no-es-suyo'
 
-echo "hub#1718 — the guard before sending the app to Google Play (saas-next + hub-next)"
+echo "the guard before sending the app to Google Play (SaaS + hub)"
 
 if [ ! -f "$script" ]; then
     bad "scripts/ci/play-reviewer-preflight.py exists" \
@@ -148,7 +146,7 @@ class H(BaseHTTPRequestHandler):
 
     def _saas_cookie_leaked(self):
         """A browser never sends `erplora.com`'s host-only cookies to `<slug>.erplora.com`; Python's
-        cookiejar does (measured 2026-10-15), and both sites call their session `sessionid`. Here
+        cookiejar does, and both sites call their session `sessionid`. Here
         both live on 127.0.0.1, so the fake hub refuses any cookie of the SaaS outright."""
         cookies = self.cookies()
         if "csrftoken" in cookies or cookies.get("sessionid") == SAAS_SESSION:
@@ -217,7 +215,7 @@ class H(BaseHTTPRequestHandler):
             if rest == "/readyz":
                 return self._send(spec.get("code", 200), spec.get("body", {"status": "ok"}))
             if rest == "/auth/login":
-                # Like hub-next's login_redirect: the state goes in a cookie for the callback only.
+                # Like the hub's login_redirect: the state goes in a cookie for the callback only.
                 target = f"{self.origin()}/hub-login/?{urlencode({'hub': slug, 'next': query.get('next', '/'), 'state': STATE})}"
                 return self._redirect(
                     target, ("Set-Cookie", f"hub_login_state={STATE}; Path=/hub/{slug}/auth/callback; HttpOnly")
@@ -274,13 +272,13 @@ class H(BaseHTTPRequestHandler):
             slug, rest = self._hub_path(url.path)
             if rest == "/auth/callback" and slug in LIVE:
                 form = {k: v[0] for k, v in parse_qs(raw.decode()).items()}
-                # hub-next redeems a code only with THIS browser's state, and only a good code.
+                # The hub redeems a code only with THIS browser's state, and only a good code.
                 if self.cookies().get("hub_login_state") != form.get("state") or form.get("code") != CODE:
                     return self._send(403, "<p>Sign in again</p>", content_type="text/html")
                 error = scenario.get("callback_error")
                 if error:
                     return self._redirect(f"{self.origin()}/hub-login/?{urlencode({'hub': slug, 'error': error})}")
-                # `next` is a path of the hub (hub-next's safe_next): here, under its prefix.
+                # `next` is a path of the hub (the hub's safe_next): here, under its prefix.
                 return self._redirect(
                     f"/hub/{slug}{form.get('next', '/')}",
                     ("Set-Cookie", f"sessionid={HUB_SESSION}; Path=/; HttpOnly; SameSite=Lax"),
@@ -391,8 +389,8 @@ else
     ok "the good case does not print the password"
 fi
 
-# 🪤 Measured 2026-09-16: with urllib's default User-Agent, Cloudflare answered 403 «error code:
-# 1010» and the control died at the login. It sends its own.
+# 🪤 With urllib's default User-Agent, Cloudflare answers 403 «error code: 1010» and the control
+# dies at the login. It sends its own.
 ua=$(head -n1 "$tmp/logins" 2>/dev/null)
 if [ -z "$ua" ]; then
     bad "the login sends its own User-Agent" "the fake server saw no login request"
@@ -405,7 +403,7 @@ fi
 # ── 2. THE TEST OF THE TEST: the control must CATCH THE POSITIVE ─────────────
 # Every case below is a real failure Google would see, and the control must come out RED.
 
-# 2a. A slug that is not the account's — the 09/09 case: a `.env` pointing at a dead hub.
+# 2a. A slug that is not the account's: a `.env` pointing at a dead hub.
 start_stub "$(healthy)"
 write_env "$tmp/env.ghost" "$GHOST_SLUG"
 expect_fail "🔴 a slug that is not the account's → RED" "$tmp/env.ghost" "hub_not_in_account"
@@ -428,7 +426,7 @@ start_stub "{\"hubs\": [\"$FAKE_SLUG\"], \"readyz\": {}}"
 write_env "$tmp/env.404" "$FAKE_SLUG"
 expect_fail "🔴 the hub's address answers 404 → RED" "$tmp/env.404" "hub_not_ready"
 
-# 2e. The dead address: nobody listening. The real shape of the 09/09 dead hub.
+# 2e. The dead address: nobody listening, the real shape of a dead hub.
 start_stub "$(healthy)"
 write_env "$tmp/env.dead" "$FAKE_SLUG"
 expect_fail "🔴 the hub's address does not answer (nobody listening) → RED" \
@@ -439,10 +437,10 @@ start_stub "{\"hubs\": [\"$FAKE_SLUG\"], \"readyz\": {\"$FAKE_SLUG\": {\"code\":
 write_env "$tmp/env.degraded" "$FAKE_SLUG"
 expect_fail "🔴 200 but \`status: unavailable\` → RED (the 200 is not the verdict)" "$tmp/env.degraded" "hub_not_ready"
 
-# 2g. 🔴 THE 09/09 FAILURE: the hub is alive and EMPTY. «Aquí aparecerán tus apps».
+# 2g. 🔴 The hub is alive and EMPTY: «Aquí aparecerán tus apps».
 start_stub "$(healthy '"apps": [],')"
 write_env "$tmp/env.empty" "$FAKE_SLUG"
-expect_fail "🔴 hub alive with ZERO modules inside → RED (the shell Google saw on 09/09)" \
+expect_fail "🔴 hub alive with ZERO modules inside → RED (the empty shell a reviewer would see)" \
     "$tmp/env.empty" "hub_without_modules"
 
 # 2h. The account has no business at all — where the issue started.
@@ -473,7 +471,7 @@ start_stub "$(healthy '"login_unauthenticated": true,')"
 write_env "$tmp/env.noauth" "$FAKE_SLUG"
 expect_fail "🔴 login 200 without \`is_authenticated\` → RED" "$tmp/env.noauth" "login_rejected"
 
-# 2l. The SaaS does not answer at all. Without this case «SaaS down = green» survived (rv-1885).
+# 2l. The SaaS does not answer at all. Without this case «SaaS down = green» would survive.
 start_stub "$(healthy)"
 write_env "$tmp/env.saasdown" "$FAKE_SLUG"
 expect_fail "🔴 the SaaS does not answer (nobody listening) → RED" "$tmp/env.saasdown" "saas_unreachable" "" "http://127.0.0.1:1"
@@ -509,13 +507,13 @@ else
 fi
 
 # 2n'. The account exists, but erplora.com asks for the code it mails at every password sign-in:
-# 401 with the pending flow `login_by_code` (saas-next `accounts/tests/test_sign_in_code.py`).
+# 401 with the pending flow `login_by_code` (the SaaS's `accounts/tests/test_sign_in_code.py`).
 # Google's reviewer cannot read that mailbox: its own red, naming what the SaaS lacks.
 start_stub "$(healthy '"login": {"code": 401, "body": {"status": 401, "data": {"flows": [{"id": "login"}, {"id": "login_by_code", "is_pending": true}]}, "meta": {"is_authenticated": false}}},')"
 write_env "$tmp/env.code" "$FAKE_SLUG"
 expect_fail "🔴 the SaaS asks the account for the mailed sign-in code → RED \`code_required\`" "$tmp/env.code" "code_required"
 expect_said "…naming the pending step" "login_by_code"
-expect_said "…and where the exemption of a review account lives" "saas#132"
+expect_said "…and what the SaaS has to do about it" "as a review account in the SaaS"
 
 # An address not yet proven gets the same mailed code, as `verify_email`.
 start_stub "$(healthy '"login": {"code": 401, "body": {"status": 401, "data": {"flows": [{"id": "verify_email", "is_pending": true}]}, "meta": {"is_authenticated": false}}},')"
@@ -588,19 +586,19 @@ else
     ok "no slug is written in the code (it comes from PLAY_REVIEWER_HUB)"
 fi
 
-# Since 2026-10-14 the hubs are hub-next at `https://<slug>.erplora.com`; the Hetzner
-# `<slug>.a.erplora.com` has no DNS. The default must be the address the reviewer's app opens.
+# The hubs live at `https://<slug>.erplora.com`; the old `<slug>.a.erplora.com` hosts have no
+# DNS. The default must be the address the reviewer's app opens.
 if grep -qF '"https://{slug}.erplora.com"' "$script" && ! grep -qF '.a.erplora.com' "$script"; then
-    ok "the default hub address is https://{slug}.erplora.com (hub-next), not the old .a.erplora.com"
+    ok "the default hub address is https://{slug}.erplora.com, not the old .a.erplora.com"
 else
     bad "the default hub address is https://{slug}.erplora.com" \
-        "the control still points at the old Hetzner hosts, which have no DNS since 2026-10-14"
+        "the control still points at the old .a.erplora.com hosts, which have no DNS"
 fi
 
 # ── 5. It runs on the runner's Python, not only on the newest one ───────────
 # `publish-play` and the `scripts` job run the system python3 of `ubuntu-latest` (3.12). A local
-# formatter targeting 3.14 rewrote `except (A, B):` into PEP 758's `except A, B:` (2026-10-15),
-# a SyntaxError before 3.14 that would turn every release red without checking anything.
+# formatter targeting 3.14 rewrites `except (A, B):` into PEP 758's `except A, B:`, a
+# SyntaxError before 3.14 that would turn every release red without checking anything.
 if grep -nE '^[[:space:]]*except[[:space:]]+[^(:][^:]*,[^:]*:' "$script"; then
     bad "every multi-type \`except\` is parenthesized (Python < 3.14 parses it)" \
         "an unparenthesized \`except A, B:\` is 3.14-only: the runner's python3 would not even start the control"
@@ -685,8 +683,8 @@ fi
 
 # ── 6. The `.env` is read the way dotenv reads it ────────────────────────────
 # The real root `.env` annotates its lines: `PLAY_REVIEWER_HUB=<slug>   # [var]`. Read raw, the
-# comment became part of the value: run locally, the control looked for the hub `<slug>   # [var]`
-# and signed in as `<email>   # [var]` (2026-10-15; CI never saw it, the values come exported).
+# comment becomes part of the value: run locally, the control looks for the hub `<slug>   # [var]`
+# and signs in as `<email>   # [var]` (CI never sees it, the values come exported).
 # A `#` glued to the value, or inside quotes, is data: a password may contain one.
 start_stub "$(healthy)"
 {

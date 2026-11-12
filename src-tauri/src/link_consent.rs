@@ -1,4 +1,4 @@
-//! The person decides before a link moves this device to another business (hub#2644).
+//! The person decides before a link moves this device to another business.
 
 /// What the app asks before a link links another hub: the business the link opens and the one the
 /// device is linked to now, if any. Hosts, as the person reads them in the address.
@@ -115,8 +115,8 @@ pub fn host_of(origin: &str) -> String {
     }
 }
 
-/// The question in English (the source) or in its Spanish translation (ADR-0055/0199). It says what
-/// the person gives away by answering yes: the hardware, and the business the app opens from then on.
+/// The question in English (the source) or in its Spanish translation. It says what the person
+/// gives away by answering yes: the hardware, and the business the app opens from then on.
 pub fn wording(question: &Question, spanish: bool) -> Wording {
     let to = &question.to;
     if spanish {

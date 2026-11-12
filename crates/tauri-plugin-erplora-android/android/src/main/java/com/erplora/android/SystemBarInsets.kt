@@ -7,30 +7,28 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
 
 /**
- * Reserves the strip the system bars sit on — once, and only once (hub#1719, hub#1895).
+ * Reserves the strip the system bars sit on — once, and only once.
  *
  * The activity lays itself out edge-to-edge, and on `targetSdk = 36` that is not a choice: since
  * Android 15 the framework puts every window behind the system bars whether the app opts in or
  * not. Edge-to-edge is only half a contract, though — the other half is reserving the strip the
- * bars occupy — and until this file there was no second half at all. The window's content started
- * at the physical top of the screen, so every page loaded inside it painted over the status bar.
- * QA hit it twice on 2026-09-09 (emulator `Pixel_10_Pro` / Android 16, APK 1.1.21): the back arrow
- * of the sign-in page sat on top of the clock, and the search layer of the till blacked the whole
- * bar out.
+ * bars occupy. Without it the window's content starts at the physical top of the screen, so every
+ * page loaded inside it paints over the status bar: on the `Pixel_10_Pro` emulator (Android 16) the
+ * back arrow of the sign-in page sat on top of the clock, and the search layer of the till blacked
+ * the whole bar out.
  *
  * It is reserved on the WINDOW, not in a page's stylesheet, and that is the point: the app hosts
  * pages served by the SaaS, by the hub and by any installed module, so a per-template fix would
  * have to be repeated in every one of them and would still miss the next.
  *
  * Reserving it on the window is not enough on its own, though, because the WebView does not stop
- * reporting the strip just because the window already moved out of its way. QA measured it with
- * CDP on 2026-09-16 (APK of `fb3b48a`): the window already started 52 CSS px down on
- * `Pixel_10_Pro` (`screen.height` 952 against `innerHeight` 900) and 24 down on `Pixel_Tablet`
- * (800 against 776) — and `env(safe-area-inset-top)` still reported those same 52 / 24, which
- * Ionic dutifully added again as `padding-top` on the first toolbar of every page. The header
- * floated half a bar below the clock everywhere (hub#1895). Note what the tablet says about the
- * WebView here: it has no cutout at all and still reported 24, so under edge-to-edge these insets
- * carry the system bars, not just the notch.
+ * reporting the strip just because the window already moved out of its way. Measured with CDP: the
+ * window already started 52 CSS px down on `Pixel_10_Pro` (`screen.height` 952 against
+ * `innerHeight` 900) and 24 down on `Pixel_Tablet` (800 against 776) — and
+ * `env(safe-area-inset-top)` still reported those same 52 / 24, which Ionic dutifully added again
+ * as `padding-top` on the first toolbar of every page. The header floated half a bar below the
+ * clock everywhere. Note what the tablet says about the WebView here: it has no cutout at all and
+ * still reported 24, so under edge-to-edge these insets carry the system bars, not just the notch.
  *
  * So the strip is both reserved AND spent: whatever is padded here is subtracted from the insets
  * handed down, and what reaches the page is only what nobody has reserved yet.
@@ -75,7 +73,7 @@ object SystemBarInsets {
      */
     fun applyTopSystemBarPadding(view: View?) {
         if (view == null) {
-            Log.w(TAG, "no content view to pad: the app will paint under the status bar (hub#1719)")
+            Log.w(TAG, "no content view to pad: the app will paint under the status bar")
             return
         }
 

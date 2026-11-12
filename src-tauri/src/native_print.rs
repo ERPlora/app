@@ -1,10 +1,10 @@
-//! `print_document` — the SYSTEM print dialog for an A4 document the page holds (hub#2006).
+//! `print_document` — the SYSTEM print dialog for an A4 document the page holds.
 //!
-//! Inside the webview `window.print()` prints nothing (hub#862), so an invoice only had the till
-//! roll. Tauri 2 already prints a webview natively (`Webview::print`: `NSPrintOperation` on macOS,
-//! the WebView2 dialog on Windows), so nothing is rendered to PDF here: the shell opens a window
-//! whose ONLY content is the document, served from memory under [`PRINT_SCHEME`], and once it has
-//! loaded asks the OS to print it. The printer list and «Save as PDF» are the system's.
+//! Inside the webview `window.print()` prints nothing, so without this an invoice could only go to
+//! the till roll. Tauri 2 already prints a webview natively (`Webview::print`: `NSPrintOperation`
+//! on macOS, the WebView2 dialog on Windows), so nothing is rendered to PDF here: the shell opens a
+//! window whose ONLY content is the document, served from memory under [`PRINT_SCHEME`], and once
+//! it has loaded asks the OS to print it. The printer list and «Save as PDF» are the system's.
 //!
 //! The document is html from a remote page shown in a window of the app, so it is contained three
 //! ways: its response forbids every script ([`PRINT_DOCUMENT_CSP`]), no capability names the print
@@ -31,7 +31,7 @@ pub const PRINT_DOCUMENT_CSP: &str =
 /// Does this platform have a system print dialog for a webview? `os` is `std::env::consts::OS`.
 ///
 /// wry implements `print` on macOS, Windows and Linux. On Android it does not, so the shell hands
-/// the document to Android's own print service through its plugin instead (hub#2008). Anywhere
+/// the document to Android's own print service through its plugin instead. Anywhere
 /// else the print door keeps its usual route.
 pub fn native_print_supported(os: &str) -> bool {
     matches!(os, "macos" | "windows" | "linux" | "android")

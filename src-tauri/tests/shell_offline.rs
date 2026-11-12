@@ -1,11 +1,8 @@
-//! Guard for what the till shows when the NETWORK dies under it (hub#1716).
+//! Guard for what the till shows when the NETWORK dies under it.
 //!
-//! The shell is a thin client (ADR-0159): the window navigates to a remote origin and everything
-//! the user sees comes from there. So a failed navigation is not an edge case, it is Tuesday
-//! afternoon in a bar — and until hub#1716 the app had no answer for it. `open_main_window` fell
-//! back to the bundled page only when the initial URL failed to **parse**, and `on_navigation`
-//! returned `true` without ever looking at whether the load succeeded. Everything else landed in
-//! whatever the platform's webview paints on a dead load:
+//! The shell is a thin client: the window navigates to a remote origin and everything the user
+//! sees comes from there. So a failed navigation is not an edge case, it is Tuesday afternoon in a
+//! bar. Left alone, the window shows whatever the platform's webview paints on a dead load:
 //!
 //! - on macOS (WKWebView) a **blank white window** — no message at all, no control, nothing;
 //! - on Android (Chromium) the grey `ERR_NAME_NOT_RESOLVED` / `ERR_INTERNET_DISCONNECTED` page.
@@ -21,9 +18,9 @@
 //!    its own when the network returns. Driven here against a REAL `WebviewWindow` on Tauri's mock
 //!    runtime, so the test fails if the navigation stops happening, not merely if a bool flips.
 //! 2. **The page** — `shell-dist/index.html` must be recognisably ERPlora, must say that it is the
-//!    NETWORK and not a crash, must carry its `en` source chain and its `es` translation
-//!    (ADR-0055/0199), and its retry control must reach the app instead of reloading itself
-//!    (reloading the fallback page re-renders the fallback page: the button was a dead end).
+//!    NETWORK and not a crash, must carry its `en` source chain and its `es` translation, and its
+//!    retry control must reach the app instead of reloading itself (reloading the fallback page
+//!    re-renders the fallback page: a dead end).
 
 const SHELL_PAGE: &str = include_str!("../../shell-dist/index.html");
 
@@ -31,17 +28,17 @@ const SHELL_PAGE: &str = include_str!("../../shell-dist/index.html");
 
 #[test]
 fn the_offline_page_carries_the_erplora_brand() {
-    // The whole point of the issue: the person is looking at what is, to them, their till. A grey
+    // The person is looking at what is, to them, their till. A grey
     // page with somebody else's error text reads as "the program broke". Ours has to be ours.
     assert!(
         SHELL_PAGE.contains("ERPlora"),
         "shell-dist/index.html never names ERPlora: the fallback screen is indistinguishable from \
-         the browser error page it replaces (hub#1716)"
+         the browser error page it replaces"
     );
     assert!(
         SHELL_PAGE.contains("erplora-mark.png"),
         "shell-dist/index.html shows no ERPlora mark: the screen has to be recognisable as the app \
-         the person opened, not as a generic failure (hub#1716)"
+         the person opened, not as a generic failure"
     );
 }
 
@@ -58,21 +55,21 @@ fn the_offline_page_blames_the_network_and_not_the_app() {
         assert!(
             SHELL_PAGE.contains(needle),
             "the {language} copy never says {needle:?}: the screen does not tell the person that \
-             the network is what failed, so it reads as a crash (hub#1716)"
+             the network is what failed, so it reads as a crash"
         );
     }
 }
 
 #[test]
 fn the_offline_page_ships_both_the_english_source_and_its_spanish_translation() {
-    // ADR-0055/0199: visible text is an English source chain plus its `es` translation, never one
+    // Visible text is an English source chain plus its `es` translation, never one
     // hardcoded string. This page has no i18n runtime to lean on — it is the page you get when
     // there is no network at all — so it carries both catalogues itself.
     for chain in ["en:", "es:"] {
         assert!(
             SHELL_PAGE.contains(chain),
             "shell-dist/index.html has no `{chain}` catalogue: visible text must ship as an English \
-             source chain plus its Spanish translation (ADR-0055/0199)"
+             source chain plus its Spanish translation"
         );
     }
 
@@ -86,30 +83,29 @@ fn the_offline_page_ships_both_the_english_source_and_its_spanish_translation() 
     assert_eq!(
         en, es,
         "the `en` and `es` catalogues of shell-dist/index.html do not cover the same keys: the \
-         language that misses one renders nothing where a sentence should be (ADR-0199)"
+         language that misses one renders nothing where a sentence should be"
     );
 }
 
 #[test]
 fn the_offline_page_retry_asks_the_app_instead_of_reloading_itself() {
-    // The button existed before hub#1716 and did `location.reload()`. On the fallback page that
-    // reloads THE FALLBACK PAGE: the one control on the only screen the user can reach was a loop
-    // back to itself. Retry has to reach the shell, which is the only side that can probe the
-    // network and navigate the window.
+    // A retry that does `location.reload()` on the fallback page reloads THE FALLBACK PAGE: the one
+    // control on the only screen the user can reach would be a loop back to itself. Retry has to
+    // reach the shell, which is the only side that can probe the network and navigate the window.
     //
-    // Asserted on the CODE and not on the file: the page's own comment explains what it used to do
-    // and names `location.reload()` doing so, so a check over the raw text would fail on a page
-    // that is right. A guard that forces you to stop writing down why is a guard that gets deleted.
+    // Asserted on the CODE and not on the file: the page's own comment names `location.reload()`
+    // to explain why it does not reload, so a check over the raw text would fail on a page that is
+    // right. A guard that forces you to stop writing down why is a guard that gets deleted.
     let code = executable_page_code();
     assert!(
         code.contains("shell_retry"),
         "shell-dist/index.html never invokes `shell_retry`: its retry control cannot reach the \
-         shell, so pressing it can only re-render the same dead end (hub#1716)"
+         shell, so pressing it can only re-render the same dead end"
     );
     assert!(
         !code.contains("location.reload()"),
         "shell-dist/index.html still reloads itself: on the bundled fallback page that re-renders \
-         the fallback page and the user stays trapped (hub#1716)"
+         the fallback page and the user stays trapped"
     );
 }
 
@@ -179,11 +175,8 @@ fn read(relative: &str) -> String {
 
 #[test]
 fn the_main_window_arms_the_connectivity_guard() {
-    // The page is useless if nothing ever navigates to it. Before hub#1716 the bundled page was
-    // reachable only from the `Err(_)` arm of `initial.parse::<tauri::Url>()` — a branch whose own
-    // comment said it "should not happen" — so in practice it shipped as dead weight. The guard is
-    // what gives it a reason to exist, and deleting the spawn is a one-line silent regression that
-    // no type error catches.
+    // The page is useless if nothing ever navigates to it. The guard is what gives it a reason to
+    // exist, and deleting the spawn is a one-line silent regression that no type error catches.
     let source = read("src/lib.rs");
 
     let window = source
@@ -195,8 +188,7 @@ fn the_main_window_arms_the_connectivity_guard() {
     assert!(
         window.contains("spawn_connectivity_guard"),
         "`open_main_window` no longer arms the connectivity guard: a failed load leaves the window \
-         on the platform's own error page — blank on macOS, grey on Android — with no way out \
-         (hub#1716)"
+         on the platform's own error page — blank on macOS, grey on Android — with no way out"
     );
 }
 
@@ -236,12 +228,12 @@ fn the_retry_command_is_reachable_from_the_bundled_page_and_from_nowhere_else() 
     assert!(
         !has_remote,
         "{file} grants `allow-shell-retry` to REMOTE origins: any page the till loads could then \
-         drive the window's navigation (hub#1716)"
+         drive the window's navigation"
     );
     assert_eq!(
         *local,
         Some(true),
         "{file} must declare `local: true` explicitly — the bundled fallback page is the only \
-         origin that needs `shell_retry` (hub#1716)"
+         origin that needs `shell_retry`"
     );
 }

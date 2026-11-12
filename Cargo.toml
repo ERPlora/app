@@ -1,6 +1,4 @@
-# Cargo workspace of the ERPlora native app (Tauri 2). Moved out of the ERPlora/hub monorepo
-# (origin/develop 9dd38215), where these three crates were members of the hub's root workspace.
-# `[workspace.lints]` and `[workspace.package]` are lifted unchanged from that root manifest.
+# Cargo workspace of the ERPlora native app (Tauri 2).
 [workspace]
 resolver = "2"
 members = [
@@ -9,7 +7,7 @@ members = [
     "crates/tauri-plugin-erplora-android",
 ]
 
-# ── Rust lints of the workspace (hub#1242) ─────────────────────────────────────────────────────
+# ── Rust lints of the workspace ────────────────────────────────────────────────────────────────
 # Each member inherits these tables with
 #   [lints]
 #   workspace = true
@@ -27,12 +25,12 @@ suspicious = { level = "warn", priority = -1 }
 [workspace.lints.rust]
 # Code the compiler already knows it will REJECT in a future version.
 future_incompatible = { level = "deny", priority = -1 }
-# An unused import is an ERROR, not a warning (hub#1501 → hub#1504).
+# An unused import is an ERROR, not a warning.
 unused_imports = { level = "deny", priority = -1 }
 
 [workspace.package]
 edition = "2021"
 # Inherited by `erplora-peripherals` (`version.workspace = true`). The app's own version lives in
-# `src-tauri/tauri.conf.json`, which the release workflow rewrites from the `v*` tag.
+# `src-tauri/tauri.conf.json`.
 version = "1.0.0"
 license = "MIT"

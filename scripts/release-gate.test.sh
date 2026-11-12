@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# Tests for the release gate: scripts/release-gate.sh (hub#895)
+# Tests for the release gate: scripts/release-gate.sh
 #
 # Run:  scripts/release-gate.test.sh
 #
@@ -77,7 +77,7 @@ expect_says()  { case "$out" in *"$2"*) ok "$1";; *) bad "$1" "the output never 
 expect_summary_says() { case "$summary" in *"$2"*) ok "$1";; *) bad "$1" "the job summary never mentions '$2'. It said: $summary";; esac; }
 
 echo
-echo "release-gate.sh (hub#895)"
+echo "release-gate.sh"
 echo
 
 # ── The script has to exist and be runnable ──────────────────────────────────
@@ -119,7 +119,7 @@ expect_green "the pending list is case- and space-insensitive"
 
 # ── A mandatory channel can NEVER be excused ─────────────────────────────────
 # `upload-s3` writes `latest.json`, the only thing the installed app compares its
-# version against (hub#400). Skipping it leaves the fleet without an update
+# version against. Skipping it leaves the fleet without an update
 # channel, so it has no gating Variable and the excuse list must not reach it.
 run_gate "s3" "$(channels success success skipped true true)" "$(builds success success)"
 expect_red  "a mandatory channel listed as pending → RED anyway"

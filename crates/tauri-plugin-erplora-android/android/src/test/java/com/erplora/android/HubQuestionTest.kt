@@ -5,7 +5,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 /**
- * The question the app asks before a link links another hub (hub#2644). The app sends the words in
+ * The question the app asks before a link links another hub. The app sends the words in
  * English and in Spanish; what is decided here is which ones the device reads, and that a question
  * with missing words is refused instead of shown half empty (a dialog with no «Open» cannot be
  * answered yes, but one with no «Cancel» cannot be answered no).

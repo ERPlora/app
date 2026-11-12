@@ -1,21 +1,21 @@
-//! What the release workflow assumes about the machine it runs on (hub#878).
+//! What the release workflow assumes about the machine it runs on.
 //!
-//! `tauri-release.yml` builds four platforms. Windows and macOS run on GitHub-hosted runners
-//! because there is nowhere else to run them; Linux and Android moved to `ci-runner-1`, our own
-//! box. Every time that move bit us it was the same shape of bug: **a step that only worked
-//! because of something the hosted image happened to give it**, and the red it produced never
-//! looked like its cause.
+//! `tauri-release.yml` builds four platforms. Windows and macOS need GitHub-hosted runners
+//! because there is nowhere else to run them; the Linux and Android jobs are written to run on a
+//! self-hosted runner too (the `runner.environment == 'self-hosted'` branches). Every bug of that
+//! split has the same shape: **a step that only works because of something the hosted image
+//! happens to give it**, and the red it produces never looks like its cause.
 //!
-//! `v1.1.0` lost both self-hosted jobs at once:
+//! One per self-hosted job:
 //!
 //! * **Linux** — `tauri-action` falls back to `npm install -g @tauri-apps/cli` when the project
-//!   does not depend on the CLI. On a hosted runner the user owns `/usr/lib/node_modules`; on
-//!   `ci-runner-1` it belongs to root, so the install died with `EACCES` before a single line of
-//!   Rust was compiled. The build only ever worked because of a filesystem permission.
+//!   does not depend on the CLI. On a hosted runner the user owns `/usr/lib/node_modules`; on a
+//!   self-hosted runner it can belong to root, so the install dies with `EACCES` before a single line of
+//!   Rust is compiled.
 //! * **Android** — `android-actions/setup-android` downloads the command line tools from
-//!   `dl.google.com`, which answers **404 to this machine over IPv6** (and 200 over IPv4 —
-//!   verified from the runner: `curl -6` 404, `curl -4` 206, for every path under that host).
-//!   Hosted runners have no IPv6, so the download could never take the broken road there.
+//!   `dl.google.com`, which answers **404 to that machine over IPv6** (and 200 over IPv4 —
+//!   `curl -6` 404, `curl -4` 206, for every path under that host). Hosted runners have no IPv6,
+//!   so the download never takes the broken road there.
 //!
 //! Both of those are invisible in the YAML: nothing in it says "this needs a writable
 //! `/usr/lib`" or "this needs the IPv4 road to Google". These assertions say it, so that removing
@@ -30,7 +30,7 @@ use std::path::PathBuf;
 const TAURI_CLI_PACKAGE: &str = "@tauri-apps/cli";
 
 /// Node resolves AAAA-first by default (`verbatim`). This is the flag that makes it try IPv4
-/// first, and it is the whole reason the Android SDK download reaches Google on `ci-runner-1`.
+/// first, and it is the whole reason the Android SDK download reaches Google where IPv6 to it is broken.
 const IPV4_FIRST: &str = "--dns-result-order=ipv4first";
 
 fn repo_root() -> PathBuf {
@@ -74,7 +74,7 @@ fn the_tauri_cli_is_a_project_dependency_not_a_global_install() {
             panic!(
                 "package.json must declare `{TAURI_CLI_PACKAGE}` as a devDependency: it \
                  is the only thing that keeps the release from installing the CLI globally, which \
-                 needs a writable /usr/lib/node_modules that `ci-runner-1` does not give (hub#878)"
+                 needs a writable /usr/lib/node_modules that a self-hosted runner may not give"
             )
         });
 
@@ -96,8 +96,8 @@ fn the_release_never_installs_the_tauri_cli_globally() {
     assert!(
         code.contains("tauriScript:"),
         "the Tauri build step no longer passes `tauriScript`, so `tauri-action` falls back to \
-         `npm install -g @tauri-apps/cli` — which is exactly what killed the Linux job of v1.1.0 \
-         with EACCES on `ci-runner-1` (hub#878)"
+         `npm install -g @tauri-apps/cli`, which dies with EACCES where /usr/lib/node_modules \
+         belongs to root"
     );
     assert!(
         code.contains("pnpm exec tauri"),
@@ -108,7 +108,7 @@ fn the_release_never_installs_the_tauri_cli_globally() {
         !code.contains("install -g"),
         "a global install is back in the release workflow: it works on a hosted runner and fails \
          on ours, which is the worst way for it to fail — only on the release, only on two of the \
-         four platforms (hub#878)"
+         four platforms"
     );
 
     // Installing the dependency is what makes `pnpm exec tauri` resolve to a binary at all.
@@ -152,7 +152,7 @@ fn the_linux_job_installs_what_the_appimage_takes_from_the_machine() {
             "`{package}` is no longer installed by the Linux job. It provides {why}: a hosted \
              runner image happens to carry it, a Hetzner Ubuntu does not, and the bundle only \
              fails AFTER a full release compile — on a tag, where re-running is expensive and the \
-             release is already public (hub#878)"
+             release is already public"
         );
     }
 }
@@ -161,12 +161,12 @@ fn the_linux_job_installs_what_the_appimage_takes_from_the_machine() {
 /// running on the OTHER slot of the same machine.
 const CACHE_SAVE_GUARD: &str = "save-if: ${{ runner.environment != 'self-hosted' }}";
 
-/// The condition inside [`CACHE_SAVE_GUARD`]: `false` on `ci-runner-1`, `true` on hosted images.
+/// The condition inside [`CACHE_SAVE_GUARD`]: `false` on a self-hosted runner, `true` on hosted images.
 const SELF_HOSTED_SKIP: &str = "runner.environment != 'self-hosted'";
 
 /// Is this line a `save-if:` that keeps rust-cache from cleaning on the shared runner?
 ///
-/// Read as the expression Actions evaluates, not as a string (hub#2713): [`SELF_HOSTED_SKIP`] has
+/// Read as the expression Actions evaluates, not as a string: [`SELF_HOSTED_SKIP`] has
 /// to be a term of a pure conjunction, so the whole `save-if:` is `false` wherever the runner is
 /// self-hosted, whatever the other terms say. An `||` anywhere voids it — the other side could
 /// still answer `true` — and so does a negation, a comment or a mention outside `save-if:`.
@@ -214,16 +214,16 @@ fn guard_shortfall(name: &str, code: &str) -> Option<String> {
 fn the_cargo_cache_does_not_prune_the_registry_a_concurrent_job_is_reading() {
     let code = workflow_code();
 
-    // Both Linux jobs of a release run AT THE SAME TIME on `ci-runner-1`: two runner slots, two
+    // On a self-hosted runner with two slots both Linux jobs of a release run AT THE SAME TIME: two
     // `_work` trees — and ONE `$HOME`, so one `~/.cargo`. The `Post` of rust-cache `rmRF`s every
     // non-`-sys` directory under `registry/src` before saving (`cleanRegistry`), and the Android
     // build resolves `:tauri-android`, `:tauri-plugin-deep-link`, `:tauri-plugin-notification` and
     // `:tauri-plugin-opener` as Gradle projects living in exactly those directories.
     //
-    // Measured, not deduced: `Post Cache cargo` of the desktop job logged
-    // "... Cleaning cargo registry ..." at 13:29:24, and 41 s later the Android build died in
-    // Gradle's configuration phase with "No matching variant ... No variants exist" for those four
-    // projects — a red that names Gradle variants and says nothing about a cache on another job.
+    // The symptom: `Post Cache cargo` of the desktop job logs "... Cleaning cargo registry ...",
+    // and seconds later the Android build dies in Gradle's configuration phase with "No matching
+    // variant ... No variants exist" for those four projects — a red that names Gradle variants
+    // and says nothing about a cache on another job.
     //
     // `save-if: false` returns before any cleaning (rust-cache `save.ts`), so the restore still
     // works and the hosted runners still save: it is only the destructive half that goes away, and
@@ -238,15 +238,13 @@ fn the_cargo_cache_does_not_prune_the_registry_a_concurrent_job_is_reading() {
         cache_steps,
         "every `Swatinem/rust-cache` step must carry `{CACHE_SAVE_GUARD}`. Without it the `Post` \
          of whichever job finishes first deletes the registry sources the other one is building \
-         from, and a release loses a platform to a failure that looks like a Gradle problem \
-         (hub#878)"
+         from, and a release loses a platform to a failure that looks like a Gradle problem"
     );
 }
 
 /// Marker that a workflow can land on a self-hosted runner instead of a GitHub-hosted image: the
-/// label GitHub gives every self-hosted runner. It used to be the org Variable `CI_RUNNER_LABEL`,
-/// which named `ci-runner-1`; that runner is gone and no workflow reads the Variable any more
-/// (app#31), so matching its name would let a new self-hosted job without the guard pass unseen.
+/// label GitHub gives every self-hosted runner. Matching one runner's own name instead would let a
+/// self-hosted job on another runner pass without the guard, unseen.
 const SELF_HOSTED_MARKER: &str = "self-hosted";
 
 /// Every workflow file in the repository, as `(file name, contents with comments stripped)`.
@@ -275,16 +273,14 @@ fn all_workflows_code() -> Vec<(String, String)> {
     out
 }
 
-/// The release workflow was fixed on its own (hub#886), which left the hole only half shut: the
-/// registry it stopped pruning is the SAME `~/.cargo` that every other Rust workflow of this repo
-/// prunes from the other runner slot. `test-hub.yml` and `test-shell.yml` both run on
-/// `ci-runner-1` and both save a cargo cache, so either of them finishing while a release builds
-/// Android reproduces hub#886 exactly — and the red still lands on the release, still shaped like
-/// a Gradle problem, still on a tag that cannot be re-run.
+/// Guarding the release workflow alone shuts only half the hole: the registry it stops pruning is
+/// the SAME `~/.cargo` that any other Rust workflow of this repo can prune from the other runner
+/// slot. One of them finishing while a release builds Android deletes the sources under it — and
+/// the red lands on the release, shaped like a Gradle problem, on a tag that cannot be re-run.
 ///
 /// This is the whole-machine version of the assertion above: the guard is a property of *sharing
 /// one `$HOME` between two runner slots*, not a property of the release workflow, so it is checked
-/// everywhere the machine is shared rather than in the one file where it happened to hurt first.
+/// everywhere the machine is shared.
 #[test]
 fn no_workflow_on_the_shared_runner_prunes_the_cargo_registry() {
     let mut unguarded = Vec::new();
@@ -299,29 +295,26 @@ fn no_workflow_on_the_shared_runner_prunes_the_cargo_registry() {
     assert!(
         unguarded.is_empty(),
         "these workflows can run on a self-hosted runner and save a cargo cache without \
-         `{CACHE_SAVE_GUARD}`: {unguarded:?}. The slots of such a runner share one `$HOME` (as \
-         `ci-runner-1`'s two did), so the \
+         `{CACHE_SAVE_GUARD}`: {unguarded:?}. The slots of such a runner share one `$HOME`, so the \
          `Post` of rust-cache `rmRF`s `~/.cargo/registry/src` while the job on the other slot is \
-         still compiling from it — measured on v1.1.1: `Cleaning cargo registry` at 00:54:22 and \
-         the Android build dead at 00:54:30 with `could not parse/generate dep info ... No such \
-         file or directory` (hub#886)"
+         still compiling from it, and that build dies with `could not parse/generate dep info ... \
+         No such file or directory`"
     );
 }
 
-/// Regression test for ERPlora/hub#2713: the guard is a CONDITION, not a string.
+/// The guard is a CONDITION, not a string.
 ///
-/// hub#2706 split `test-hub.yml` into six nextest partitions and only partition 1 saves the cache:
+/// A job split into partitions may save the cache from one of them only:
 /// `save-if: ${{ runner.environment != 'self-hosted' && matrix.part == 1 }}`. On the shared runner
-/// that still evaluates to `false` — rust-cache never reaches its cleaning — yet the literal string
-/// match counted "1 guard(s) for 2 cache step(s)" and turned this suite red on every OS, unseen on
-/// develop because `test-shell.yml` only ran when `apps/tauri/**` changed (ERPlora/hub).
+/// that still evaluates to `false` — rust-cache never reaches its cleaning — yet a literal string
+/// match counts "1 guard(s) for 2 cache step(s)" and turns this suite red.
 ///
 /// So the guard is read as what Actions evaluates: the self-hosted condition has to be a TERM of a
-/// conjunction (`&&`), which forces the whole expression to `false` on `ci-runner-1`. Anywhere
+/// conjunction (`&&`), which forces the whole expression to `false` on a self-hosted runner. Anywhere
 /// else it proves nothing: without it, or under an `||`, the other side can still say `true` and
-/// the `Post` prunes the registry the other runner slot is compiling from (hub#886).
+/// the `Post` prunes the registry the other runner slot is compiling from.
 #[test]
-fn the_cache_save_guard_is_read_as_a_conjunction_hub2713() {
+fn the_cache_save_guard_is_read_as_a_conjunction() {
     let guarded = [
         "save-if: ${{ runner.environment != 'self-hosted' }}",
         "          save-if: ${{ runner.environment != 'self-hosted' && matrix.part == 1 }}",
@@ -335,7 +328,7 @@ fn the_cache_save_guard_is_read_as_a_conjunction_hub2713() {
         );
     }
 
-    // Positive control: each of these lets the `Post` clean the registry on `ci-runner-1`.
+    // Positive control: each of these lets the `Post` clean the registry on a self-hosted runner.
     let unguarded = [
         "save-if: ${{ matrix.part == 1 }}",
         "save-if: ${{ runner.environment != 'self-hosted' || matrix.part == 1 }}",
@@ -356,7 +349,7 @@ fn the_cache_save_guard_is_read_as_a_conjunction_hub2713() {
         );
     }
 
-    // The same reading over a whole workflow: the partition shape of hub#2706 passes, and a cache
+    // The same reading over a whole workflow: the partition shape passes, and a cache
     // step whose `save-if:` dropped the condition still turns the check red.
     let partitioned = "\
       - uses: Swatinem/rust-cache@v2
@@ -382,10 +375,10 @@ fn google_downloads_do_not_take_the_ipv6_road_that_answers_404() {
     let code = workflow_code();
     assert!(
         code.contains(IPV4_FIRST),
-        "the workflow no longer forces `{IPV4_FIRST}`. `dl.google.com` answers 404 to \
-         `ci-runner-1` over IPv6, and Node — which is what every JS action downloads with — \
+        "the workflow no longer forces `{IPV4_FIRST}`. `dl.google.com` can answer 404 \
+         over IPv6, and Node — which is what every JS action downloads with — \
          prefers IPv6: `Setup Android SDK` dies with `HTTPError: Unexpected HTTP response: 404` \
-         for a file that exists and that `curl -4` fetches fine (hub#878)"
+         for a file that exists and that `curl -4` fetches fine"
     );
     assert!(
         code.contains("NODE_OPTIONS:"),

@@ -1,9 +1,9 @@
 //! Guard on the Android window staying lit while the app is in the foreground (app#26).
 //!
-//! QA, 2026-11-07, Lenovo TB361FU with Android 16 and app 1.1.34: with the till open and nobody
-//! touching the tablet, the screen went dark at the system's sleep timeout (`dumpsys window` →
-//! `mHoldScreenWindow=null`, `Display #0 state=OFF`). A till or a kitchen screen is in service all
-//! day; a black panel on the counter has to be woken up every time.
+//! Without the flag, a till left open with nobody touching the tablet goes dark at the system's
+//! sleep timeout (`dumpsys window` → `mHoldScreenWindow=null`, `Display #0 state=OFF`). A till or a
+//! kitchen screen is in service all day; a black panel on the counter has to be woken up every
+//! time.
 //!
 //! The flag lives in `ScreenOn` (plugin module), where the Kotlin unit tests reach it on every PR.
 //! What no unit test can reach is the wiring: `MainActivity` belongs to `:app`, and `:app` cannot
@@ -13,7 +13,7 @@
 //!
 //! `FLAG_KEEP_SCREEN_ON` is the lever because Android honours it only while the window is visible:
 //! the power button still turns the screen off, and in the background the system decides again.
-//! No wake lock and no permission. The listening service (HUB_APP-F26, hub#836) is another matter:
+//! No wake lock and no permission. The listening service is another matter:
 //! it keeps the process with the screen OFF and never holds the screen on.
 
 use std::path::PathBuf;
@@ -86,7 +86,7 @@ fn wiring_fault(source: &str) -> Option<&'static str> {
 
 /// The activity must keep its window lit.
 ///
-/// This is the whole user-visible promise of app#26: leave the till open on the counter, and the
+/// This is the whole user-visible promise: leave the till open on the counter, and the
 /// screen stays on until someone presses the power button or leaves the app.
 #[test]
 fn the_activity_keeps_its_window_lit() {

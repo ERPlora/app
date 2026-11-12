@@ -3,19 +3,15 @@ package com.erplora.android
 import android.nfc.NfcAdapter
 
 /**
- * Reading a staff badge off the tablet's OWN NFC reader — Android only (hub#988, follow-up of the
- * employee badge, hub#658).
+ * Reading a staff badge off the tablet's OWN NFC reader — Android only.
  *
  * At a counter the badge arrives through a €15 USB reader that behaves as a keyboard: it types the
- * number and presses Enter, and the shell catches the burst by its speed
- * (`apps/web/src/lib/badge-scanner.ts`). On a tablet there is no USB reader and no keyboard — but
- * the reader is already inside the device and, until this existed, unused. A salon on a tablet
- * simply could not enrol or read a card.
+ * number and presses Enter, and the shell catches the burst by its speed. On a tablet there is no
+ * USB reader and no keyboard — but the reader is already inside the device.
  *
- * **One badge path, two origins** is the design condition of the issue, and it is what this file
- * exists to respect: the tap produces the same kind of string the wedge produces, and it is handed
- * to the same subscribers. Nothing above — the login screen, the approval dialog, the staff form —
- * learns where a card came from.
+ * **One badge path, two origins** is what this file exists to respect: the tap produces the same
+ * kind of string the wedge produces, and it is handed to the same subscribers. Nothing above — the
+ * login screen, the approval dialog, the staff form — learns where a card came from.
  *
  * Two things are decided here rather than at the call site, and both are the difference between a
  * badge that works next week and one that does not:
@@ -27,9 +23,8 @@ import android.nfc.NfcAdapter
  *    once and never matched again, which locks the employee out with a card that demonstrably
  *    "worked when we set it up".
  *
- * The radio half can only be proven with a card in a hand, and that validation is booked in pm#145.
- * Everything decidable is a pure function of plain bytes, tested on the JVM without a device —
- * the same split as [BluetoothSpp].
+ * The radio half can only be proven with a card in a hand. Everything decidable is a pure function
+ * of plain bytes, tested on the JVM without a device — the same split as [BluetoothSpp].
  */
 object NfcBadge {
 

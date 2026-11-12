@@ -1,14 +1,14 @@
-//! Guard on the Windows application manifest reaching EVERY executable of this crate (hub#2705).
+//! Guard on the Windows application manifest reaching EVERY executable of this crate.
 //!
 //! `tauri-build` embeds its default manifest — the dependency on Common Controls v6 — through
 //! `tauri-winres`, which links it with `cargo:rustc-link-arg-bins`: the APP binary gets it, the
 //! test harnesses do not. Tauri's menu crate (`muda`) imports `TaskDialogIndirect` from
 //! `comctl32.dll`, and that function only exists in v6. Without the manifest Windows loads the v5
 //! in System32, the loader cannot resolve the import, and every test binary of this crate dies
-//! before `main` with `0xc0000139 STATUS_ENTRYPOINT_NOT_FOUND` — seen on the first Windows run of
-//! `test-shell.yml`. The release job never noticed: it builds the app, it never runs a test exe.
+//! before `main` with `0xc0000139 STATUS_ENTRYPOINT_NOT_FOUND`. The release job cannot notice: it
+//! builds the app, it never runs a test exe.
 //!
-//! The fix is Tauri's documented one (`WindowsAttributes::new_without_app_manifest`): the build
+//! The way out is Tauri's documented one (`WindowsAttributes::new_without_app_manifest`): the build
 //! script embeds the same manifest itself with `cargo:rustc-link-arg`, which applies to every
 //! target of the package — the app, the lib's test harness and each file in `tests/`. These
 //! assertions run on all three systems; the Windows job of `test-shell.yml` is where a missing
@@ -42,7 +42,7 @@ fn the_manifest_declares_common_controls_v6() {
     assert!(
         manifest.contains("Microsoft.Windows.Common-Controls") && manifest.contains("6.0.0.0"),
         "{MANIFEST} must declare Common Controls 6.0.0.0: `TaskDialogIndirect` only exists in v6, \
-         and without it every executable of the crate fails to load on Windows (hub#2705)",
+         and without it every executable of the crate fails to load on Windows",
     );
 }
 

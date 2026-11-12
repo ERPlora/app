@@ -1,27 +1,20 @@
 #!/usr/bin/env bash
-# Contract test for ERPlora/infra#313 — a job that installs system packages on the SHARED CI
-# runner must wait out the apt lock another job holds, instead of dying on it.
-#
-# WHAT HAPPENED. On 2026-09-26 the Playwright job of hub#2225 went red with every test green: its
-# step `Instalar el navegador de Playwright` runs `playwright install --with-deps chromium`, which
-# shells out to `sudo apt-get update && sudo apt-get install …`, and another job on the same
-# machine was running `apt-get` at that moment:
+# Contract test: a job that installs system packages on a SHARED CI runner must wait out the apt
+# lock another job holds, instead of dying on it with every test green:
 #
 #     E: Could not get lock /var/lib/apt/lists/lock. It is held by process 98241 (apt-get)
 #     Installation process exited with code: 100
 #
-# Re-running the same commit went green. The slots of `ci-runner-1` share one `/var/lib/apt` and
-# one `/var/lib/dpkg`, so any two jobs that touch apt at the same time can knock each other over.
+# The slots of a shared runner share one `/var/lib/apt` and one `/var/lib/dpkg`, so any two jobs
+# that touch apt at the same time can knock each other over.
 #
 # WHY A RETRY AND NOT `-o DPkg::Lock::Timeout=N`. That option only makes apt wait for the DPKG
-# locks. The lock in the incident is the LISTS lock that `apt-get update` takes, and apt fails on
-# it at once whatever the timeout says — measured on 2026-09-27 against apt 2.4.14 (ubuntu:22.04)
-# and 2.8.3 (ubuntu:24.04), holding the lock with fcntl from another process: `apt-get -o
-# DPkg::Lock::Timeout=60 update` exits 100 in 8 ms. The same goes for a system-wide
-# `/etc/apt/apt.conf.d` on the runner, which is why the fix lives here and not in ERPlora/infra.
-# Playwright's `--with-deps` also gives no way to pass apt options. So every such step goes
-# through `scripts/ci/apt-lock-retry.sh`, which re-runs the command while the failure is a held
-# lock, and gives up on anything else at once.
+# locks. The LISTS lock that `apt-get update` takes fails at once whatever the timeout says
+# (apt 2.4.14 on ubuntu:22.04 and 2.8.3 on ubuntu:24.04, holding the lock with fcntl from another
+# process: `apt-get -o DPkg::Lock::Timeout=60 update` exits 100 in 8 ms), and so does a system-wide
+# `/etc/apt/apt.conf.d` on the runner. Playwright's `--with-deps` also gives no way to pass apt
+# options. So every such step goes through `scripts/ci/apt-lock-retry.sh`, which re-runs the
+# command while the failure is a held lock, and gives up on anything else at once.
 #
 # WHAT IT CHECKS.
 #   Part 1 — the wrapper itself, against a fake command (no apt, no sudo):
@@ -35,7 +28,7 @@
 #     action): every `run:` line that calls `apt-get`/`apt` update|install|upgrade, or Playwright
 #     with `--with-deps` / `install-deps`, goes through the wrapper — EVERY such call on the line,
 #     each one inside its own command (a wrapper before `&&`/`;`/`||` guards only the call before
-#     it; hub#2267, hub#2268). `KNOWN` is the proof the scan
+#     it). `KNOWN` is the proof the scan
 #     still SEES the steps that exist today; the fixtures prove the detector catches the positive
 #     and leaves the harmless shapes alone.
 #
@@ -73,8 +66,8 @@ chmod +x "$work/fake-apt"
 HELD='E: Could not get lock /var/lib/apt/lists/lock. It is held by process 98241 (apt-get)'
 
 # run_wrapper <fails> <rc> <message> [env…] — runs the wrapper under a hard cap so a wrapper that
-# never gives up turns this suite red instead of hanging it (the infra#310 lesson: every script
-# with a wait loop needs a ceiling in its test). The cap is `perl alarm` + `exec`, not `timeout`:
+# never gives up turns this suite red instead of hanging it: every script with a wait loop needs
+# a ceiling in its test. The cap is `perl alarm` + `exec`, not `timeout`:
 # macOS has no `timeout`, and SIGALRM kills the wrapper with rc 142.
 run_wrapper() {
     local fails=$1 rc=$2 message=$3
@@ -180,7 +173,6 @@ WRAPPER = "scripts/ci/apt-lock-retry.sh"
 
 # The steps that touch apt TODAY. Not the scan — the proof the scan still finds something. If one
 # is deliberately retired, delete its line here too.
-# (`test-web.yml` and `visual-baselines.yml` stayed in ERPlora/hub when the app moved here.)
 KNOWN = {
     ".github/workflows/test-shell.yml": ["System deps (webkit2gtk + GTK)"],
     ".github/workflows/tauri-release.yml": ["Install Linux build deps"],
@@ -250,7 +242,7 @@ FIXTURES = [
     ("sudo apt install -y jq", True),
     ("sudo -E apt-get -o DPkg::Lock::Timeout=600 update", True),
     # The wrapper only guards the command it prefixes: later on the line, or before a second apt
-    # call chained with `&&`/`;`/`||`, it does not count (hub#2267, hub#2268).
+    # call chained with `&&`/`;`/`||`, it does not count.
     (f"sudo apt-get update && bash {WRAPPER} true", True),
     (f"bash {WRAPPER} sudo apt-get update && sudo apt-get install -y jq", True),
     (f"bash {WRAPPER} sudo apt-get update; sudo apt-get install -y jq", True),
@@ -314,7 +306,7 @@ for path in files:
                 f"{rel_path} · job `{job_name}` · step «{label}» waits out the apt lock",
                 not bad,
                 f"`{bad[0] if bad else ''}` runs apt without `bash {WRAPPER}` — on the shared "
-                "runner another job's apt lock turns it red (infra#313)",
+                "runner another job's apt lock turns it red",
             )
 
 for rel_path, labels in KNOWN.items():

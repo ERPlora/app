@@ -277,7 +277,7 @@ llamador en `ERPlora/hub`, `@erplora/ui` ni `ERPlora/saas`.
 
 ## Tests adaptados
 
-- `crates/peripherals/tests/arquitectura_names_the_live_transports_hub1562.rs` leía `ARQUITECTURA.md`
+- `crates/peripherals/tests/readme_names_the_live_transports.rs` leía `ARQUITECTURA.md`
   del monorepo (§2.7). Ahora guarda `crates/peripherals/README.md`, que tiene la misma tabla de
   transportes (`network:{ip}:{port}`, `bluetooth:{mac}`, `usb:{queue}`): ningún transporte vivo puede
   darse por descartado en el documento que se lee antes de tocar la impresión.

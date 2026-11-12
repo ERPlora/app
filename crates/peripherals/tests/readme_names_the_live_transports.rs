@@ -20,7 +20,7 @@ use erplora_peripherals::discovery::{parse_print_target, PrintTarget};
 
 /// The crate's README, pulled in at compile time: moving or renaming it cannot leave this test
 /// green. It holds the transports table a reader checks before touching printing.
-const ARQUITECTURA: &str = include_str!("../README.md");
+const README: &str = include_str!("../README.md");
 
 /// One `printer_id` per transport the crate is meant to accept today.
 const SAMPLE_IDS: [&str; 3] = [
@@ -157,7 +157,7 @@ fn readme_does_not_bury_the_usb_transport() {
          which is the whole point of asking the code first"
     );
 
-    let buried = buried_claims(ARQUITECTURA);
+    let buried = buried_claims(README);
 
     assert!(
         buried.is_empty(),
@@ -180,7 +180,7 @@ fn readme_names_every_transport_the_crate_accepts() {
         .iter()
         .filter_map(|id| parse_print_target(id).ok())
         .map(|target| documented_shape(&target))
-        .filter(|shape| !ARQUITECTURA.contains(shape))
+        .filter(|shape| !README.contains(shape))
         .collect();
 
     assert!(

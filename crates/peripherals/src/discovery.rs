@@ -1,10 +1,11 @@
-//! Descubrimiento de impresoras en red + parseo de `printer_id` (**los tres transportes**).
-//! Porta `bridge/ERPlora-Bridge-desktop/erplora_bridge/hardware/discovery.py`, del que solo el
-//! descubrimiento **de red** vive aquí: las colas USB del SO las enumera [`crate::usb`]
-//! (hub#1083) y las Bluetooth emparejadas las lista el plugin Kotlin (ADR-0204).
+//! Network printer discovery, and parsing of `printer_id` (**all three transports**).
 //!
-//! Métodos: escaneo de subred /24 al puerto 9100 + mDNS (`_pdl-datastream._tcp`,`_ipp._tcp`),
-//! deduplicado, y enriquecido con MAC/ARP para registrar en `registry::DeviceRegistry`.
+//! Only the **network** discovery lives here: the OS's USB print queues are listed by
+//! [`crate::usb`], and the bonded Bluetooth printers by the Kotlin plugin.
+//!
+//! Methods: a /24 subnet sweep on port 9100 plus mDNS (`_pdl-datastream._tcp`, `_ipp._tcp`),
+//! deduplicated and enriched with the MAC (ARP) so they can be registered in
+//! `registry::DeviceRegistry`.
 
 use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};
@@ -18,28 +19,26 @@ use crate::protocol::PrinterInfo;
 use crate::registry::DeviceRegistry;
 use crate::{Result, ESCPOS_NETWORK_PORT};
 
-/// Timeout del `connect` TCP durante el escaneo de subred.
+/// TCP `connect` timeout during the subnet sweep.
 ///
-/// Eran 300 ms, heredados del `timeout=0.3` del Python. Un `connect` a una impresora encendida en
-/// la misma LAN tarda milisegundos, así que 300 parecía de sobra — y no lo es: el margen no lo come
-/// la impresora, lo come la CONTENCIÓN. Con el barrido compitiendo consigo mismo (el watchdog de
-/// `registry` barre esta misma subred) o con la máquina cargada, el `connect` a la impresora REAL
-/// se pasa de 300 ms y se descarta **sin un solo error**: «no hay impresoras».
+/// A `connect` to a powered printer on the same LAN takes milliseconds, so a 300 ms timeout looks
+/// generous — and it is not: the margin is not eaten by the printer but by CONTENTION. With the sweep
+/// competing with itself (the `registry` watchdog sweeps this same subnet) or with a loaded
+/// machine, the `connect` to the REAL printer goes past 300 ms and is dropped **without a single
+/// error**: «no printers».
 ///
-/// Medido el 2026-08-09 contra una térmica encendida, dos barridos en paralelo: con 300 ms la
-/// perdía 3 de 3; acotando la concurrencia a [`SCAN_MAX_IN_FLIGHT`] bajó a 1 de 3; con 1 s, 0 de 3.
-/// Las dos mitades hacen falta.
+/// Measured against a powered thermal printer with two sweeps in parallel: at 300 ms it was lost
+/// 3 times out of 3; capping the concurrency at [`SCAN_MAX_IN_FLIGHT`] brought it down to 1 of 3;
+/// at 1 s, 0 of 3. Both halves are needed.
 ///
-/// El coste es el peor caso de un barrido sin nadie al otro lado: 254 direcciones en tandas de 64 →
-/// 4 tandas × 1 s ≈ 4 s. Un descubrimiento se pide a mano y de tarde en tarde; perder la impresora
-/// sale mucho más caro que esperar cuatro segundos.
+/// The cost is the worst case of a sweep with nobody on the other end: 254 addresses in batches of
+/// 64 → 4 batches × 1 s ≈ 4 s. Discovery is asked for by hand and seldom; losing the printer costs
+/// far more than waiting four seconds.
 const SCAN_CONNECT_TIMEOUT: Duration = Duration::from_millis(1000);
-/// Ventana de escucha mDNS (espejo de `time.sleep(1.5)` en Python).
 const MDNS_BROWSE_WINDOW: Duration = Duration::from_millis(1500);
-/// Tipos de servicio mDNS sondeados (espejo de la lista de `_discover_mdns`).
 const MDNS_SERVICE_TYPES: [&str; 2] = ["_pdl-datastream._tcp.local.", "_ipp._tcp.local."];
 
-/// Destino de impresión por red. Sustituye al tuple `('network', {host, port})` de Python.
+/// Network print destination: a TCP host and port.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetworkTarget {
     pub host: String,
@@ -47,18 +46,18 @@ pub struct NetworkTarget {
 }
 
 impl NetworkTarget {
-    /// Para `tokio::net::TcpStream::connect`.
+    /// `host:port`, as `tokio::net::TcpStream::connect` takes it.
     pub fn socket_addr(&self) -> String {
         format!("{}:{}", self.host, self.port)
     }
 }
 
-/// Bluetooth Classic SPP print destination — Android only (ADR-0204, hub#388).
+/// Bluetooth Classic SPP print destination — Android only.
 ///
 /// The MAC is the whole identity: RFCOMM connects to a bonded device by address, there is no
 /// host/port. Desktop and iOS never produce nor accept this variant — iOS because of Apple's MFi
 /// restriction on Bluetooth Classic, desktop because the cheap printer there arrives by cable and
-/// is served by the OS print queue instead ([`UsbTarget`], hub#1083).
+/// is served by the OS print queue instead ([`UsbTarget`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BluetoothTarget {
     /// Normalized (`AA:BB:CC:DD:EE:FF`): the same spelling the device registry keys on and the
@@ -66,13 +65,13 @@ pub struct BluetoothTarget {
     pub mac: String,
 }
 
-/// Raw print destination through the operating system's own print queue — desktop only (hub#1083).
+/// Raw print destination through the operating system's own print queue — desktop only.
 ///
 /// The queue name is the whole identity. There is no host, no port and no MAC: the cable is the
 /// OS's business, and what we address is the spooler entry the user (or the vendor installer)
 /// created for the printer. That is deliberate — it is what lets us support USB *without shipping
-/// a driver per OS*, which is the thing the old red-only decision was actually protecting against.
-/// The vendor writes the driver; we keep emitting the same ESC/POS bytes we emit over TCP.
+/// a driver per OS*. The vendor writes the driver; we keep emitting the same ESC/POS bytes we emit
+/// over TCP.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UsbTarget {
     /// A CUPS destination name, already validated: non-empty, no SPACE/TAB/`/`/`#`, no leading
@@ -80,7 +79,7 @@ pub struct UsbTarget {
     pub queue: String,
 }
 
-/// Where a print job goes, parsed from a `printer_id` (ADR-0204).
+/// Where a print job goes, parsed from a `printer_id`.
 ///
 /// `network:{ip}:{port}` feeds the TCP path everywhere; `bluetooth:{mac}` exists ONLY on Android,
 /// where the shell hands the rendered ESC/POS bytes to the Kotlin SPP transport. The rendering
@@ -111,10 +110,9 @@ pub(crate) fn is_cups_queue_name(name: &str) -> bool {
 }
 
 /// Parses a `printer_id` into the transport it names: `network:{ip}:{port}`, `bluetooth:{mac}`
-/// (ADR-0204) or `usb:{queue}` (hub#1083). Anything else — an unknown scheme, a malformed MAC, a
-/// queue name the OS could never have — is refused HERE, at the contract's edge, instead of
-/// travelling on to blow up inside a socket connect or an `lp` exit code with a message nobody can
-/// map back to the id.
+/// or `usb:{queue}`. Anything else — an unknown scheme, a malformed MAC, a queue name the OS could
+/// never have — is refused HERE, at the contract's edge, instead of travelling on to blow up inside
+/// a socket connect or an `lp` exit code with a message nobody can map back to the id.
 pub fn parse_print_target(printer_id: &str) -> Result<PrintTarget> {
     match printer_id.split_once(':') {
         Some(("bluetooth", mac)) => {
@@ -141,13 +139,12 @@ pub fn parse_print_target(printer_id: &str) -> Result<PrintTarget> {
     }
 }
 
-/// Parsea un `printer_id` `network:{ip}:{port}` → `NetworkTarget`.
-/// Porta `parse_printer_id`, restringido a la rama `network`: es el parser del camino TCP (cola
-/// de impresión, cajón por socket, enriquecido del registro), así que rechaza `bluetooth:` y
-/// `usb:` — esas variantes solo llegan al hardware por [`parse_print_target`] (SPP de Android,
-/// ADR-0204; cola RAW del SO, hub#1083).
+/// Parses a `network:{ip}:{port}` `printer_id` into a [`NetworkTarget`].
+/// It is the parser of the TCP path (print queue, drawer over a socket, registry enrichment), so it
+/// refuses `bluetooth:` and `usb:` — those variants reach hardware only through
+/// [`parse_print_target`] (Android's SPP transport and the OS's raw print queue).
 pub fn parse_printer_id(printer_id: &str) -> Result<NetworkTarget> {
-    // `split(':', 1)` de Python: separa el esquema del resto por el PRIMER ':'.
+    // The scheme is split off at the FIRST ':'.
     let (scheme, rest) = match printer_id.split_once(':') {
         Some((s, r)) => (s, r),
         None => (printer_id, ""),
@@ -159,7 +156,7 @@ pub fn parse_printer_id(printer_id: &str) -> Result<NetworkTarget> {
         )));
     }
 
-    // Python's `rsplit(':', 1)`: the host may contain ':' (IPv6), the port is always last.
+    // Split at the LAST ':': the host may contain ':' (IPv6), the port is always last.
     let (host, port) = match rest.rsplit_once(':') {
         Some((h, p)) => {
             let port = p.parse::<u16>().map_err(|_| {
@@ -244,7 +241,7 @@ impl PrinterDiscovery {
 }
 
 /// Discovers every network printer (mDNS + subnet sweep), deduplicates, enriches with the MAC and
-/// registers them in `registry`. Ports `discover_all(registry)`.
+/// registers them in `registry`.
 ///
 /// `access` is not decoration: with the permission denied the sweep is 254 silent timeouts and an
 /// mDNS window that resolves nothing, so it is skipped and the caller is told **why** there is no
@@ -266,14 +263,14 @@ pub async fn discover_printers(
     })
 }
 
-/// How long a typed address gets to answer before it is refused as unreachable (hub#1924).
+/// How long a typed address gets to answer before it is refused as unreachable.
 ///
 /// Longer than the sweep's [`SCAN_CONNECT_TIMEOUT`] on purpose: this is ONE connect the owner is
 /// waiting on, often to another subnet through a router, and refusing a printer that was merely
 /// slow sends them to check a cable that is fine.
 pub const MANUAL_PRINTER_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// Adds a network printer by the address the owner TYPED (hub#1924) — the way out when the scan
+/// Adds a network printer by the address the owner TYPED — the way out when the scan
 /// cannot see it (another subnet, an isolated guest Wi-Fi, mDNS blocked by the router).
 ///
 /// Three answers, and only the first saves anything:
@@ -332,8 +329,8 @@ pub async fn add_network_printer(
 }
 
 /// Adds the printers the owner typed by hand ([`add_network_printer`]) that this scan did not
-/// see, so a printer on another subnet does not vanish from the list at the next «Re-scan»
-/// (hub#1924). Their state is the watchdog's (`offline` → `offline`, anything else → `ready`).
+/// see, so a printer on another subnet does not vanish from the list at the next «Re-scan». Their
+/// state is the watchdog's (`offline` → `offline`, anything else → `ready`).
 ///
 /// A blocked scan stays blocked: the screen has to ask for the permission first, and a typed
 /// printer is behind that same permission.
@@ -361,7 +358,7 @@ pub fn with_manual_printers(outcome: PrinterDiscovery, registry: &DeviceRegistry
 
 /// The scan itself: mDNS + subnet sweep, deduplicated, MAC-enriched and registered.
 async fn scan_network(registry: &DeviceRegistry) -> Result<Vec<PrinterInfo>> {
-    // mDNS gana ante colisión de IP → se inserta primero y el escaneo solo añade IDs nuevos.
+    // mDNS wins when both find the same printer: it goes in first and the sweep only adds new ids.
     let mut printers = discover_mdns().await?;
 
     let mut seen_ids: HashSet<String> = printers.iter().map(|p| p.id.clone()).collect();
@@ -371,23 +368,22 @@ async fn scan_network(registry: &DeviceRegistry) -> Result<Vec<PrinterInfo>> {
         }
     }
 
-    // Enriquece cada impresora de red con su MAC (ARP) y la registra. Espejo del bucle final de
-    // `discover_all`: cualquier fallo de resolución/registro se ignora, no rompe el descubrimiento.
+    // Enrich every network printer with its MAC (ARP) and register it. A failure to resolve or to
+    // register is ignored: it must not break the discovery.
     for p in printers.iter_mut() {
         if p.kind != "network" {
             continue;
         }
-        // `network:IP:PORT` → IP es el 2º segmento.
         let (ip, port) = match parse_printer_id(&p.id) {
             Ok(t) => (t.host, t.port),
             Err(_) => continue,
         };
 
-        // La MAC es un ENRIQUECIMIENTO, no un requisito: el registro se hace siempre. Antes el
-        // `register` colgaba del `if let Some(mac)`, así que en Android —donde ARP nunca resuelve,
-        // no existe el binario `arp` y `/proc/net/arp` está restringido desde Android 10— ninguna
-        // impresora llegaba a `devices.json`: `get_devices` devolvía `[]` y no se podía asignar
-        // ningún rol de cocina/barra/caja.
+        // The MAC is an ENRICHMENT, not a requirement: the printer is always registered. On
+        // Android ARP never resolves (there is no `arp` binary and `/proc/net/arp` is restricted
+        // since Android 10), so registering only with a MAC would leave no printer in
+        // `devices.json`: `get_devices` would return `[]` and no kitchen/bar/till role could be
+        // assigned.
         p.mac = crate::registry::get_mac_for_ip(&ip);
         let _ = registry.register(p.mac.as_deref(), &ip, port, &p.name, "network");
     }
@@ -396,7 +392,7 @@ async fn scan_network(registry: &DeviceRegistry) -> Result<Vec<PrinterInfo>> {
 }
 
 /// Subnet sweep: a TCP `connect` to `port` on `{prefix}.1..=254` of every network the device is on
-/// ([`local_subnet_prefixes`]). Ports `_discover_network_scan` + `_get_local_subnet`.
+/// ([`local_subnet_prefixes`]).
 pub async fn discover_subnet_scan(port: u16) -> Result<Vec<PrinterInfo>> {
     let prefixes = local_subnet_prefixes();
     if prefixes.is_empty() {
@@ -419,13 +415,13 @@ pub async fn discover_subnet_scan(port: u16) -> Result<Vec<PrinterInfo>> {
     let mut printers = Vec::new();
     {
         for ip in found {
-            tracing::debug!("impresora de red encontrada en {ip}:{port}");
+            tracing::debug!("network printer found at {ip}:{port}");
             printers.push(PrinterInfo {
                 id: format!("network:{ip}:{port}"),
                 name: format!("Network Printer ({ip})"),
                 kind: "network".into(),
-                // Responder al 9100 no dice qué idioma habla: una láser A4 de oficina también
-                // escucha ahí. Sin más evidencia no se clasifica.
+                // Answering on 9100 says nothing about the language it speaks: an office A4 laser
+                // listens there too. Without more evidence it stays unclassified.
                 category: crate::protocol::default_printer_category(),
                 status: "ready".into(),
                 paper_width: 80,
@@ -437,33 +433,34 @@ pub async fn discover_subnet_scan(port: u16) -> Result<Vec<PrinterInfo>> {
     Ok(printers)
 }
 
-/// Cuántas sondas pueden estar EN VUELO a la vez durante el barrido.
+/// How many probes may be IN FLIGHT at once during the sweep.
 ///
-/// El barrido nació lanzando las 254 de golpe, y eso pierde impresoras de verdad: cada sonda tiene
-/// [`SCAN_CONNECT_TIMEOUT`] (300 ms) para completar el `connect`, así que basta con que la máquina
-/// vaya cargada —o que haya otro barrido a la vez, cosa que pasa: el watchdog de `registry` barre
-/// esta misma subred— para que el `connect` a la impresora REAL se pase de 300 ms y se descarte.
+/// Launching all 254 at once loses real printers: each probe has [`SCAN_CONNECT_TIMEOUT`] to
+/// complete its `connect`, so a loaded machine — or a second sweep at the same time, which does
+/// happen: the `registry` watchdog sweeps this same subnet — is enough for the `connect` to the
+/// REAL printer to run out of time and be dropped.
 ///
-/// Y el fallo es MUDO: el resultado es «no hay impresoras», que es exactamente lo que se ve en un
-/// local sin impresora. Medido el 2026-08-09 contra una térmica encendida: con dos barridos
-/// simultáneos la perdía 3 de cada 3 veces; en serie, 0 de 2.
+/// And the failure is SILENT: the result is «no printers», exactly what a venue without a printer
+/// looks like. Measured against a powered thermal printer: with two simultaneous sweeps it was lost
+/// 3 times out of 3; one after the other, 0 of 2.
 ///
-/// 64 mantiene el barrido rápido (4 tandas) dando a cada `connect` una ventana que no se come la
-/// contención.
+/// 64 keeps the sweep fast (4 batches) while giving every `connect` a window contention does not
+/// eat.
 pub const SCAN_MAX_IN_FLIGHT: usize = 64;
 
-/// El barrido, separado de CÓMO se conecta.
+/// The sweep, kept apart from HOW it connects.
 ///
-/// La separación existe para poder fijarle el límite en un test sin red ni impresora: lo que hay
-/// que garantizar es cuántas sondas coexisten, y eso con sockets de verdad solo se observa
-/// provocando la congestión que se quiere evitar.
+/// The split lets a test pin the limit with no network and no printer: what has to be guaranteed is
+/// how many probes coexist, and with real sockets that can only be observed by causing the very
+/// congestion the limit is there to avoid.
 async fn sweep_addresses<C, F>(addresses: Vec<String>, probe: C) -> Vec<String>
 where
     C: Fn(String) -> F + Clone + Send + 'static,
     F: std::future::Future<Output = bool> + Send + 'static,
 {
-    // El semáforo NO reduce lo que se sondea: se sondean las 254 igual, por tandas de
-    // SCAN_MAX_IN_FLIGHT. Lo que acota es cuántas compiten a la vez por la red y por los 300 ms.
+    // The semaphore does NOT reduce what is probed: all 254 are probed anyway, in batches of
+    // SCAN_MAX_IN_FLIGHT. What it caps is how many compete at once for the network and for the
+    // connect timeout.
     let permisos = std::sync::Arc::new(tokio::sync::Semaphore::new(SCAN_MAX_IN_FLIGHT));
 
     let mut set: JoinSet<Option<String>> = JoinSet::new();
@@ -471,7 +468,7 @@ where
         let probe = probe.clone();
         let permisos = permisos.clone();
         set.spawn(async move {
-            // `acquire_owned` solo falla si el semáforo se cierra, y aquí no se cierra nunca.
+            // `acquire_owned` only fails if the semaphore is closed, and it is never closed here.
             let _permiso = permisos.acquire_owned().await.ok()?;
             probe(addr.clone()).await.then_some(addr)
         });
@@ -486,24 +483,24 @@ where
     hits
 }
 
-/// Descubrimiento mDNS/Bonjour. Porta `_discover_mdns`.
-/// Robusto: ante cualquier error devuelve `Vec` vacío en lugar de propagar (espejo del try/except).
+/// mDNS/Bonjour discovery. On any error it returns an empty `Vec` instead of propagating it.
 pub async fn discover_mdns() -> Result<Vec<PrinterInfo>> {
-    // El daemon de `mdns-sd` usa canales `flume` síncronos; lo ejecutamos en un hilo bloqueante
-    // para no acaparar el runtime async durante la ventana de escucha.
+    // The `mdns-sd` daemon uses synchronous `flume` channels, so it runs on a blocking thread
+    // rather than hogging the async runtime for the whole listening window.
     let result = tokio::task::spawn_blocking(browse_mdns_blocking).await;
 
     match result {
         Ok(printers) => Ok(printers),
         Err(e) => {
-            tracing::error!("error en descubrimiento mDNS (join): {e}");
+            tracing::error!("mDNS discovery failed (join): {e}");
             Ok(Vec::new())
         }
     }
 }
 
-/// Lógica bloqueante de mDNS: arranca el daemon, navega los tipos de servicio, escucha la ventana
-/// y mapea cada `ServiceResolved` a `PrinterInfo`. Nunca falla: ante error registra y sigue.
+/// The blocking half of mDNS: starts the daemon, browses the service types, listens for the window
+/// and maps every `ServiceResolved` to a `PrinterInfo`. Never fails: on an error it logs and goes
+/// on.
 fn browse_mdns_blocking() -> Vec<PrinterInfo> {
     use mdns_sd::{ServiceDaemon, ServiceEvent};
 
@@ -513,18 +510,18 @@ fn browse_mdns_blocking() -> Vec<PrinterInfo> {
     let daemon = match ServiceDaemon::new() {
         Ok(d) => d,
         Err(e) => {
-            tracing::error!("no se pudo crear el daemon mDNS: {e}");
+            tracing::error!("could not start the mDNS daemon: {e}");
             return printers;
         }
     };
 
-    // Se conserva el tipo de servicio junto al receptor: es lo ÚNICO que permite distinguir una
-    // impresora de oficina (`_ipp._tcp`) de una térmica, y se perdía al meter solo el `rx`.
+    // The service type is kept next to its receiver: it is the ONLY thing that tells an office
+    // printer (`_ipp._tcp`) from a thermal one.
     let mut receivers = Vec::new();
     for service_type in MDNS_SERVICE_TYPES {
         match daemon.browse(service_type) {
             Ok(rx) => receivers.push((service_type, rx)),
-            Err(e) => tracing::debug!("no se pudo navegar {service_type}: {e}"),
+            Err(e) => tracing::debug!("could not browse {service_type}: {e}"),
         }
     }
 
@@ -536,7 +533,7 @@ fn browse_mdns_blocking() -> Vec<PrinterInfo> {
         }
         let remaining = deadline - now;
 
-        // Recorre todos los receptores con un timeout corto; al expirar la ventana, salimos.
+        // Poll every receiver with a short timeout until the window runs out.
         let mut progressed = false;
         for (service_type, rx) in &receivers {
             let slice = remaining.min(Duration::from_millis(100));
@@ -546,7 +543,7 @@ fn browse_mdns_blocking() -> Vec<PrinterInfo> {
                     if let Some(printer) = service_to_printer(&info, service_type) {
                         if seen_ids.insert(printer.id.clone()) {
                             tracing::debug!(
-                                "impresora mDNS encontrada: {} ({})",
+                                "mDNS printer found: {} ({})",
                                 printer.name,
                                 printer.id
                             );
@@ -558,13 +555,13 @@ fn browse_mdns_blocking() -> Vec<PrinterInfo> {
                     progressed = true;
                 }
                 Err(_) => {
-                    // timeout/desconexión de este receptor: probar el siguiente.
+                    // This receiver timed out or disconnected: try the next one.
                 }
             }
         }
 
         if !progressed {
-            // Nada pendiente; evita busy-loop hasta agotar la ventana.
+            // Nothing pending: avoid a busy loop until the window runs out.
             std::thread::sleep(Duration::from_millis(50));
         }
     }
@@ -573,14 +570,14 @@ fn browse_mdns_blocking() -> Vec<PrinterInfo> {
     printers
 }
 
-/// Mapea un `ServiceInfo` resuelto a `PrinterInfo` de red. `None` si no tiene direcciones.
+/// Maps a resolved `ServiceInfo` to a network `PrinterInfo`. `None` when it has no address.
 fn service_to_printer(info: &mdns_sd::ServiceInfo, service_type: &str) -> Option<PrinterInfo> {
     let ip = info.get_addresses().iter().next()?.to_string();
     let port = match info.get_port() {
         0 => ESCPOS_NETWORK_PORT,
         p => p,
     };
-    // Nombre = primer segmento del fullname (espejo de `info.name.split('.')[0]`).
+    // The name is the first segment of the full name.
     let fullname = info.get_fullname();
     let name = match fullname.split('.').next() {
         Some(n) if !n.is_empty() => n.to_string(),
@@ -598,13 +595,12 @@ fn service_to_printer(info: &mdns_sd::ServiceInfo, service_type: &str) -> Option
     })
 }
 
-/// The /24 networks to sweep, as prefixes (`192.168.1`). Ported from `_get_local_subnet`, which
-/// asked only the default route (a UDP socket «connected» to 8.8.8.8, nothing sent): a shop network
-/// without internet has no default route, so nothing was swept (app#17). Now the device's own
-/// addresses are read too, and nobody outside is asked.
+/// The /24 networks to sweep, as prefixes (`192.168.1`): the one of the default route and those of
+/// the device's own addresses. The default route alone is not enough: a shop network without
+/// internet has none, and nothing would be swept (app#17). Nobody outside is asked.
 ///
-/// `pub(crate)` because the `registry` watchdog sweeps exactly the same networks: it had its own
-/// copy of this rule, and two copies of one rule is one that falls behind.
+/// `pub(crate)` because the `registry` watchdog sweeps exactly the same networks, and two copies of
+/// one rule drift apart.
 pub(crate) fn local_subnet_prefixes() -> Vec<String> {
     let interfaces: Vec<IpAddr> = match if_addrs::get_if_addrs() {
         Ok(list) => list.iter().map(if_addrs::Interface::ip).collect(),
@@ -636,9 +632,9 @@ fn default_route_ip() -> Option<IpAddr> {
 }
 
 /// Which /24 networks a device with these addresses sweeps, each once, in this order: the one the
-/// default route leaves by (whatever its address, as the sweep always did), then the one of every
-/// PRIVATE IPv4 address it holds (RFC 1918: Wi-Fi, cable). Loopback, link-local, public or carrier
-/// addresses and IPv6 are not a shop network: sweeping a public /24 knocks on strangers' doors.
+/// default route leaves by (whatever its address), then the one of every PRIVATE IPv4 address it
+/// holds (RFC 1918: Wi-Fi, cable). Loopback, link-local, public or carrier addresses and IPv6 are
+/// not a shop network: sweeping a public /24 knocks on strangers' doors.
 pub(crate) fn subnet_prefixes(route: Option<IpAddr>, interfaces: &[IpAddr]) -> Vec<String> {
     let private = interfaces
         .iter()
@@ -654,23 +650,23 @@ pub(crate) fn subnet_prefixes(route: Option<IpAddr>, interfaces: &[IpAddr]) -> V
     prefixes
 }
 
-/// Los tres primeros octetos de una IPv4 (`192.168.1.42` → `192.168.1`). Cualquier otra cosa
-/// —IPv6, una cadena corta— no tiene subred /24 que barrer y devuelve `None`.
+/// The first three octets of an IPv4 (`192.168.1.42` → `192.168.1`). Anything else — IPv6, a short
+/// string — has no /24 subnet to sweep and returns `None`.
 fn subnet_prefix_of(ip: &str) -> Option<String> {
     let mut parts = ip.split('.');
     let a = parts.next()?;
     let b = parts.next()?;
     let c = parts.next()?;
-    // Solo IPv4 tiene 4 octetos; si no, no es una subred /24 escaneable.
+    // A fourth octet must be there, or this is no IPv4.
     parts.next()?;
     Some(format!("{a}.{b}.{c}"))
 }
 
-/// Clasifica una impresora por el servicio mDNS que la anunció.
+/// Classifies a printer by the mDNS service that announced it.
 ///
-/// `_ipp._tcp` lo publican las multifunción de oficina y las AirPrint, y prácticamente ninguna
-/// térmica ESC/POS → es la única señal fiable de "A4". `_pdl-datastream._tcp` (impresión cruda al
-/// 9100) lo anuncian **las dos familias**, así que no clasifica nada.
+/// `_ipp._tcp` is published by office multifunction and AirPrint printers and by hardly any ESC/POS
+/// thermal printer, so it is the only reliable sign of "A4". `_pdl-datastream._tcp` (raw printing
+/// on 9100) is announced by **both families**, so it classifies nothing.
 pub fn category_for_service(service_type: &str) -> &'static str {
     if service_type.starts_with("_ipp.") {
         crate::protocol::PRINTER_CATEGORY_A4
@@ -684,14 +680,14 @@ mod tests {
     use super::*;
     use crate::protocol::{PRINTER_CATEGORY_A4, PRINTER_CATEGORY_UNKNOWN};
 
-    /// El barrido no puede lanzar las 254 sondas a la vez.
+    /// The sweep cannot launch all 254 probes at once.
     ///
-    /// Con `SCAN_CONNECT_TIMEOUT` = 300 ms, cada sonda que espera detrás de otras 253 se queda sin
-    /// ventana y **la impresora real se descarta en silencio** — el usuario ve «no hay impresoras»
-    /// y no hay nada en los logs que lo distinga de un local sin impresora. Medido contra hardware
-    /// de verdad: dos barridos simultáneos la perdían 3 de 3.
+    /// Each probe has only `SCAN_CONNECT_TIMEOUT` to connect; one waiting behind 253 others runs
+    /// out of time and **the real printer is dropped silently** — the user sees «no printers» and
+    /// nothing in the logs tells it apart from a venue without a printer. Measured against real
+    /// hardware: two simultaneous sweeps lost it 3 times out of 3.
     #[tokio::test]
-    async fn el_barrido_no_abre_mas_sondas_de_las_que_puede_atender() {
+    async fn the_sweep_never_opens_more_probes_than_it_can_serve() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
 
@@ -705,8 +701,8 @@ mod tests {
             async move {
                 let ahora = v.fetch_add(1, Ordering::SeqCst) + 1;
                 p.fetch_max(ahora, Ordering::SeqCst);
-                // Sin esperar, una sonda termina antes de que arranque la siguiente y el pico nunca
-                // sube: la congestión que se quiere medir necesita que se solapen.
+                // Without the wait a probe ends before the next one starts and the peak never
+                // rises: the congestion being measured needs them to overlap.
                 tokio::time::sleep(Duration::from_millis(20)).await;
                 v.fetch_sub(1, Ordering::SeqCst);
                 false
@@ -717,17 +713,17 @@ mod tests {
         let pico = pico.load(Ordering::SeqCst);
         assert!(
             pico <= SCAN_MAX_IN_FLIGHT,
-            "el barrido tuvo {pico} sondas en vuelo a la vez, por encima del límite de \
-             {SCAN_MAX_IN_FLIGHT}: con 300 ms por sonda, las que esperan detrás se descartan y la \
-             impresora se pierde SIN error"
+            "the sweep had {pico} probes in flight at once, above the limit of \
+             {SCAN_MAX_IN_FLIGHT}: the ones waiting behind run out of time and the printer is \
+             lost WITHOUT an error"
         );
     }
 
-    /// El límite acota, no amputa: las 254 direcciones se sondean igual, solo que por tandas. Sin
-    /// esto, «arreglar» la concurrencia bajando el número de sondas dejaría medio /24 sin barrer y
-    /// el test de arriba seguiría en verde.
+    /// The limit caps, it does not cut: all 254 addresses are probed anyway, only in batches.
+    /// Without this, «fixing» the concurrency by probing fewer addresses would leave half the /24
+    /// unswept and the test above would stay green.
     #[tokio::test]
-    async fn el_barrido_sigue_sondeando_todas_las_direcciones() {
+    async fn the_sweep_still_probes_every_address() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
 
@@ -745,19 +741,19 @@ mod tests {
         )
         .await;
 
-        assert_eq!(sondeadas.load(Ordering::SeqCst), 254, "se dejó direcciones sin sondear");
-        assert_eq!(encontradas, vec!["10.0.0.42".to_string()], "debe devolver solo los aciertos");
+        assert_eq!(sondeadas.load(Ordering::SeqCst), 254, "some addresses were never probed");
+        assert_eq!(encontradas, vec!["10.0.0.42".to_string()], "it must return only the hits");
     }
 
     #[test]
-    fn ipp_delata_una_impresora_de_oficina() {
+    fn ipp_gives_away_an_office_printer() {
         assert_eq!(category_for_service("_ipp._tcp.local."), PRINTER_CATEGORY_A4);
     }
 
     #[test]
-    fn la_impresion_cruda_no_clasifica_nada() {
-        // `_pdl-datastream._tcp` es "acepto bytes en el 9100": lo dicen tanto una térmica como una
-        // láser A4. Clasificarlo como térmica sería adivinar.
+    fn raw_printing_classifies_nothing() {
+        // `_pdl-datastream._tcp` means "I take bytes on 9100": a thermal printer and an A4 laser
+        // both say it. Calling it thermal would be guessing.
         assert_eq!(
             category_for_service("_pdl-datastream._tcp.local."),
             PRINTER_CATEGORY_UNKNOWN
@@ -765,17 +761,16 @@ mod tests {
     }
 
     #[test]
-    fn lo_encontrado_solo_por_escaneo_de_puerto_queda_sin_clasificar() {
-        // El escaneo del 9100 no aporta ninguna señal: responder ahí no dice qué idioma habla.
+    fn a_printer_found_only_by_the_port_sweep_stays_unclassified() {
+        // The 9100 sweep brings no signal: answering there says nothing about the language spoken.
         assert_eq!(crate::protocol::default_printer_category(), PRINTER_CATEGORY_UNKNOWN);
     }
 
-    // ── ADR-0204 / hub#388: `bluetooth:{mac}` joins the printer_id contract ───────────────────
+    // ── `bluetooth:{mac}` in the printer_id contract ──────────────────────────────────────────
     //
-    // This INVERTS the old test that asserted `bluetooth:` was an error. The retirement of SPP
-    // rested on a wrong premise ("Tauri-Android loses Bluetooth") — a Kotlin plugin runs
-    // in-process with the full Android APIs, so the €30 thermal printer at the table is back:
-    // only Android produces and accepts the variant, desktop and iOS stay network-only.
+    // A Kotlin plugin runs in-process with the full Android APIs, so the cheap bonded Bluetooth
+    // thermal printer at the table can be driven from the app. Only Android produces and accepts
+    // the variant.
 
     #[test]
     fn a_bluetooth_printer_id_is_a_valid_print_target_now() {
@@ -800,17 +795,15 @@ mod tests {
         }
     }
 
-    // ── hub#1083: `usb:{queue}` joins the printer_id contract on the desktop ────────────────
+    // ── `usb:{queue}` in the printer_id contract, on the desktop ──────────────────────────────
     //
-    // This INVERTS the half of the old test that fixed `usb:` as an error, the same movement
-    // Bluetooth made in ADR-0204. The "red-only" premise refused USB because *drivers per OS do
-    // not scale* — and that is still true: what changed is that we no longer need one. The OS
-    // print queue IS the generic transport, the vendor writes the driver, and we keep emitting the
-    // ESC/POS we already emit. The USB thermal printer is the cheapest in the catalogue and the
-    // one a single-till bar or salon actually buys.
+    // USB does not need a driver per OS from us: the OS print queue IS the generic transport, the
+    // vendor writes the driver, and we keep emitting the ESC/POS we already emit. The USB thermal
+    // printer is the cheapest in the catalogue and the one a single-till bar or salon actually
+    // buys.
 
     #[test]
-    fn hub1083_a_usb_printer_id_names_an_os_queue() {
+    fn a_usb_printer_id_names_an_os_queue() {
         match parse_print_target("usb:Star_TSP143") {
             Ok(PrintTarget::Usb(t)) => assert_eq!(t.queue, "Star_TSP143"),
             other => panic!("usb:{{queue}} must parse as a USB target, got {other:?}"),
@@ -818,7 +811,7 @@ mod tests {
     }
 
     #[test]
-    fn hub1083_a_queue_name_the_os_could_never_have_is_refused_at_the_edge() {
+    fn a_queue_name_the_os_could_never_have_is_refused_at_the_edge() {
         // CUPS forbids SPACE, TAB, `/` and `#` in a destination name, so an id carrying one names
         // a queue that cannot exist. Refusing it HERE keeps it from travelling on to come back as
         // an `lp` exit code nobody can map to the printer the cashier picked.
@@ -830,7 +823,7 @@ mod tests {
     }
 
     #[test]
-    fn hub1083_a_leading_dash_is_refused_so_a_queue_can_never_become_an_lp_flag() {
+    fn a_leading_dash_is_refused_so_a_queue_can_never_become_an_lp_flag() {
         // `lp -d <queue>`: a destination that starts with `-` is an argument `lp` would read as a
         // flag. There is no shell here (argv, never a string), so this is not an injection — it
         // is a queue that would silently print somewhere else, which is worse than an error.
@@ -866,10 +859,9 @@ mod tests {
     }
 
     /// **The /24 prefix is derived from the local IP, and that derivation is what gets tested.**
-    /// The socket half (`local_subnet_prefixes`) asks the OS for its addresses and its route out
-    /// — untestable in CI, and the reason this rule used to live twice in the crate
-    /// (here and in `registry`, copy-pasted). Splitting the pure half out gives the single
-    /// implementation the sweep and the watchdog now share something to pin.
+    /// The socket half (`local_subnet_prefixes`) asks the OS for its addresses and its route out,
+    /// which CI cannot test; the pure half is what the sweep and the watchdog share, and what this
+    /// pins.
     #[test]
     fn the_subnet_prefix_is_the_first_three_octets_of_an_ipv4() {
         assert_eq!(subnet_prefix_of("192.168.1.42"), Some("192.168.1".to_string()));
@@ -890,11 +882,10 @@ mod tests {
 
     // ── A shop network without internet is still swept (app#17) ─────────────────────────────
     //
-    // The network to sweep used to come ONLY from the default route (a UDP socket «connected» to
-    // 8.8.8.8). A shop Wi-Fi that is just the till and the printer, or a router with no uplink, has
-    // no default route: the lookup failed with ENETUNREACH, nothing was swept, and the ticket
-    // printer on 9100 never showed up although it printed when typed in by hand. The device's own
-    // addresses say which networks it is on, without asking anybody outside.
+    // A shop Wi-Fi that is just the till and the printer, or a router with no uplink, has no
+    // default route: looking it up fails with ENETUNREACH, so the default route alone would sweep
+    // nothing and the ticket printer on 9100 would never show up. The device's own addresses say
+    // which networks it is on, without asking anybody outside.
 
     fn ip(s: &str) -> std::net::IpAddr {
         s.parse().expect("test address")
@@ -961,20 +952,20 @@ mod tests {
 
     #[test]
     fn the_network_of_the_default_route_is_swept_whatever_its_address() {
-        // What the sweep always did: a LAN on a public range keeps being found when it has the
-        // route out.
+        // A LAN on a public range is still found when it has the route out.
         assert_eq!(
             subnet_prefixes(Some(ip("81.45.12.30")), &[ip("81.45.12.30")]),
             vec!["81.45.12".to_string()],
         );
     }
 
-    // ── "No permission" is not "no printers" (hub#338) ────────────────────────────────────────
+    // ── "No permission" is not "no printers" ──────────────────────────────────────────────────
     //
     // Without local network access the sweep is 254 silent timeouts and the mDNS window resolves
-    // nothing, so discovery came back with an empty list and no error whatsoever — the worst
-    // failure mode a till can have. The two states send the user in OPPOSITE directions ("connect
-    // a printer" vs "grant this app permission"), so they must stay apart in the return value.
+    // nothing, so discovery would come back with an empty list and no error whatsoever — the
+    // worst failure mode a till can have. The two states send the user in OPPOSITE directions
+    // ("connect a printer" vs "grant this app permission"), so they must stay apart in the return
+    // value.
 
     const ANDROID_LOCAL_NETWORK: &str = "android.permission.ACCESS_LOCAL_NETWORK";
 
@@ -1098,7 +1089,7 @@ mod tests {
         );
     }
 
-    // ── hub#1924: a printer the scan cannot see, added by typing its address ─────────────────────
+    // ── A printer the scan cannot see, added by typing its address ───────────────────────────────
     //
     // The sweep only covers the device's own /24 and mDNS stops at the router; a printer on another
     // subnet or an isolated guest Wi-Fi never shows up. Every POS lets the owner type the IP from

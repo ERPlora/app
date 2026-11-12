@@ -13,21 +13,20 @@ val tauriProperties = Properties().apply {
     }
 }
 
-// Firma de release. El fichero lo escribe el CI desde los secretos del repo
-// (ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD, alias `erplora`, ADR-0053) y NO está en
-// git. Si no existe —build local— la release sale sin firmar en vez de romper el build.
+// Release signing. CI writes the file from the repository secrets (ANDROID_KEYSTORE_BASE64 /
+// ANDROID_KEYSTORE_PASSWORD, alias `erplora`) and it is NOT in git. Without it — a local build —
+// the release comes out unsigned instead of breaking the build.
 val keystoreProperties = Properties().apply {
     val f = rootProject.file("keystore.properties")
     if (f.exists()) f.inputStream().use { load(it) }
 }
 
 /**
- * `versionCode` según ADR-0160: `major*1_000_000 + minor*1_000 + patch`.
+ * `versionCode` as `major*1_000_000 + minor*1_000 + patch`.
  *
- * NO se usa el que calcula Tauri por su cuenta: Play es una **puerta de un solo sentido** —un
- * `versionCode` publicado no se puede bajar ni reutilizar jamás. Si se sube uno con la fórmula
- * equivocada, ese número queda quemado para siempre y la numeración del ADR ya no se puede
- * aplicar sin saltos.
+ * The one Tauri computes on its own is NOT used: Play is a **one-way door** — a published
+ * `versionCode` can never be lowered or reused. Upload one with the wrong formula and that number
+ * is burnt forever, and this numbering can no longer be applied without gaps.
  */
 fun versionCodeFrom(name: String): Int {
     val p = Regex("""^(\d+)\.(\d+)\.(\d+)""").find(name)?.destructured
@@ -70,7 +69,7 @@ android {
             }
         }
         getByName("release") {
-            // Sin `keystore.properties` (build local) se queda sin firmar en vez de romper.
+            // Without `keystore.properties` (a local build) it stays unsigned instead of breaking.
             if (keystoreProperties.getProperty("storeFile") != null) {
                 signingConfig = signingConfigs.getByName("release")
             }

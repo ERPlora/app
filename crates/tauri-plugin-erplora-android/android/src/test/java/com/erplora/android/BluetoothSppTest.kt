@@ -6,12 +6,11 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * The decidable half of the SPP transport (ADR-0204, hub#388), pure and JVM-testable.
+ * The decidable half of the SPP transport, pure and JVM-testable.
  *
  * The socket half can only be proven on a real Android with a real bonded thermal printer (the
- * emulator has no Bluetooth) — that end-to-end print is the issue's own DoD. What CAN be pinned
- * without hardware is every decision around the socket: which bonded devices are offered as
- * printers, and under what id.
+ * emulator has no Bluetooth). What CAN be pinned without hardware is every decision around the
+ * socket: which bonded devices are offered as printers, and under what id.
  */
 class BluetoothSppTest {
 
@@ -19,8 +18,7 @@ class BluetoothSppTest {
     //
     // The bonded list holds headsets, cars and watches. Offering all of them as print
     // destinations buries the real printer under a page of nonsense; offering none hides it.
-    // Inherited from the archived ERPlora-Bridge-android, where the heuristics were validated
-    // against real hardware.
+    // The heuristics were validated against real hardware.
 
     @Test
     fun `an imaging-class device is a printer whatever its name`() {

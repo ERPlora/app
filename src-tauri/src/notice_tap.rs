@@ -1,7 +1,7 @@
-//! A tap on a system notice, kept for the page until it claims it (hub#2360).
+//! A tap on a system notice, kept for the page until it claims it.
 //!
-//! hub#2305 made a tap open the screen the notice is about, through the notification plugin's
-//! `actionPerformed`. Two places never got there:
+//! The page opens the screen a notice is about when the notification plugin reports its tap
+//! through `actionPerformed`. Two places never get that event to the page:
 //!
 //! * **The computer.** The plugin's desktop `show()` hands the notice to `notify-rust` on a spawned
 //!   task and drops the handle: no click ever comes back, so a click brings the app to the front
@@ -21,13 +21,13 @@
 //! says one is waiting. The page may be a new one whose memory of ids is empty, which is why the tap
 //! carries its screen and not only its id.
 //!
-//! * **Android, open (hub#1039).** The plugin never stores the notice on the intent of its tap
+//! * **Android, open.** The plugin never stores the notice on the intent of its tap
 //!   (`sourceJson` is never set, tauri-apps/plugins-workspace#3550): its `actionPerformed` says
-//!   neither the number nor the screen, and the page stayed where it was — with the app open, in the
-//!   background or started by the tap. So `erplora_notify` has Kotlin write each notice's screen
-//!   down under its number as it goes out, Kotlin keeps every such tap with that screen, and when
-//!   the page already listens it tells the shell, which tells the page with the same
-//!   [`NOTICE_TAPPED_EVENT`] as on the computer ([`tell_page`]).
+//!   neither the number nor the screen, so on its own the page would stay where it is — with the
+//!   app open, in the background or started by the tap. So `erplora_notify` has Kotlin write each
+//!   notice's screen down under its number as it goes out, Kotlin keeps every such tap with that
+//!   screen, and when the page already listens it tells the shell, which tells the page with the
+//!   same [`NOTICE_TAPPED_EVENT`] as on the computer ([`tell_page`]).
 
 use std::sync::Mutex;
 
@@ -54,7 +54,7 @@ impl NoticeTap {
 
     /// A tap Kotlin kept on Android: the notice's id, the JSON the plugin stored the notice as,
     /// whose `extra.path` is the screen, and the screen the app wrote down when it showed it
-    /// (`remembered`, hub#1039) — the plugin never stores that JSON today. A tap with neither still
+    /// (`remembered`) — the plugin never stores that JSON today. A tap with neither still
     /// opens the app, only without a screen of its own.
     pub fn from_launch(id: i32, notification: Option<&str>, remembered: Option<&str>) -> Self {
         let path = notification
@@ -107,7 +107,7 @@ pub fn on_click<R: Runtime>(app: &AppHandle<R>, tap: Option<NoticeTap>) {
 }
 
 /// Tells the page a tap waits to be claimed: a click on the computer, or a tap on Android while the
-/// page already listens (hub#1039), whose `actionPerformed` says nothing the page can open.
+/// page already listens, whose `actionPerformed` says nothing the page can open.
 #[cfg_attr(not(any(desktop, target_os = "android")), allow(dead_code))]
 pub fn tell_page<R: Runtime>(app: &AppHandle<R>) {
     if let Err(e) = app.emit_to("main", NOTICE_TAPPED_EVENT, ()) {
@@ -115,12 +115,12 @@ pub fn tell_page<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-/// The host of a notice's own link, `erplora://notice?id=<id>&path=<screen>` (hub#2409).
+/// The host of a notice's own link, `erplora://notice?id=<id>&path=<screen>`.
 const NOTICE_LINK_HOST: &str = "notice";
 
 /// The link a notice opens when it is clicked, wherever it is clicked from. Windows does not bring a
 /// click on a notice in the Action Center back to the thread that showed it, so the notice carries
-/// its tap in a link of the app's own scheme and a click launches the app with it (hub#2409). A
+/// its tap in a link of the app's own scheme and a click launches the app with it. A
 /// notice without an id still links to the app: the click brings the window up.
 #[cfg_attr(not(windows), allow(dead_code))] // only Windows writes it into the notice
 pub fn notice_link(tap: Option<&NoticeTap>) -> String {
@@ -259,7 +259,7 @@ mod desktop {
     }
 }
 
-/// Windows: the notice carries its own link (hub#2409). A click on the notice while it is on screen
+/// Windows: the notice carries its own link. A click on the notice while it is on screen
 /// could be heard by the thread that showed it, but once it moves to the Action Center (about seven
 /// seconds later) that thread has had its answer — «expired» — and a later click there has nobody to
 /// go to, even less with the app closed. So the notice is a protocol activation of
@@ -371,7 +371,7 @@ mod tests {
         }
     }
 
-    // ── hub#1039: the tap comes back without its notice ──────────────────────────────────────────
+    // ── The tap comes back without its notice ────────────────────────────────────────────────────
 
     #[test]
     fn a_tap_whose_notice_was_not_stored_opens_the_screen_the_app_wrote_down() {
@@ -489,7 +489,7 @@ mod tests {
     #[cfg(desktop)]
     #[test]
     fn the_platform_is_handed_the_tap_its_notice_links_to() {
-        // A platform that gets the click back through the notice's link (Windows, hub#2409) needs
+        // A platform that gets the click back through the notice's link (Windows) needs
         // the tap to write that link: here it answers «clicked» only when it was given the right one.
         let (kept, _) = show_and_wait(|_, _, _, tap| Ok(tap == Some(&NoticeTap { id: 6, path: Some("/m/appointments".into()) })));
         assert_eq!(kept, Some(NoticeTap { id: 6, path: Some("/m/appointments".into()) }));
@@ -528,7 +528,7 @@ mod tests {
         }
     }
 
-    // ── hub#2409: the click that comes back through the notice's own link ────────────────────────
+    // ── The click that comes back through the notice's own link ──────────────────────────────────
 
     fn launched_with(link: &str) -> Vec<String> {
         vec![r"C:\Program Files\ERPlora\ERPlora.exe".into(), link.into()]

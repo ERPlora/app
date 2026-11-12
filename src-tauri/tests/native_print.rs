@@ -1,17 +1,17 @@
-//! The boundary of `print_document` (hub#2006): an A4 document the page holds, shown in a window of
+//! The boundary of `print_document`: an A4 document the page holds, shown in a window of
 //! the shell's own and handed to the SYSTEM print dialog — the printer list and «Save as PDF» are
 //! the operating system's, not ours.
 //!
-//! Inside the webview `window.print()` prints nothing (hub#862), so an invoice only had the till
-//! roll. Tauri 2 already prints a webview natively (`Webview::print`: `NSPrintOperation` on macOS,
-//! the WebView2 dialog on Windows); what the shell adds is a window whose ONLY content is the
-//! document, served from memory under its own scheme. Three frontiers come with that:
+//! Inside the webview `window.print()` prints nothing, so without this an invoice could only go to
+//! the till roll. Tauri 2 already prints a webview natively (`Webview::print`: `NSPrintOperation`
+//! on macOS, the WebView2 dialog on Windows); what the shell adds is a window whose ONLY content is
+//! the document, served from memory under its own scheme. Three frontiers come with that:
 //!
 //! 1. **The document runs no code.** It is html from a remote page, shown in a window of the app:
 //!    its response carries a CSP with `default-src 'none'` and no script source at all.
 //! 2. **The print window has no IPC.** No capability names it, so nothing inside it can `invoke`.
 //! 3. **Desktop and Android have the dialog.** Android's comes from its own print service
-//!    (`PrintManager`, hub#2008); any other platform answers `native_print_unsupported` and the
+//!    (`PrintManager`); any other platform answers `native_print_unsupported` and the
 //!    print door keeps its usual route.
 
 use erplora_tauri_lib::{
@@ -29,7 +29,7 @@ fn the_desktop_has_a_system_print_dialog() {
 #[test]
 fn android_has_the_system_print_service() {
     // wry has no `print` on Android, so the shell hands the document to Android's own
-    // `PrintManager` through its plugin: printer list and «Save as PDF» (hub#2008).
+    // `PrintManager` through its plugin: printer list and «Save as PDF».
     assert!(native_print_supported("android"));
 }
 

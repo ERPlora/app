@@ -1,26 +1,22 @@
 #!/usr/bin/env bash
 # Contract of .github/workflows/test-shell.yml — run with:  bash scripts/tests/test-shell-workflow.test.sh
 #
-# What it pins (hub#2705, ERPlora/pm#655 J3): the installable app is compiled and tested on the
-# three desktop systems it ships to, on the PULL REQUEST that touches it. Until then only Linux
-# ran here; Windows and macOS were compiled by `tauri-release.yml` alone, on a `vX.Y.Z` tag — so a
-# change that broke the Windows or Mac build was found while cutting the release, with the
-# installer. The CI was trimmed to one Linux runner when there was one machine for everything; on
-# GitHub's runners (public repo, 08/10) that reason is gone.
+# What it pins: the installable app is compiled and tested on the three desktop systems it ships
+# to, on the PULL REQUEST that touches it, so a change that breaks the Windows or Mac build is not
+# found while cutting the release, with the installer.
 #
 # What must NOT come back with it:
-#   · draft PRs spending minutes (measured 29/08: half the runner minutes were runs cancelled by
-#     the reviewer's re-push on drafts) — every job keeps the draft filter;
+#   · draft PRs spending minutes on runs a re-push during the review cancels — every job keeps the
+#     draft filter;
 #   · the Kotlin/Android tests three times — they are JVM tests of the Android plugin, the OS of
 #     the runner adds nothing, so they stay on Linux only;
 #   · one red system hiding the other two — `fail-fast: false`.
 #
-# Also hub#2689: a push (to `main`) finishes; only a PR's newer head cancels its older run.
+# Also: a push (to `main`) finishes; only a PR's newer head cancels its older run.
 #
-# And (ERPlora/app, 2026-10-14): the workflow is also CALLED by `tauri-release.yml` (`workflow_call`),
-# whose builds need it — nothing is published on red. Its `scripts` job runs actionlint over every
-# workflow and EVERY `scripts/*.test.sh` and `scripts/tests/*.test.sh` (this contract included):
-# in ERPlora/hub five of them ran only in `actionlint.yml`, which did not move with the app.
+# And the workflow is also CALLED by `tauri-release.yml` (`workflow_call`), whose builds need it —
+# nothing is published on red. Its `scripts` job runs actionlint over every workflow and EVERY
+# `scripts/*.test.sh` and `scripts/tests/*.test.sh` (this contract included).
 #
 # Parsed as YAML (PyYAML, as `canonical-mirrors-workflow.test.sh`), so a case names what is
 # missing. `--workflow <path>` lets the guard be proven on a mutated copy.
@@ -94,10 +90,9 @@ check(
 for event, block in (("pull_request", pr), ("push", push)):
     paths = block.get("paths") or []
     # `.github/workflows/*.yml`: `release_runner_assumptions.rs` reads EVERY workflow, so a change to
-    # any of them can turn this suite red — on 08/10 a guard added to another workflow did, and
-    # develop stayed red in the shell with no run saying so.
-    # The app is the whole repo (moved out of ERPlora/hub's `apps/tauri/**`): its crate, the
-    # bundled page, the workspace manifests and both library crates it compiles against.
+    # any of them can turn this suite red, and only a run of this workflow would say so.
+    # The app is the whole repo: its crate, the bundled page, the workspace manifests and both
+    # library crates it compiles against.
     for wanted in (
         "src-tauri/**",
         "shell-dist/**",
@@ -201,7 +196,7 @@ for s in cargo_steps:
         "-p tauri-plugin-erplora-android" in run_of(s),
         run_of(s),
     )
-    # In ERPlora/hub this crate was tested by `test-hub.yml`; in this repo nothing else runs it.
+    # Nothing else runs this crate's tests.
     check(
         "the cargo test step covers the hardware crate (erplora-peripherals)",
         "-p erplora-peripherals" in run_of(s),
@@ -212,8 +207,8 @@ for name in (
     "System deps (webkit2gtk + GTK)",
     "Setup JDK 17",
     "Setup Android SDK",
-    "Android platform 36 (sin NDK)",
-    "Kotlin unit tests (plugin de permisos + SPP)",
+    "Android platform 36 (no NDK)",
+    "Kotlin unit tests (permissions plugin + SPP)",
 ):
     step = by_name.get(name)
     check(f"the step `{name}` exists", step is not None)
@@ -226,7 +221,7 @@ for name in (
 
 # Windows checks out with `core.autocrlf=true`: the tests that read this repo's own sources
 # (`include_str!("lib.rs")`, workflows, gradle files) would see CRLF where Linux and macOS see the
-# committed LF, and split on "\n" would find nothing. LF is pinned BEFORE the checkout (hub#2705).
+# committed LF, and split on "\n" would find nothing. LF is pinned BEFORE the checkout.
 names = [str(s.get("name", "")) for s in steps if isinstance(s, dict)]
 checkout_at = next((i for i, s in enumerate(steps) if "actions/checkout" in str(s.get("uses", ""))), None)
 lf_at = next((i for i, s in enumerate(steps) if "core.autocrlf false" in run_of(s)), None)
@@ -263,9 +258,8 @@ for s in steps:
         )
 
 # ── 4 · actionlint and EVERY script test run, once, in the `scripts` job ─────────────────────
-# This contract, the release gate rules and the five tests that `actionlint.yml` ran in ERPlora/hub
-# (pack-msix, apt-lock-retry, setup-android-packages and the two Play reviewer preflights) are bash
-# rules that do not depend on the OS: one Linux job, by glob — a test nobody runs is a shopping
+# This contract, the release gate rules, the MSIX packer, the apt lock, the Android SDK setup and
+# the two Play reviewer preflights are bash rules that do not depend on the OS: one Linux job, by glob — a test nobody runs is a shopping
 # list, and a list of names forgets the next file.
 scripts_job = jobs.get("scripts") or {}
 check("the workflow has the `scripts` job", bool(scripts_job), f"jobs are {list(jobs)}")
@@ -318,7 +312,7 @@ for name in ("release-gate.test.sh", SELF.rsplit("/", 1)[1]):
     dupes = [s for s in steps if name in run_of(s)]
     check(f"`{name}` is not also run by the `test` job", not dupes, f"found {len(dupes)}")
 
-# ── 5 · A push finishes; only a PR's newer head cancels (hub#2689) ────────────────────
+# ── 5 · A push finishes; only a PR's newer head cancels ───────────────────────────────
 concurrency = doc.get("concurrency") or {}
 # Called by the release, `github.*` is the CALLER's context: with a group of `github.ref` alone the
 # release's call and the push's own run share it, and a third push cancels the release's PENDING
@@ -329,7 +323,7 @@ check(
     f"group is {concurrency.get('group')!r}",
 )
 check(
-    "a push finishes; only a PR's newer head cancels its older run (hub#2689)",
+    "a push finishes; only a PR's newer head cancels its older run",
     str(concurrency.get("cancel-in-progress")).strip() == "${{ github.event_name == 'pull_request' }}",
     f"cancel-in-progress is {concurrency.get('cancel-in-progress')!r}",
 )

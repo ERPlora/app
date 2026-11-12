@@ -1,27 +1,24 @@
-// Raíz Gradle mínima para correr los tests Kotlin del plugin SIN construir la app (hub#933).
+// Minimal Gradle root to run the plugin's Kotlin tests WITHOUT building the app.
 //
-// El proyecto de verdad vive en `apps/tauri/src-tauri/gen/android`, y no sirve para esto: su
-// `settings.gradle` incluye `:app`, que aplica `app/tauri.build.gradle.kts` — un fichero que
-// escribe `cargo tauri android build`. Por eso los 34 tests Kotlin del plugin solo se ejecutaban
-// en la release: para llegar a un paso de 12 s había que pagar el build de Android entero (NDK,
-// cuatro targets de Rust, ~60 min). Resultado: `48f2b0e1` dejó una expectativa caducada y
-// `develop` estuvo un día en rojo sin que ningún check se enterara.
+// The real project lives in `src-tauri/gen/android` and does not serve for this: its
+// `settings.gradle` includes `:app`, which applies `app/tauri.build.gradle.kts` — a file that
+// `cargo tauri android build` writes. Through it, reaching a 12 s test step means paying for the
+// whole Android build (NDK, four Rust targets, ~60 min).
 //
-// Aquí solo entran los DOS proyectos que hacen falta para compilar y probar la librería:
-// el plugin y el SDK `tauri-android` contra el que compila. Nada generado, nada de NDK, nada de
-// Rust: 22 s en frío, 1 s en caliente.
+// Only the TWO projects needed to compile and test the library come in here: the plugin and the
+// `tauri-android` SDK it compiles against. Nothing generated, no NDK, no Rust: 22 s cold, 1 s warm.
 //
-// Se lanza con `scripts/kotlin-plugin-tests.sh`, que resuelve la ruta del SDK a partir del
-// `tauri` que fija `Cargo.lock` — así esto se prueba SIEMPRE contra la misma versión que se
-// publica, sin clavar aquí un número que se quedaría atrás en silencio.
+// It is launched by `scripts/kotlin-plugin-tests.sh`, which resolves the SDK path from the `tauri`
+// that `Cargo.lock` pins — so this is ALWAYS tested against the same version that ships, without
+// pinning a number here that would silently fall behind.
 
 rootProject.name = "erplora-android-plugin-tests"
 
 val tauriAndroidDir: String =
     settings.startParameter.projectProperties["tauriAndroidDir"]
         ?: error(
-            "falta -PtauriAndroidDir=<ruta al mobile/android del crate tauri>. " +
-                "Usa scripts/kotlin-plugin-tests.sh, que la resuelve desde Cargo.lock.",
+            "missing -PtauriAndroidDir=<path to the tauri crate's mobile/android>. " +
+                "Use scripts/kotlin-plugin-tests.sh, which resolves it from Cargo.lock.",
         )
 
 include(":tauri-android")

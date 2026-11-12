@@ -1,47 +1,45 @@
 #!/usr/bin/env python3
 """
-ERPlora · pipeline de generación del set de iconos de APP de Tauri v2.
+Generates the Tauri v2 APP icon set of ERPlora.
 
-A partir de UN único asset de marca (PNG de alta resolución, recomendado 1024×1024
-con la marca centrada y márgenes), compone un **icono de aplicación** real —no el
-logo plano de navbar— y emite el set completo que Tauri v2 espera en
-`src-tauri/icons/`:
+From ONE brand asset (a high-resolution PNG, 1024×1024 recommended, with the mark centred and
+margins) it composes a real **application icon** — not the flat navbar logo — and writes the full
+set Tauri v2 expects in `src-tauri/icons/`:
 
-  · icon.png                 (1024, base, esquinas planas)
+  · icon.png                 (1024, base, square corners)
   · icon.ico                 (Windows: 16/24/32/48/64/128/256)
-  · icon.icns                (macOS: set Retina con esquinas redondeadas estilo Big Sur)
+  · icon.icns                (macOS: Retina set with Big Sur rounded corners)
   · 32x32.png · 128x128.png · 128x128@2x.png   (Linux/dev)
   · Square{30,44,71,89,107,142,150,284,310}x...Logo.png   (Windows Store / MSIX)
   · StoreLogo.png            (50×50)
 
-Composición de icono de APP (no logo plano):
-  - Fondo sólido de marca por defecto (relleno full-bleed): los iconos de app no
-    deben ser transparentes en la mayoría de plataformas (Windows tile, iOS, macOS
-    Big Sur recorta su propia silueta sobre fondo opaco).
-  - Safe-area / padding: la marca ocupa ~`--mark-scale` del lienzo, centrada, para
-    que ni el recorte de máscara de Android/iOS ni el borde redondeado de macOS la
-    coman.
-  - Forma por plataforma:
-      · `.icns` (macOS) → esquinas redondeadas estilo Big Sur (radio ~22.37% +
-        margen ~10%, "squircle" aproximado con rounded_rectangle).
-      · `icon.png` / Square*Logo (Windows) → cuadrado a sangre (Windows aplica su
-        propia máscara de tile).
-      · Linux → cuadrado.
+Composition of an APP icon (not a flat logo):
+  - A solid brand background by default (full-bleed fill): app icons must not be transparent on
+    most platforms (Windows tile, iOS, macOS Big Sur cuts its own silhouette on an opaque
+    background).
+  - Safe area / padding: the mark takes ~`--mark-scale` of the canvas, centred, so neither the
+    Android/iOS mask nor the macOS rounded edge eats into it.
+  - Shape per platform:
+      · `.icns` (macOS) → Big Sur rounded corners (radius ~22.37% + ~10% margin, a squircle
+        approximated with rounded_rectangle).
+      · `icon.png` / Square*Logo (Windows) → full-bleed square (Windows applies its own tile
+        mask).
+      · Linux → square.
 
-Sin rasterizador SVG obligatorio: trabaja sobre PNG. Si el asset es `.svg` y
-`cairosvg` está instalado, lo rasteriza; si no, pide un PNG (mensaje claro).
+No SVG rasterizer is required: it works on PNG. If the asset is `.svg` and `cairosvg` is
+installed, it rasterizes it; otherwise it asks for a PNG.
 
-Uso:
+Usage:
     python3 scripts/gen-tauri-icon.py [SOURCE] [--out DIR] [--store-assets-only]
 
-  SOURCE por defecto: branding/app-icon-source.png
-  (ver branding/README.md — ahí va el arte de marca DEFINITIVO).
-  --out DIR             destino alternativo (default: src-tauri/icons).
-  --store-assets-only   emite SOLO los 3 PNG que referencia un Package.appxmanifest
-                        (Square44x44Logo, Square150x150Logo, StoreLogo) — para los
-                        Assets MSIX del bridge (hub#120), sin ico/icns/set completo.
+  SOURCE defaults to branding/app-icon-source.png
+  (see branding/README.md — the FINAL brand art goes there).
+  --out DIR             another destination (default: src-tauri/icons).
+  --store-assets-only   writes ONLY the 3 PNG a Package.appxmanifest references
+                        (Square44x44Logo, Square150x150Logo, StoreLogo), for the MSIX
+                        Assets, without the ico/icns/full set.
 
-Dependencia única: Pillow (`pip install Pillow`). Reproducible.
+Only dependency: Pillow (`pip install Pillow`). Reproducible.
 """
 
 from __future__ import annotations
@@ -53,7 +51,7 @@ try:
     from PIL import Image, ImageDraw, ImageFilter
 except ImportError:  # pragma: no cover
     sys.exit(
-        "Falta Pillow. Instálalo:\n"
+        "Pillow is missing. Install it:\n"
         "  python3 -m venv .venv && . .venv/bin/activate && pip install Pillow\n"
         "  python3 scripts/gen-tauri-icon.py"
     )
@@ -62,29 +60,28 @@ ROOT = Path(__file__).resolve().parents[1]
 ICONS_DIR = ROOT / "src-tauri/icons"
 DEFAULT_SOURCE = ROOT / "branding/app-icon-source.png"
 
-# ── Parámetros de composición del icono de APP ──────────────────────────────
-# Fondo de marca (azul hub V5 = #0091CE). El arte definitivo del humano puede
-# traer su propio fondo: si el PNG fuente ya es opaco a sangre, se respeta tal cual
-# (BACKGROUND solo se usa para rellenar bajo la marca cuando el fuente es
-# transparente).
-BACKGROUND = (0, 145, 206)  # #0091CE
-# Fracción del lienzo que ocupa la marca (safe-area). 0.72 deja ~14% de margen por
-# lado: aguanta el recorte de máscara de Android/iOS y el redondeo de macOS.
+# ── Composition of the APP icon ─────────────────────────────────────────────
+# Brand background (hub blue #0091CE). The final art may bring its own background: a source PNG
+# that is already opaque to the edge is kept as it is, and BACKGROUND only fills under the mark
+# when the source is transparent.
+BACKGROUND = (0, 145, 206)
+# Share of the canvas the mark takes (safe area). 0.72 leaves ~14% margin per side: it survives
+# the Android/iOS mask and the macOS rounding.
 MARK_SCALE = 0.72
-# Radio de esquina (fracción del lado) para los iconos con forma redondeada (macOS).
-MACOS_CORNER_RADIUS = 0.2237  # ~ squircle de Big Sur
-MACOS_CONTENT_INSET = 0.10  # margen extra que macOS deja alrededor del tile
+# Corner radius (share of the side) of the rounded icons (macOS).
+MACOS_CORNER_RADIUS = 0.2237  # ~ the Big Sur squircle
+MACOS_CONTENT_INSET = 0.10  # the extra margin macOS leaves around the tile
 
-SS = 4  # supersampling para bordes/máscaras limpios
+SS = 4  # supersampling for clean edges and masks
 
-# ── Tamaños del set Tauri v2 ────────────────────────────────────────────────
+# ── Sizes of the Tauri v2 set ───────────────────────────────────────────────
 PNG_SIZES = {
     "32x32.png": 32,
     "128x128.png": 128,
     "128x128@2x.png": 256,
     "icon.png": 1024,
 }
-# Windows Store / MSIX (a sangre, sin redondear: Windows pone su máscara)
+# Windows Store / MSIX (full bleed, not rounded: Windows applies its mask)
 SQUARE_LOGOS = {
     "Square30x30Logo.png": 30,
     "Square44x44Logo.png": 44,
@@ -101,22 +98,22 @@ ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
 ICNS_SIZES = [16, 32, 64, 128, 256, 512, 1024]
 
 
-# ── Carga del asset fuente ──────────────────────────────────────────────────
+# ── Loading the source asset ────────────────────────────────────────────────
 def load_source(path: Path) -> Image.Image:
     if not path.exists():
         sys.exit(
-            f"No existe el asset fuente: {path.relative_to(ROOT)}\n"
-            "Pon el arte de marca (PNG 1024×1024, marca centrada con margen) ahí.\n"
-            "Ver branding/README.md."
+            f"The source asset does not exist: {path.relative_to(ROOT)}\n"
+            "Put the brand art there (PNG 1024×1024, the mark centred with a margin).\n"
+            "See branding/README.md."
         )
     if path.suffix.lower() == ".svg":
         try:
             import cairosvg  # type: ignore
         except ImportError:
             sys.exit(
-                "El asset es SVG y no hay rasterizador (cairosvg) instalado.\n"
-                "Opción A (recomendada): exporta el SVG a PNG 1024×1024 y úsalo como fuente.\n"
-                "Opción B: pip install cairosvg (arrastra cairo nativo)."
+                "The asset is an SVG and no rasterizer (cairosvg) is installed.\n"
+                "Option A (recommended): export the SVG to a 1024×1024 PNG and use it as the source.\n"
+                "Option B: pip install cairosvg (it pulls in the native cairo)."
             )
         import io
 
@@ -128,7 +125,7 @@ def load_source(path: Path) -> Image.Image:
 
 
 def _has_alpha_content(img: Image.Image) -> bool:
-    """True si el fuente tiene transparencia real (necesita fondo de marca)."""
+    """True when the source has real transparency (it needs the brand background)."""
     if img.mode != "RGBA":
         return False
     alpha = img.getchannel("A")
@@ -136,7 +133,7 @@ def _has_alpha_content(img: Image.Image) -> bool:
     return lo < 250
 
 
-# ── Composición ─────────────────────────────────────────────────────────────
+# ── Composition ─────────────────────────────────────────────────────────────
 def compose(
     src: Image.Image,
     size: int,
@@ -145,27 +142,25 @@ def compose(
     mark_scale: float = MARK_SCALE,
     inset: float = 0.0,
 ) -> Image.Image:
-    """Compón el icono de app `size×size` desde la marca fuente.
+    """Composes the `size×size` app icon from the source mark.
 
-    rounded → esquinas redondeadas estilo macOS (+ inset de contenido).
-    Fondo de marca sólido salvo que el fuente ya sea opaco a sangre.
+    rounded → macOS-style rounded corners (plus the content inset).
+    A solid brand background unless the source is already opaque to the edge.
     """
     S = size * SS
     needs_bg = _has_alpha_content(src)
 
-    # lienzo de fondo
     canvas = Image.new(
         "RGBA", (S, S), BACKGROUND + (255,) if needs_bg else (0, 0, 0, 0)
     )
 
-    # tile útil tras inset (margen que la plataforma deja alrededor)
+    # The usable tile after the inset (the margin the platform leaves around it).
     tile = int(round(S * (1.0 - 2 * inset)))
     tile_off = (S - tile) // 2
 
-    # si el fuente es opaco a sangre, ocupa todo el tile; si es marca con alpha,
-    # se centra al mark_scale dentro del tile (safe-area).
+    # A source opaque to the edge fills the whole tile; a mark with alpha is centred at
+    # mark_scale inside the tile (safe area).
     if needs_bg:
-        # rellenar el tile con el fondo de marca
         bg_tile = Image.new("RGBA", (tile, tile), BACKGROUND + (255,))
         canvas.alpha_composite(bg_tile, (tile_off, tile_off))
         mark_span = int(round(tile * mark_scale))
@@ -173,7 +168,6 @@ def compose(
         m_off = tile_off + (tile - mark_span) // 2
         canvas.alpha_composite(mark, (m_off, m_off))
     else:
-        # fuente ya opaco a sangre: escálalo al tile completo
         full = src.resize((tile, tile), Image.LANCZOS)
         canvas.alpha_composite(full, (tile_off, tile_off))
 
@@ -186,7 +180,6 @@ def compose(
             radius=radius,
             fill=255,
         )
-        # antialias del borde
         mask = mask.filter(ImageFilter.GaussianBlur(SS * 0.4))
         out = Image.new("RGBA", (S, S), (0, 0, 0, 0))
         out.paste(canvas, (0, 0), mask)
@@ -216,37 +209,36 @@ def main() -> None:
     ICONS_DIR = Path(args.out).resolve()
     source = Path(args.source).resolve()
     src = load_source(source)
-    print(f"→ fuente: {source.relative_to(ROOT) if ROOT in source.parents else source}")
+    print(f"→ source: {source.relative_to(ROOT) if ROOT in source.parents else source}")
     print(
-        f"→ destino: {ICONS_DIR.relative_to(ROOT) if ROOT in ICONS_DIR.parents else ICONS_DIR}"
+        f"→ destination: {ICONS_DIR.relative_to(ROOT) if ROOT in ICONS_DIR.parents else ICONS_DIR}"
     )
 
     if args.store_assets_only:
         for name in ("Square44x44Logo.png", "Square150x150Logo.png", "StoreLogo.png"):
             save(compose(src, SQUARE_LOGOS[name]), name)
-        print("OK — Assets MSIX (manifest) generados.")
+        print("OK — MSIX Assets (manifest) written.")
         return
 
-    # PNGs cuadrados a sangre (Linux/dev + base) — Windows aplica su máscara
+    # Full-bleed square PNGs (Linux/dev + base); Windows applies its mask.
     for name, size in PNG_SIZES.items():
         save(compose(src, size), name)
 
-    # Windows Store / MSIX (a sangre)
     for name, size in SQUARE_LOGOS.items():
         save(compose(src, size), name)
 
-    # ICO (Windows) — multi-size en un fichero
+    # ICO (Windows): every size in one file.
     ico_base = compose(src, 256)
     ico_path = ICONS_DIR / "icon.ico"
     ico_base.save(ico_path, sizes=[(s, s) for s in ICO_SIZES])
     print(f"  {ico_path.relative_to(ROOT)}  ({'/'.join(map(str, ICO_SIZES))})")
 
-    # ICNS (macOS) — esquinas redondeadas estilo Big Sur, multi-size
+    # ICNS (macOS): Big Sur rounded corners, every size.
     icns_frames = [
         compose(src, s, rounded=True, inset=MACOS_CONTENT_INSET) for s in ICNS_SIZES
     ]
     icns_path = ICONS_DIR / "icon.icns"
-    # Pillow guarda ICNS desde la imagen mayor + append_images con los tamaños.
+    # Pillow writes ICNS from the largest image plus append_images with the other sizes.
     largest = icns_frames[-1]
     largest.save(
         icns_path,
@@ -255,7 +247,7 @@ def main() -> None:
     )
     print(f"  {icns_path.relative_to(ROOT)}  ({'/'.join(map(str, ICNS_SIZES))})")
 
-    print("OK — set de iconos de app Tauri generado.")
+    print("OK — Tauri app icon set written.")
 
 
 if __name__ == "__main__":

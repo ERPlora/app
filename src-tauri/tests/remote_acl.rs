@@ -1,4 +1,4 @@
-//! Guard for the shell's REMOTE-origin ACL — the security boundary of the app (ADR-0159/0196).
+//! Guard for the shell's REMOTE-origin ACL — the security boundary of the app.
 //!
 //! The shell is a thin client: the webview navigates to origins that are NOT the bundled app, and
 //! Tauri only lets such an origin call `invoke` when it matches a pattern declared in some
@@ -8,15 +8,15 @@
 //!   opens) and nobody notices until a real hub is in front of you, because dev talks to loopback;
 //! - too wide → whatever runs on the allowed origin can drive the till's hardware.
 //!
-//! So the boundary is split in TWO capabilities on purpose (hub#334):
+//! So the boundary is split in TWO capabilities on purpose:
 //!
 //! - `default.json` — the hub PWA (`https://*.erplora.com`) plus the dev loopback. This is the
 //!   ONLY place that grants the `erplora_*` hardware commands.
-//! - `onboarding.json` — the SaaS apex (`https://erplora.com`), where the app BOOTS (ADR-0196).
+//! - `onboarding.json` — the SaaS apex (`https://erplora.com`), where the app BOOTS.
 //!   It gets the device identity and nothing else: the onboarding page never prints.
 //!
 //! The ACL is the FIRST gate, by pattern. A pattern cannot name the one business this till belongs
-//! to, so `src/hub_link.rs` (hub#2504) is the second: of the pages these patterns let through, only
+//! to, so `src/hub_link.rs` is the second: of the pages these patterns let through, only
 //! the one whose origin is the LINKED hub runs the commands that are not open to every page.
 //!
 //! Every assertion below reads the REAL `capabilities/*.json` — the whole directory, not a list
@@ -30,7 +30,7 @@ use tauri::Url;
 use tauri_utils::acl::RemoteUrlPattern;
 
 /// Everything the onboarding origin (the SaaS apex) may ever ask the app for: the device identity
-/// the hub login carries as `X-Device-Id` (single session, ADR-0154) and the escape hatch that
+/// the hub login carries as `X-Device-Id` (single session) and the escape hatch that
 /// drops a captured hub. NOT the hardware.
 const ONBOARDING_ALLOWLIST: [&str; 2] = ["allow-device-context", "allow-forget-hub"];
 
@@ -166,7 +166,7 @@ fn scheme_and_host(pattern: &str) -> (&str, &str) {
 
 #[test]
 fn authorizes_the_saas_onboarding_origin() {
-    // ADR-0196: the app BOOTS at the SaaS (`{saas}/shell/`) and only reaches a hub from there. If
+    // The app BOOTS at the SaaS (`{saas}/shell/`) and only reaches a hub from there. If
     // the apex is not declared the boot page cannot even ask for the device identity — and the
     // apex is NOT covered by `*.erplora.com`, which needs at least one label before the dot.
     assert!(
@@ -221,7 +221,7 @@ fn the_hub_origin_can_drive_the_hardware() {
         .map(|(_, permission)| permission)
         .collect();
 
-    // `add-network-printer` (hub#1924): without it a printer the scan cannot see has no way in.
+    // `add-network-printer`: without it a printer the scan cannot see has no way in.
     for needed in [
         "allow-erplora-print",
         "allow-erplora-open-drawer",
@@ -276,9 +276,9 @@ fn rejects_plain_http_outside_loopback() {
 
 #[test]
 fn the_saas_origin_cannot_drive_the_hardware() {
-    // THE boundary hub#334 draws. `erplora.com` also serves marketing, billing and a third-party
-    // checkout; the onboarding is by far the widest attack surface of the origins the app loads.
-    // Whatever gets injected there must not be able to open the cash drawer.
+    // THE boundary the two capabilities draw. `erplora.com` also serves marketing, billing and a
+    // third-party checkout; the onboarding is by far the widest attack surface of the origins the
+    // app loads. Whatever gets injected there must not be able to open the cash drawer.
     for (file, permission) in permissions_granted_to("https://erplora.com/shell/") {
         assert!(
             ONBOARDING_ALLOWLIST.contains(&permission.as_str()),
@@ -288,7 +288,7 @@ fn the_saas_origin_cannot_drive_the_hardware() {
     }
 }
 
-// ── The capture contract and the ACL are ONE boundary (hub#335) ─────────────────────────────────
+// ── The capture contract and the ACL are ONE boundary ───────────────────────────────────────────
 
 /// Does some capability hand this origin the hardware — i.e. can a till actually run there?
 fn can_drive_the_hardware(raw: &str) -> bool {
@@ -299,10 +299,10 @@ fn can_drive_the_hardware(raw: &str) -> bool {
 
 #[test]
 fn the_shell_only_remembers_origins_that_can_drive_the_till() {
-    // `?shell=1` is what makes the shell persist an origin as `hub.url` and boot there for good
-    // (ADR-0159), and `remote.urls` is what decides whether that origin may touch the hardware
-    // (ADR-0221). They are two halves of the SAME decision, written in two files, and every way
-    // they can disagree is a bug with no error message:
+    // `?shell=1` is what makes the shell persist an origin as `hub.url` and boot there for good,
+    // and `remote.urls` is what decides whether that origin may touch the hardware. They are two
+    // halves of the SAME decision, written in two files, and every way they can disagree is a bug
+    // with no error message:
     //
     // - remembered but not authorized → the till boots into a page whose every `invoke` is refused:
     //   it cannot even ask for `device_context`, so it looks fine and cannot print;
@@ -365,10 +365,10 @@ fn no_capability_declares_an_origin_outside_our_domain() {
 #[test]
 fn the_hub_origin_can_leave_for_the_browser() {
     // The other half of the guard below, and the one that fails SILENTLY: without this grant the
-    // till is back to hub#475 — `openExternal` asks for `open_external_url`, Tauri's ACL refuses it
-    // because no capability hands it out, and the buttons that CHARGE go dead again with nothing in
-    // the log. Dev hides it (a local origin with no app manifest skips the gate), so it would ship
-    // green and only a real installed app would show it.
+    // till cannot leave for the browser — `openExternal` asks for `open_external_url`, Tauri's ACL
+    // refuses it because no capability hands it out, and the buttons that CHARGE go dead with
+    // nothing in the log. Dev hides it (a local origin with no app manifest skips the gate), so it
+    // would ship green and only a real installed app would show it.
     let granted: Vec<String> = permissions_granted_to("https://panaderia.a.erplora.com/apps")
         .into_iter()
         .map(|(_, permission)| permission)
@@ -382,9 +382,9 @@ fn the_hub_origin_can_leave_for_the_browser() {
 
 #[test]
 fn the_hub_origin_can_save_a_file_where_the_user_will_find_it() {
-    // Same silent failure, one door along (hub#480). Without this grant `saveDownload` asks for
-    // `save_download`, the ACL refuses it because nothing hands it out, and «descargar» goes back to
-    // doing nothing at all — on the installed app only, which is the one surface no gate opens.
+    // Same silent failure, one door along. Without this grant `saveDownload` asks for
+    // `save_download`, the ACL refuses it because nothing hands it out, and «descargar» does
+    // nothing at all — on the installed app only, which is the one surface no gate opens.
     let granted: Vec<String> = permissions_granted_to("https://panaderia.a.erplora.com/files")
         .into_iter()
         .map(|(_, permission)| permission)
@@ -398,7 +398,7 @@ fn the_hub_origin_can_save_a_file_where_the_user_will_find_it() {
 
 #[test]
 fn the_hub_origin_can_open_the_system_print_dialog() {
-    // hub#2006: an A4 invoice reaches a laser printer or «Save as PDF» through `print_document`.
+    // An A4 invoice reaches a laser printer or «Save as PDF» through `print_document`.
     // Without this grant the ACL refuses the command and the door falls back to the till roll —
     // on the installed app only, where no dev run would show it.
     let granted: Vec<String> = permissions_granted_to("https://panaderia.a.erplora.com/m/sales")
@@ -415,7 +415,7 @@ fn the_hub_origin_can_open_the_system_print_dialog() {
 #[test]
 fn no_capability_hands_a_page_the_raw_opener_plugin() {
     // The app links `tauri-plugin-opener` so the till can send the user to the SaaS checkout in
-    // their own browser (hub#475). The plugin's OWN commands are not what the page gets: they take
+    // their own browser. The plugin's OWN commands are not what the page gets: they take
     // any address, and two of them (`open-path`, `reveal-item-in-dir`) address the FILE SYSTEM of
     // the machine the till runs on. What is granted instead is `allow-open-external-url`, this
     // crate's command, which refuses everything that is not an https origin of ours
@@ -428,7 +428,7 @@ fn no_capability_hands_a_page_the_raw_opener_plugin() {
             assert!(
                 !permission.starts_with("opener:"),
                 "{} grants `{permission}`: a remote page must reach the system browser only \
-                 through `open_external_url`, which checks the destination first (hub#475)",
+                 through `open_external_url`, which checks the destination first",
                 capability.file
             );
         }

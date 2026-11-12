@@ -421,7 +421,7 @@ jobs:
       # Gradle builds UNSIGNED (fine for a local build): an APK nobody can install and an AAB Play
       # rejects. So a missing secret is red HERE, naming it. The secrets reach the script through
       # `env:`, never pasted into its text.
-      - name: Keystore (release signing, ADR-0053)
+      - name: Keystore (release signing)
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}

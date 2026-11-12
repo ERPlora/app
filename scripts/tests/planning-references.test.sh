@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Tests for scripts/ci/planning-references.sh, which fails when a tracked file other than a Markdown
-# document cites a planning document: a section sign before a number, a dated decision round or a
-# numbered slice. The code is read by people who have never seen those documents.
+# document cites something the reader does not have: a plan section, a dated decision round, a
+# numbered slice, a decision record, an issue of another repo, a flow or task id, or a path of the
+# old monorepo. The code is read by people who have never seen any of those.
 #
 # Run:  bash scripts/tests/planning-references.test.sh
 #
@@ -25,6 +26,8 @@ expect_silent_about() { case "$out" in *"$2"*) bad "$1" "mentions '$2': $out";; 
 section=$'\xc2\xa7'
 year=2026
 slice=ajada
+record=ADR
+old_tree="apps/t""auri"
 
 tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/erplora-planning-refs-test.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
@@ -100,6 +103,75 @@ run "$tmp_dir/repo"
 expect_status "Markdown documents and untracked files are not code under review → exit 0" 0
 expect_silent_about "…and the Markdown file is not named" "README.md"
 expect_silent_about "…nor the untracked file" "untracked.rs"
+
+new_repo
+{
+    printf '// the system voice (%s-0204)\n' "$record"
+    printf '// the scope of the request (%s#758)\n' hub
+    printf '// see ERPlora/%s#1718 for the reviewer\n' hub
+    printf '// mark it as a review account (%s#132)\n' saas
+    printf '// booked in %s#145\n' pm
+    printf '// the board (%s#12)\n' knowledge
+    printf '// the apt lock (%s#313)\n' infra
+    printf '// listening with the screen off (HUB_APP-F%s)\n' 26
+    printf '// dictating to the assistant (BASE-F%s)\n' 94
+    printf '// the task that brought it (FIX-%s)\n' 1883
+    printf '// guarded by `%s/src-tauri/tests/x.rs`\n' "$old_tree"
+} > "$tmp_dir/repo/src/refs.rs"
+git -C "$tmp_dir/repo" add -A
+run "$tmp_dir/repo"
+expect_status "a file that cites records, other repos' issues, flow ids or old paths → exit 1" 1
+expect_says "…a decision record" "src/refs.rs:1:"
+expect_says "…an issue of another repo" "src/refs.rs:2:"
+expect_says "…an issue of another repo named with its owner" "src/refs.rs:3:"
+expect_says "…an issue of the SaaS" "src/refs.rs:4:"
+expect_says "…an issue of the old board" "src/refs.rs:5:"
+expect_says "…an issue of the knowledge base" "src/refs.rs:6:"
+expect_says "…an issue of the infrastructure repo" "src/refs.rs:7:"
+expect_says "…a flow id" "src/refs.rs:8:"
+expect_says "…a flow id of the platform" "src/refs.rs:9:"
+expect_says "…a task id" "src/refs.rs:10:"
+expect_says "…a path of the old monorepo" "src/refs.rs:11:"
+
+new_repo
+{
+    printf '// the plugin never sets sourceJson (tauri-apps/plugins-workspace#%s)\n' 3550
+    printf '// pending channels are declared since app#%s\n' 7
+    printf 'assert!(parse_print_target("usb:star#%s").is_err());\n' 1
+    printf '// HUB_APP is the app of the hub, and %s-like names are not ids\n' "$record"
+    printf '        uses: tauri-%s/tauri-action@84b9d35b # v0.6.2\n' apps
+} > "$tmp_dir/repo/src/fine.rs"
+git -C "$tmp_dir/repo" add -A
+run "$tmp_dir/repo"
+expect_status "an upstream issue, an issue of this repo and look-alike data → exit 0" 0
+
+new_repo
+mkdir -p "$tmp_dir/repo/.github/workflows"
+{
+    printf '          CHANNELS: |\n'
+    printf '            store|Microsoft Store|x|MICROSOFT_STORE_PRODUCT_ID|true|%s#392\n' hub
+    printf '            play|Google Play|x|PLAY_PACKAGE_NAME|true|%s#308\n' hub
+    printf '            s3|S3 downloads (latest.json)|x|AWS_DOWNLOADS_ROLE_ARN|true|%s#400\n' hub
+} > "$tmp_dir/repo/.github/workflows/tauri-release.yml"
+mkdir -p "$tmp_dir/repo/scripts"
+{
+    printf 'store|Microsoft Store|$store|MICROSOFT_STORE_PRODUCT_ID|$store_var|%s#392\n' hub
+    printf 's3|Object Storage (latest.json)|$s3|||%s#400\n' hub
+    printf 'expect_says  "…naming where the decision lives" "%s#392"\n' hub
+} > "$tmp_dir/repo/scripts/release-gate.test.sh"
+printf '{\n  "description": "thin shell (%s#878)"\n}\n' hub > "$tmp_dir/repo/package.json"
+git -C "$tmp_dir/repo" add -A
+run "$tmp_dir/repo"
+expect_status "the release gate's channel rows, their test fixtures and package.json's description are data → exit 0" 0
+
+printf '      # the release gate (%s#895)\n' hub >> "$tmp_dir/repo/.github/workflows/tauri-release.yml"
+printf '// store|Microsoft Store| row (%s#392)\n' hub > "$tmp_dir/repo/src/copy.rs"
+git -C "$tmp_dir/repo" add -A
+run "$tmp_dir/repo"
+expect_status "…but a comment in the same workflow, or the same row elsewhere, is still caught → exit 1" 1
+expect_says "…the comment in the workflow" ".github/workflows/tauri-release.yml:5:"
+expect_says "…the copied row" "src/copy.rs:1:"
+expect_silent_about "…and not the exempt rows" "tauri-release.yml:2:"
 
 new_repo
 printf '// IPP printer-state, RFC 8011 section 5.4.11\n' > "$tmp_dir/repo/src/ipp.rs"

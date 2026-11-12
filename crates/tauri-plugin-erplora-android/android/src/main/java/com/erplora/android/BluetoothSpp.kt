@@ -4,11 +4,9 @@ import android.bluetooth.BluetoothAdapter
 import java.util.UUID
 
 /**
- * Bluetooth Classic SPP transport — Android only (ADR-0204, hub#388).
+ * Bluetooth Classic SPP transport — Android only.
  *
- * Ported from the archived `ERPlora-Bridge-android` app (`PrinterConnection.kt` /
- * `PrinterDiscovery.kt`), whose SPP path was the one real reason that app still existed. This is
- * TRANSPORT only, on purpose: the ESC/POS rendering stays in Rust
+ * This is TRANSPORT only, on purpose: the ESC/POS rendering stays in Rust
  * (`erplora-peripherals::escpos`), and what crosses into Kotlin is finished bytes plus the MAC of
  * a bonded printer. Keeping the boundary there is what makes a bluetooth ticket identical to a
  * network one everywhere above the socket.
@@ -16,12 +14,12 @@ import java.util.UUID
  * Discovery here means the BONDED list — the printers the user already paired in Android's own
  * settings — never an over-the-air scan: pairing is the OS's job (with its own UI and PIN
  * handling), and skipping the scan is also what keeps `BLUETOOTH_SCAN` out of the permission
- * batch — one dialog fewer, in the spirit of hub#758.
+ * batch — one dialog fewer.
  *
  * The connection is opened per job and closed after it. A held-open socket saves ~1s per ticket
  * but turns "printer switched off between tickets" into a stale handle that fails the NEXT job;
- * phase 1 of ADR-0204 buys the simple failure mode. Everything decidable is a pure function of
- * plain values, testable on the JVM without an emulator.
+ * opening per job buys the simple failure mode. Everything decidable is a pure function of plain
+ * values, testable on the JVM without an emulator.
  */
 object BluetoothSpp {
 
@@ -32,8 +30,8 @@ object BluetoothSpp {
     const val IMAGING_MAJOR_CLASS = 0x600
 
     /**
-     * Name fragments that give away a thermal printer when the device class does not.
-     * Inherited from the archived bridge, where the list was validated against real hardware.
+     * Name fragments that give away a thermal printer when the device class does not. The list was
+     * validated against real hardware.
      */
     val PRINTER_NAME_HINTS = listOf(
         "print", "pos", "thermal", "escpos", "star", "epson",
@@ -49,7 +47,7 @@ object BluetoothSpp {
         majorDeviceClass == IMAGING_MAJOR_CLASS ||
             PRINTER_NAME_HINTS.any { it in (name ?: "").lowercase() }
 
-    /** The `printer_id` a bonded device is announced under: `bluetooth:{MAC}` (ADR-0204). */
+    /** The `printer_id` a bonded device is announced under: `bluetooth:{MAC}`. */
     @JvmStatic
     fun printerId(mac: String): String = "bluetooth:${mac.uppercase()}"
 
@@ -62,7 +60,7 @@ object BluetoothSpp {
      * Sends already-rendered ESC/POS bytes to the bonded device at [mac] over RFCOMM.
      *
      * Blocking — the caller runs it off the main thread. Errors propagate: a ticket that did not
-     * come out must be reported as failed, never resolved (the hub#475 lesson).
+     * come out must be reported as failed, never resolved.
      */
     @JvmStatic
     fun send(adapter: BluetoothAdapter, mac: String, payload: ByteArray) {

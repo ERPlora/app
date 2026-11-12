@@ -1,8 +1,8 @@
-//! Hardware probe for USB printing through the OS print queue (hub#1083).
+//! Hardware probe for USB printing through the OS print queue.
 //!
 //! The unit tests cover everything that can be proven without a printer; this covers what cannot.
 //! CI has no printer plugged in, so the only place the USB path is validated against real hardware
-//! is a machine with the cable in it — `qa-hub-macos`, or Ioan's Mac.
+//! is a machine with the cable in it.
 //!
 //! ```text
 //! cargo run -p erplora-peripherals --example usb_queue_probe            # list, prints nothing
@@ -21,8 +21,8 @@ fn main() {
         Ok(found) => {
             println!("{} USB print queue(s):", found.len());
             for p in &found {
-                // The state comes from CUPS itself (hub#1541), so a queue with no paper reads
-                // `stopped` here instead of the `ready` this listing used to print for every cable.
+                // The state comes from CUPS itself, so a queue with no paper reads `stopped`
+                // here rather than `ready`.
                 println!("  {}  ->  {}  [{}]", p.id, p.name, p.status);
             }
         }

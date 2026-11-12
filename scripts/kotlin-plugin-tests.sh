@@ -1,30 +1,25 @@
 #!/usr/bin/env bash
-# Tests unitarios Kotlin del plugin de Android, SIN construir la app (hub#933).
+# Kotlin unit tests of the Android plugin, WITHOUT building the app.
 #
-# Los 34 tests de `crates/tauri-plugin-erplora-android/android/src/test` son donde vive la lógica
-# de qué permiso se pide en cada nivel de API y cómo se habla con una impresora SPP. Hasta hub#933
-# solo se ejecutaban en el job `build-android` de la release, porque el proyecto Gradle real
-# (`gen/android`) no se puede ni configurar sin ficheros que escribe `cargo tauri android build`.
-# Un test que solo corre al publicar no protege nada: el SPP (48f2b0e1) dejó una expectativa
-# caducada y `develop` estuvo un día en rojo sin un solo check en ámbar.
+# The tests under `crates/tauri-plugin-erplora-android/android/src/test` hold which permission is
+# asked for at each API level and how an SPP printer is spoken to. The real Gradle project
+# (`gen/android`) cannot even be configured without files that `cargo tauri android build` writes,
+# so this script uses the minimal root `android-tests/`, which has no `:app` and therefore depends
+# on nothing generated. It needs a JDK 17 and the Android SDK (`platforms;android-36`); it does NOT
+# need the NDK, Rust or tauri-cli.
 #
-# Este script usa la raíz mínima de `android-tests/`, que no incluye `:app` y por tanto no depende
-# de nada generado. Necesita un JDK 17 y el SDK de Android (`platforms;android-36`); NO necesita
-# NDK, ni Rust, ni tauri-cli.
-#
-# Uso:
-#   scripts/kotlin-plugin-tests.sh                 # todos los tests del plugin
+# Usage:
+#   scripts/kotlin-plugin-tests.sh                 # every test of the plugin
 #   scripts/kotlin-plugin-tests.sh --tests '*Permission*'
 #
-# Sin awk/jq/python exóticos a propósito: `ci-runner-1` es un Ubuntu pelado sin `python` ni `gh`.
-
+# No awk/jq/python beyond the basics on purpose: a bare Ubuntu runner has neither `python` nor `gh`.
 set -euo pipefail
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
-# La versión de `tauri` la manda Cargo.lock, no un número escrito aquí: el SDK Kotlin
-# (`tauri-android`) viaja DENTRO del crate, así que probar contra otra versión sería probar contra
-# un `@TauriPlugin` que no es el que se publica.
+# Cargo.lock decides the `tauri` version, not a number written here: the Kotlin SDK
+# (`tauri-android`) travels INSIDE the crate, so testing against another version would test against
+# a `@TauriPlugin` that is not the one shipped.
 TAURI_VERSION=$(
     awk '
         /^name = "tauri"$/ { found = 1; next }
@@ -33,12 +28,12 @@ TAURI_VERSION=$(
 )
 
 if [ -z "$TAURI_VERSION" ]; then
-    echo "::error::no encuentro la versión de 'tauri' en Cargo.lock" >&2
+    echo "::error::cannot find the version of 'tauri' in Cargo.lock" >&2
     exit 1
 fi
 
-# El SDK sale del crate ya DESEMPAQUETADO en el registry. Lo desempaqueta el primer build que use
-# `tauri`, que en CI es el `cargo test` que corre antes que este script.
+# The SDK comes from the crate already UNPACKED in the registry. The first build that uses `tauri`
+# unpacks it; in CI that is the `cargo test` that runs before this script.
 CARGO_HOME=${CARGO_HOME:-$HOME/.cargo}
 TAURI_ANDROID_DIR=""
 for candidate in "$CARGO_HOME"/registry/src/*/"tauri-$TAURI_VERSION"/mobile/android; do
@@ -49,16 +44,16 @@ for candidate in "$CARGO_HOME"/registry/src/*/"tauri-$TAURI_VERSION"/mobile/andr
 done
 
 if [ -z "$TAURI_ANDROID_DIR" ]; then
-    echo "::error::no está el SDK Kotlin de tauri $TAURI_VERSION en $CARGO_HOME/registry/src." >&2
-    echo "Se desempaqueta al compilar: corre antes 'cargo test -p erplora-tauri' (o 'cargo build -p erplora-tauri')." >&2
+    echo "::error::the Kotlin SDK of tauri $TAURI_VERSION is not in $CARGO_HOME/registry/src." >&2
+    echo "It is unpacked by a build: run 'cargo test -p erplora-tauri' (or 'cargo build -p erplora-tauri') first." >&2
     exit 1
 fi
 
 echo "tauri-android SDK: $TAURI_ANDROID_DIR"
 
-# Se reutiliza el wrapper del proyecto generado (Gradle 8.14.3) para probar con la MISMA versión
-# de Gradle que la release, y para no commitear un segundo `gradle-wrapper.jar`. `-p` decide el
-# proyecto; el wrapper solo aporta el binario.
+# The generated project's wrapper (Gradle 8.14.3) is reused, to test with the SAME Gradle version
+# as the release and to avoid committing a second `gradle-wrapper.jar`. `-p` picks the project; the
+# wrapper only brings the binary.
 exec "$REPO_ROOT/src-tauri/gen/android/gradlew" \
     -p "$REPO_ROOT/crates/tauri-plugin-erplora-android/android-tests" \
     -PtauriAndroidDir="$TAURI_ANDROID_DIR" \

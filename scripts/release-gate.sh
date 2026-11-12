@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# Release gate — "a green tag means it published" (hub#895)
+# Release gate — "a green tag means it published"
 #
 # Called by the last job of `.github/workflows/tauri-release.yml`. It receives
 # the result of every publishing job and decides whether the release actually
-# shipped. Three tags in a row (the last one v1.0.3, hub#839) ended GREEN while
-# publishing nothing: the publish jobs are gated by repository Variables, an
-# empty Variable makes the job `skipped`, and a skipped job does not colour a
-# run. A tag that published nothing looked exactly like a tag that published
+# shipped. The publish jobs are gated by repository Variables, an empty Variable
+# makes the job `skipped`, and a skipped job does not colour a run: without this
+# gate a tag that published nothing looks exactly like a tag that published
 # everything.
 #
 # The rule this enforces:
@@ -74,7 +73,7 @@ $CHANNELS
 EOF
 
 if [ -z "$known_ids" ]; then
-    echo "::error::the release gate was given no channels to check (empty CHANNELS) — it cannot tell a published tag from a silent one, which is the whole reason it exists (hub#895)"
+    echo "::error::the release gate was given no channels to check (empty CHANNELS) — it cannot tell a published tag from a silent one, which is the whole reason it exists"
     exit 1
 fi
 

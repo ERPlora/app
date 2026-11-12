@@ -1,11 +1,11 @@
-//! Which page may drive this device: the hub the app is LINKED to, and no other (hub#2504).
+//! Which page may drive this device: the hub the app is LINKED to, and no other.
 //!
 //! Tauri's ACL decides by PATTERN (`capabilities/default.json` → `https://*.erplora.com/*`), and a
 //! pattern cannot name the one business this till belongs to: the hub is chosen at run time, from
 //! the SaaS, long after the binary was built. So the ACL lets every page under erplora.com through
 //! — another business's hub, the public website, the test SaaS — and this module is the second
-//! gate, in front of the app's own commands, of the Android plugin's (hub#2642) and of the
-//! notification plugin's (hub#2658): the printer, the drawer, the card reader, the way out to the
+//! gate, in front of the app's own commands, of the Android plugin's and of the notification
+//! plugin's: the printer, the drawer, the card reader, the way out to the
 //! browser, the Downloads folder, Android's permission dialogs, the listening service, the system
 //! voice, the way out of the app and the taps on the notices answer only the page whose ORIGIN is
 //! the linked hub.
@@ -90,12 +90,12 @@ impl HubLink {
     }
 
     /// The app links this hub on its own authority: the one it remembered, or the one a link the
-    /// system handed it points at (HUB_APP-F02, F03).
+    /// system handed it points at.
     pub fn link(&self, origin: &str) {
         self.state().linked = Some(origin.to_string());
     }
 
-    /// No hub any more: «Change business», or the hub is gone (HUB_APP-F04, F05).
+    /// No hub any more: «Change business», or the hub is gone.
     pub fn forget(&self) {
         self.state().linked = None;
     }
@@ -169,7 +169,7 @@ where
 /// The gate for a command that belongs to the linked hub: `Err(NOT_THE_LINKED_HUB)` unless the
 /// invoke comes from it, loaded. Fails closed: no link state, or a page whose address cannot be
 /// read, drives nothing. The Android plugin runs it before every one of its commands — none of
-/// them is open (hub#2642).
+/// them is open.
 pub fn linked_hub_only<R: Runtime>(invoke: &Invoke<R>) -> Result<(), &'static str> {
     use tauri::Manager;
     let webview = invoke.message.webview_ref();
@@ -194,7 +194,7 @@ pub fn android_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
 }
 
 /// The notification plugin (`plugin:notification`: hearing a tap on a notice) as `run` registers
-/// it — behind the same gate (hub#2658). The plugin is a third party's and its `init` takes no
+/// it — behind the same gate. The plugin is a third party's and its `init` takes no
 /// gate, so [`Gated`] wraps it.
 pub fn notification_plugin<R: Runtime>() -> Gated<R> {
     Gated(tauri_plugin_notification::init())
@@ -521,7 +521,7 @@ mod tests {
     }
 
     /// The origin a request from the app's own bundled page carries: `tauri://localhost` on macOS
-    /// and Linux, `http://tauri.localhost` on Windows and Android (hub#2705). A hard-coded
+    /// and Linux, `http://tauri.localhost` on Windows and Android. A hard-coded
     /// `tauri://` reads as a REMOTE page on Windows, and Tauri's ACL refuses it before the gate
     /// under test is ever asked.
     fn bundled_page() -> Url {
@@ -589,7 +589,7 @@ mod tests {
         assert_eq!(ask(&till, "device_context"), Ok("ran".into()));
     }
 
-    // ── The Android plugin, through its own route (hub#2642) ──────────────────────────────────
+    // ── The Android plugin, through its own route ─────────────────────────────────────────────
     //
     // `plugin:erplora-android|…` never reaches the app's invoke handler: Tauri hands it to the
     // plugin's. The real plugin, as `run` registers it, with every command granted to the page the
@@ -631,8 +631,8 @@ mod tests {
         Till { _app: app, window }
     }
 
-    /// What the Hub sends to keep the app listening (`@erplora/ui`, `src/shell/device-notices.ts`,
-    /// hub#836): `on` and the three words of the ongoing notification, in the person's language.
+    /// What the Hub sends to keep the app listening (`@erplora/ui`, `src/shell/device-notices.ts`):
+    /// `on` and the three words of the ongoing notification, in the person's language.
     fn hub_starts_listening() -> serde_json::Value {
         serde_json::json!({
             "on": true,
@@ -732,10 +732,10 @@ mod tests {
         }
     }
 
-    /// hub#836 — the sign-out sends the bare order (`{ on: false }`, `stopNoticeListening`), with no
-    /// words: the linked hub is heard, another business is not.
+    /// The sign-out sends the bare order (`{ on: false }`, `stopNoticeListening`), with no words:
+    /// the linked hub is heard, another business is not.
     #[test]
-    fn the_linked_hub_stops_the_listening_with_the_bare_order_of_the_sign_out_hub836() {
+    fn the_linked_hub_stops_the_listening_with_the_bare_order_of_the_sign_out() {
         let stop = serde_json::json!({ "on": false });
         let hub = till_with_the_android_plugin("https://panaderia.a.erplora.com/m/sales", Some(linked_to_the_hub()));
         assert_eq!(ask_android_with(&hub, "keep_listening", stop.clone()), ran("keep_listening"));
@@ -771,12 +771,12 @@ mod tests {
         }
     }
 
-    // ── The notification plugin, through its own route (hub#2658) ─────────────────────────────
+    // ── The notification plugin, through its own route ────────────────────────────────────────
     //
     // `capabilities/default.json` grants `notification:allow-register-listener` to every page under
-    // erplora.com, so the page can hear a tap on a notice (HUB_APP-F25). The plugin is a third
-    // party's and takes no gate of its own: `run` registers it wrapped. On a phone,
-    // `register_listener` is answered by the Kotlin/Swift half once the plugin's Rust handler lets
+    // erplora.com, so the page can hear a tap on a notice. The plugin is a third party's and
+    // takes no gate of its own: `run` registers it wrapped. On a phone, `register_listener` is
+    // answered by the Kotlin/Swift half once the plugin's Rust handler lets
     // it through; on a computer nothing answers it, which is what "it reached the plugin" reads
     // as here. `is_permission_granted` is answered in Rust on a computer: it proves the wrapped
     // plugin still set itself up.

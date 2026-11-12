@@ -6,14 +6,15 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * El plugin es pegamento: recibe el `invoke`, pregunta al sistema y responde. Toda decisión vive
- * en funciones puras de su companion, que son las que se prueban aquí — sin emulador.
+ * The plugin is glue: it takes the `invoke`, asks the system and answers. Every decision lives in
+ * pure functions of its companion, and those are what is tested here — without an emulator.
  *
- * Lo que se fija:
- *  - qué se pide de verdad (lo que falta, no todo: un diálogo por escaneo sería insufrible);
- *  - qué se responde (el estado REAL de cada permiso, no lo que el usuario acaba de tocar);
- *  - que un «no» del usuario NO es un error: la app tiene que poder seguir sin impresora;
- *  - que la anotación declara TODO lo que la política puede pedir (ver el test, es una trampa).
+ * What is pinned:
+ *  - what is really asked for (what is missing, not everything: a dialog per scan would be
+ *    unbearable);
+ *  - what is answered (the REAL state of each permission, not what the user just tapped);
+ *  - that a «no» from the user is NOT an error: the app has to be able to go on without a printer;
+ *  - that the annotation declares EVERYTHING the policy can ask for (see the test, it is a trap).
  */
 class ErploraAndroidPluginTest {
 
@@ -22,7 +23,7 @@ class ErploraAndroidPluginTest {
     private val BT = PermissionPolicy.BLUETOOTH_CONNECT
 
     @Test
-    fun `solo se pide lo que falta`() {
+    fun `only what is missing is asked for`() {
         val faltan = ErploraAndroidPlugin.pendingOf(
             required = listOf(NOTIF, RED),
             granted = setOf(NOTIF),
@@ -31,9 +32,9 @@ class ErploraAndroidPluginTest {
     }
 
     @Test
-    fun `si ya esta todo concedido no se pide nada`() {
-        // La PWA llama a esto ANTES de cada descubrimiento. Si pidiera siempre, el usuario vería
-        // un diálogo por escaneo.
+    fun `when everything is already granted nothing is asked for`() {
+        // The web app calls this BEFORE every discovery. If it always asked, the user would see a
+        // dialog per scan.
         val faltan = ErploraAndroidPlugin.pendingOf(
             required = listOf(NOTIF, RED),
             granted = setOf(NOTIF, RED),
@@ -42,9 +43,9 @@ class ErploraAndroidPluginTest {
     }
 
     @Test
-    fun `el resultado informa del estado REAL de cada permiso`() {
-        // El usuario puede conceder uno y denegar otro. La PWA necesita saber exactamente qué
-        // puede hacer: avisar sí, buscar impresoras no.
+    fun `the result reports the REAL state of every permission`() {
+        // The user can grant one and deny another. The web app needs to know exactly what it can
+        // do: notify yes, look for printers no.
         val estado = ErploraAndroidPlugin.statusOf(
             required = listOf(NOTIF, RED),
             granted = setOf(NOTIF),
@@ -53,39 +54,38 @@ class ErploraAndroidPluginTest {
     }
 
     @Test
-    fun `un permiso que la version de Android no conoce no aparece en el resultado`() {
-        // No se puede conceder ni denegar: informar de él sería mentir.
+    fun `a permission this Android version does not know is left out of the result`() {
+        // It can be neither granted nor denied: reporting it would be a lie.
         //
-        // Lo que se fija es el FILTRADO por nivel de API, no cuántos permisos hay: en la 36 la
-        // política conoce las notificaciones (33) y el Bluetooth (31), pero NO la red local, que
-        // llega en la 37. El esperado se escribe entero a propósito — así, añadir un permiso a la
-        // política obliga a decir en qué versión existe en vez de colarse aquí sin mirar.
+        // What is pinned is the FILTERING by API level, not how many permissions there are: on 36
+        // the policy knows notifications (33) and Bluetooth (31), but NOT the local network, which
+        // arrives in 37. The expected map is written out in full on purpose — so adding a
+        // permission to the policy forces saying in which version it exists instead of slipping in
+        // here unnoticed.
         val estado = ErploraAndroidPlugin.statusOf(
             required = PermissionPolicy.required(sdkInt = 36),
             granted = setOf(NOTIF),
         )
         assertEquals(mapOf(NOTIF to true, BT to false), estado)
-        assertTrue(RED !in estado, "ACCESS_LOCAL_NETWORK llega en la API 37: en la 36 no se puede afirmar nada de él")
+        assertTrue(RED !in estado, "ACCESS_LOCAL_NETWORK arrives in API 37: nothing can be said about it on 36")
     }
 
     @Test
-    fun `la anotacion declara todo lo que la politica puede pedir`() {
-        // Tauri pide los permisos por ALIAS declarado en `@TauriPlugin`: resuelve el alias a sus
-        // strings y, si no encuentra ninguno, `requestPermissionForAliases` **no hace nada** — ni
-        // diálogo ni excepción, y el `invoke` queda colgado PARA SIEMPRE.
-        //
-        // Es exactamente el fallo que costó un ciclo entero de emulador: el sistema concedía los
-        // dos permisos y la promesa de la PWA no resolvía jamás. Añadir un permiso a la política y
-        // olvidarlo aquí lo repetiría en silencio, así que se comprueba a máquina.
+    fun `the annotation declares everything the policy can ask for`() {
+        // Tauri asks for permissions by the ALIAS declared in `@TauriPlugin`: it resolves the alias
+        // to its strings and, if it finds none, `requestPermissionForAliases` **does nothing** — no
+        // dialog, no exception, and the `invoke` hangs FOREVER: the system grants the permissions
+        // and the web app's promise never resolves. Adding a permission to the policy and
+        // forgetting it here would bring that back silently, so a machine checks it.
         val declarados = ErploraAndroidPlugin::class.java
             .getAnnotation(TauriPlugin::class.java)!!
             .permissions
             .flatMap { it.strings.toList() }
             .toSet()
 
-        // Todos los niveles de API que la política distingue, no solo el del emulador de turno.
-        // La lista se amplía con cada umbral nuevo: si falta uno, el permiso que solo aparece por
-        // debajo del siguiente umbral se quedaría sin comprobar y la trampa volvería (hub#933).
+        // Every API level the policy tells apart, not only the emulator's at hand. The list grows
+        // with every new threshold: if one is missing, a permission that only shows up below the
+        // next threshold would go unchecked and the trap would be back.
         val posibles = listOf(
             1,
             PermissionPolicy.SDK_BLUETOOTH_CONNECT,
@@ -95,23 +95,23 @@ class ErploraAndroidPluginTest {
             .flatMap { PermissionPolicy.required(sdkInt = it) }
             .toSet()
 
-        assertEquals(emptySet(), posibles - declarados, "permisos que la política pide y la anotación NO declara")
+        assertEquals(emptySet(), posibles - declarados, "permissions the policy asks for and the annotation does NOT declare")
     }
 
     @Test
-    fun `cada permiso se declara con su alias igual al string`() {
-        // El alias ES el string del permiso: así lo que devuelve `check_permissions` se lee igual
-        // que lo que dice `dumpsys`, y no hay una segunda nomenclatura que mantener.
+    fun `every permission is declared with its alias equal to its string`() {
+        // The alias IS the permission string: so what `check_permissions` returns reads the same as
+        // what `dumpsys` says, and there is no second naming to keep in step.
         val perms = ErploraAndroidPlugin::class.java.getAnnotation(TauriPlugin::class.java)!!.permissions
-        assertTrue(perms.isNotEmpty(), "sin permisos declarados no se puede pedir nada")
+        assertTrue(perms.isNotEmpty(), "with no declared permission nothing can be asked for")
         for (p in perms) {
-            assertEquals(listOf(p.alias), p.strings.toList(), "alias y string deben coincidir")
+            assertEquals(listOf(p.alias), p.strings.toList(), "the alias and the string must match")
         }
     }
 
-    // ── hub#758: a request carries the SCOPE of the operation that makes it ──────────────────
+    // ── A request carries the SCOPE of the operation that makes it ───────────────────────────
     //
-    // Asked without one, the plugin requested its whole batch: tapping «Re-scan» popped the
+    // Asked without one, the plugin requests its whole batch: tapping «Re-scan» would pop the
     // local-network dialog and then, with no visible relation to anything the user just did, the
     // notifications one. An out-of-context permission reads as opportunistic and gets denied —
     // and a denied POST_NOTIFICATIONS is a kitchen that stops hearing orders.
@@ -130,7 +130,7 @@ class ErploraAndroidPluginTest {
     @Test
     fun `a request without a scope keeps asking for everything — an older web must not break`() {
         // The web app is served by the hub and the plugin ships inside the installed binary: they
-        // CAN be out of step. A web that predates the scope sends none, and gets the old batch.
+        // CAN be out of step. A web that predates the scope sends none, and gets the whole batch.
         assertEquals(
             listOf(NOTIF, RED),
             ErploraAndroidPlugin.requestScope(required = listOf(NOTIF, RED), requested = null),
@@ -149,10 +149,4 @@ class ErploraAndroidPluginTest {
             ),
         )
     }
-
-    // Hubo aquí un test del `REQUEST_CODE` propio del plugin. Se retiró con el mecanismo que
-    // fijaba: pedir por `activity.requestPermissions` deja la respuesta en la Activity de Tauri,
-    // que no sabe devolvérsela al plugin — el sistema concedía los permisos y el `invoke` no
-    // resolvía JAMÁS. Ahora se pide por `requestPermissionForAliases` y el código de solicitud es
-    // de Tauri, no nuestro. Lo que protege de la recaída es el test de la anotación, de arriba.
 }

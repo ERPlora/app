@@ -14,8 +14,8 @@
 #                                              Play only take a higher version,
 #                                              and the fleet only updates upward
 #   · not X.Y.Z, or minor/patch >= 1000      → RED: Play's versionCode is
-#                                              major*1000000 + minor*1000 + patch
-#                                              (ADR-0160), checked on the APK
+#                                              major*1000000 + minor*1000 + patch,
+#                                              checked on the APK
 #
 # A manual dispatch with `publish=false` only builds (packaging check): it never
 # releases, whatever the tags say. Neither does any ref but exactly
@@ -98,7 +98,7 @@ major="${BASH_REMATCH[1]}"
 minor="${BASH_REMATCH[2]}"
 patch="${BASH_REMATCH[3]}"
 if [ "$minor" -ge 1000 ] || [ "$patch" -ge 1000 ]; then
-    fail "version $version: minor and patch must stay below 1000, or the Android versionCode (major*1000000 + minor*1000 + patch, ADR-0160) collides with another version for ever"
+    fail "version $version: minor and patch must stay below 1000, or the Android versionCode (major*1000000 + minor*1000 + patch) collides with another version for ever"
 fi
 tag="v$version"
 
