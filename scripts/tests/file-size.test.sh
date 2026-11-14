@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Tests for scripts/ci/file-size.sh, which keeps every tracked code file under its size cap:
 # production 1000 lines, tests 1500. In a Rust source file the code outside its `#[cfg(test)]`
-# blocks is production (cap 1000) and the whole file is capped at 1500. Files over their cap today
+# blocks is production (cap 1000) and the whole file is capped at 1500, and a module's `tests.rs`
+# is a test file. Files over their cap today
 # are listed in `.file-size-allow` with a ceiling, and that list can only shrink against the commit
 # where the branch leaves `origin/main` (their merge-base).
 #
@@ -155,6 +156,27 @@ rust_file src/lib.rs 900 601 0
 run "$repo"
 expect_status "Rust: 900 production lines but 1501 in all → exit 1" 1
 expect_says "…the whole file is named" "src/lib.rs: 1501 lines in all, over the whole-file cap of 1500"
+
+# A module's tests moved out to their own file (`#[cfg(test)] mod tests;` in the module) carry no
+# `#[cfg(test)]` inside: only the file's name says they are tests.
+new_repo
+lines 1500 src/tests.rs
+lines 1500 src/escpos/tests.rs
+run "$repo"
+expect_status "Rust: a module's tests.rs of 1500 lines is a test file → exit 0" 0
+
+lines 1501 src/escpos/tests.rs
+run "$repo"
+expect_status "Rust: a tests.rs of 1501 lines → exit 1" 1
+expect_says "…over the tests cap" "src/escpos/tests.rs: 1501 lines, over the tests cap of 1500"
+
+new_repo
+lines 1001 src/contests.rs
+lines 1001 src/tests.rs.sh
+run "$repo"
+expect_status "a name that only contains tests.rs is still production → exit 1" 1
+expect_says "…contests.rs keeps the production cap" "src/contests.rs: 1001 production lines, over the production cap of 1000"
+expect_says "…tests.rs.sh keeps the production cap" "src/tests.rs.sh: 1001 lines, over the production cap of 1000"
 
 # ── Listed files ──────────────────────────────────────────────────────────────────────────────
 new_repo '2000 src/big.sh app#1' '1600/4300 src/escpos.rs app#2' '-/2300 src/plugin.rs app#3'
