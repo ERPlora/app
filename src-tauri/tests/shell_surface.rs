@@ -102,11 +102,13 @@ fn commands_wired_to_the_handler() -> BTreeSet<String> {
     let block = bracketed_block(&source, "generate_handler![", "src/lib.rs");
     let block = without_line_comments(block);
 
+    // A command is wired by its module's path (`printing::erplora_print`) and invoked by the
+    // function's own name, the last segment.
     let found: BTreeSet<String> = block
         .split(',')
         .map(str::trim)
         .filter(|entry| !entry.is_empty())
-        .map(str::to_string)
+        .map(|entry| entry.rsplit("::").next().unwrap_or(entry).to_string())
         .collect();
 
     assert!(
@@ -431,13 +433,13 @@ fn the_external_opener_is_registered_and_checks_before_it_opens() {
     //
     // Neither shows up in a type error and neither is reachable from a unit test: the command needs
     // a live `AppHandle`. So the guard is on the source, which is where the mistake would be made.
-    let source = read("src/lib.rs");
+    let source = read("src/links.rs");
 
     let command = source
         .find("fn open_external_url")
         .map(|at| &source[at..])
         .and_then(|rest| rest.find("\n}").map(|end| &rest[..end]))
-        .expect("src/lib.rs no longer defines `open_external_url`");
+        .expect("src/links.rs no longer defines `open_external_url`");
 
     assert!(
         command.contains("external_browser_url"),
@@ -445,7 +447,7 @@ fn the_external_opener_is_registered_and_checks_before_it_opens() {
          straight to the operating system."
     );
     assert!(
-        source.contains("tauri_plugin_opener::init()"),
+        read("src/lib.rs").contains("tauri_plugin_opener::init()"),
         "the opener plugin is not registered: `open_external_url` compiles and panics on the \
          missing `Opener` state the first time a till tries to buy anything."
     );

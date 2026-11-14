@@ -343,14 +343,14 @@ fn the_save_command_checks_the_platform_and_the_name_before_it_writes() {
     // neither shows up as a type error when deleted. Drop the platform check and an Android till
     // reports a path into storage no file manager will open; drop the name check and the page
     // chooses where on the disk to write. So the guard is on the source, where the deletion happens.
-    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
-        .expect("src/lib.rs");
+    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/downloads.rs"))
+        .expect("src/downloads.rs");
 
     let command = source
         .find("fn save_download")
         .map(|at| &source[at..])
         .and_then(|rest| rest.find("\n}").map(|end| &rest[..end]))
-        .expect("src/lib.rs no longer defines `save_download`");
+        .expect("src/downloads.rs no longer defines `save_download`");
 
     assert!(
         command.contains("save_target"),
@@ -371,8 +371,8 @@ fn the_android_branch_still_goes_through_the_native_publisher() {
     // and its disappearance is not a type error either: delete the call and the `#[cfg]` block
     // simply stops publishing, `save_target` keeps answering `AndroidDownloads`, and every test
     // above stays green while the tablet saves nothing.
-    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
-        .expect("src/lib.rs");
+    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/downloads.rs"))
+        .expect("src/downloads.rs");
 
     assert!(
         source.contains("save_to_downloads"),

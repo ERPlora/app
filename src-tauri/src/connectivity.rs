@@ -17,8 +17,8 @@
 //!
 //! The rule is deliberately about TRANSPORT, not about HTTP: any response at all — 200, 404, 502 —
 //! means the network is up and the page in the window is the origin's own business (a 404 is
-//! [`crate::should_forget_hub`]'s problem, not this module's). Only a transport failure (DNS,
-//! connect, timeout) means what the user is looking at cannot be us.
+//! [`crate::hub_url::should_forget_hub`]'s problem, not this module's). Only a transport failure
+//! (DNS, connect, timeout) means what the user is looking at cannot be us.
 //!
 //! ## What it costs
 //!

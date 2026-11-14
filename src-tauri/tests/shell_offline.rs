@@ -177,13 +177,13 @@ fn read(relative: &str) -> String {
 fn the_main_window_arms_the_connectivity_guard() {
     // The page is useless if nothing ever navigates to it. The guard is what gives it a reason to
     // exist, and deleting the spawn is a one-line silent regression that no type error catches.
-    let source = read("src/lib.rs");
+    let source = read("src/window.rs");
 
     let window = source
         .find("fn open_main_window")
         .map(|at| &source[at..])
         .and_then(|rest| rest.find("\n}").map(|end| &rest[..end]))
-        .expect("src/lib.rs no longer defines `open_main_window`");
+        .expect("src/window.rs no longer defines `open_main_window`");
 
     assert!(
         window.contains("spawn_connectivity_guard"),

@@ -275,7 +275,7 @@ llamador en `ERPlora/hub`, `@erplora/ui` ni `ERPlora/saas`.
 - `src-tauri/tests/notice_tap.rs`, test `the_page_and_the_shell_name_the_same_event_and_argument`:
   `apps/web/src/main.ts` contiene `listenTauriPlugin('notification', 'actionPerformed', cb)` y
   `apps/web/src/lib/bridge-transport.ts` contiene
-  `invokeTauri('erplora_notify', { title, body, id, path })`. Siguen las tres aserciones sobre `lib.rs`.
+  `invokeTauri('erplora_notify', { title, body, id, path })`. Siguen las tres aserciones sobre `notices.rs`.
 - `src-tauri/tests/notice_tap.rs`, test `the_page_claims_the_tap_the_shell_kept`: `apps/web/src/main.ts`
   contiene `take: () => invokeTauri('erplora_take_notice_tap')` y
   `onPoke: (cb) => listenTauriEvent('erplora://notice-tapped', cb)`. Sigue la de `notice_tap.rs`.

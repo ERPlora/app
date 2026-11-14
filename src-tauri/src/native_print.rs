@@ -179,6 +179,39 @@ pub fn open_print_window<R: tauri::Runtime>(
     Ok(())
 }
 
+/// `print_document` — the system print dialog for an A4 document the page holds.
+///
+/// The page keeps the html, the shell keeps the dialog: on the desktop a window of its own shows
+/// the document and the OS prints it, with its printer list and «Save as PDF» ([`open_print_window`]);
+/// on Android the plugin renders it in a WebView of its own and opens the system print service
+/// (`PrintManager`). Where there is no dialog it answers `native_print_unsupported` and
+/// the print door takes its usual route — a refusal, never a pretended page.
+///
+/// ⚠️ `(async)` is load-bearing: creating a window from a synchronous command deadlocks on Windows.
+#[tauri::command(async)]
+pub(crate) fn print_document(app: tauri::AppHandle, html: String) -> Result<(), ShellError> {
+    if !native_print_supported(std::env::consts::OS) {
+        return Err(ShellError::NativePrintUnsupported);
+    }
+    #[cfg(desktop)]
+    {
+        open_print_window(&app, html)
+    }
+    #[cfg(target_os = "android")]
+    {
+        use tauri_plugin_erplora_android::ErploraAndroidExt;
+        check_print_document(&html)?;
+        app.erplora_android()
+            .print_html(&html)
+            .map_err(|e| ShellError::NativePrintFailed(e.to_string()))
+    }
+    #[cfg(not(any(desktop, target_os = "android")))]
+    {
+        let _ = (&app, &html);
+        Err(ShellError::NativePrintUnsupported)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
