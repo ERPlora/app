@@ -1,0 +1,4 @@
+# Function limits of the workspace, the values clippy ships with. The lints themselves are denied
+# in the root Cargo.toml; scripts/ci/function-limits.sh keeps both in place.
+too-many-lines-threshold = 100
+too-many-arguments-threshold = 7

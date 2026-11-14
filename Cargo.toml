@@ -15,18 +15,27 @@ members = [
 #
 # Ratchet: `correctness` is at deny because it was clean when the gate was born; the next group is
 # promoted by bringing it to zero first and then changing its `level` here. No `-D warnings` flag
-# in CI: the level is operated from this table.
+# in CI (`cargo clippy --workspace --all-targets` in `test-shell.yml`): the level is operated from
+# this table.
 [workspace.lints.clippy]
 # Real bugs: `&mut` to a temporary, always-false comparisons, broken `Ord`, misplaced overflow.
 correctness = { level = "deny", priority = -1 }
 # Explicit although it matches clippy's default: it is the next notch of the ratchet.
 suspicious = { level = "warn", priority = -1 }
+# Function limits: at most 100 lines and 7 arguments (thresholds in `clippy.toml`). A function over
+# them today carries `#[expect(clippy::…, reason = "…")]`; `scripts/ci/function-limits.sh` keeps
+# these lines in place and refuses new excuses.
+too_many_lines = "deny"
+too_many_arguments = "deny"
 
 [workspace.lints.rust]
 # Code the compiler already knows it will REJECT in a future version.
 future_incompatible = { level = "deny", priority = -1 }
 # An unused import is an ERROR, not a warning.
 unused_imports = { level = "deny", priority = -1 }
+# An `#[expect]` that no longer fires is an error, so an excused function comes off the list as
+# soon as it is fixed.
+unfulfilled_lint_expectations = "deny"
 
 [workspace.package]
 edition = "2021"

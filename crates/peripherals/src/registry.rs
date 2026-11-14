@@ -276,7 +276,7 @@ impl DeviceRegistry {
 
     /// The write itself, once the identity is settled. Keeps `first_seen`, `role` and the
     /// [`Device::manual`] mark: a scan that sees a typed printer does not demote it to scanned.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "excused until its fields travel as one struct")]
     fn upsert(
         &self,
         key: String,

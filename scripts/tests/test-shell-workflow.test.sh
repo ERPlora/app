@@ -14,6 +14,12 @@
 #
 # Also: a push (to `main`) finishes; only a PR's newer head cancels its older run.
 #
+# And the lint gate: `cargo clippy --workspace --all-targets` on the three systems (the lint levels
+# and the function limits live in `Cargo.toml` and `clippy.toml`), and the `scripts` job checks out
+# the whole history, because the size and function-limit checks only let their exceptions shrink
+# against the merge-base with `main`. Those two checks also run on EVERY pull request and push to
+# `main`, path filter or not, in `code-limits.yml` (its own contract).
+#
 # And the workflow is also CALLED by `tauri-release.yml` (`workflow_call`), whose builds need it —
 # nothing is published on red. Its `scripts` job runs actionlint over every workflow and EVERY
 # `scripts/*.test.sh` and `scripts/tests/*.test.sh` (this contract included).
@@ -106,6 +112,9 @@ for event, block in (("pull_request", pr), ("push", push)):
         # Every script and its test (ERPlora/app): the `scripts` job runs all of them, so a change
         # to any one alone must trigger it.
         "scripts/**",
+        # The size exceptions and the function limits: a change to either alone must be checked.
+        ".file-size-allow",
+        "clippy.toml",
     ):
         check(
             f"`{event}.paths` includes `{wanted}`",
@@ -219,6 +228,27 @@ for name in (
             f"if is {step.get('if')!r} — webkit2gtk, the Kotlin tests and the OS-independent bash rules are Linux-only work",
         )
 
+# The lint gate: the levels and the function limits are in `Cargo.toml` and `clippy.toml`, and
+# only a clippy run reads them — `cargo test` does not.
+clippy_steps = [s for s in steps if "cargo clippy" in run_of(s)]
+check("a step runs `cargo clippy`", len(clippy_steps) == 1, f"found {len(clippy_steps)}")
+for s in clippy_steps:
+    check(
+        "the clippy step runs on EVERY system (no `if:`)",
+        "if" not in s,
+        f"if is {s.get('if')!r} — code behind `cfg(windows)` or `cfg(target_os = \"macos\")` is only linted there",
+    )
+    check(
+        "the clippy step covers the whole workspace and every target (`--workspace --all-targets`)",
+        "--workspace" in run_of(s) and "--all-targets" in run_of(s),
+        run_of(s),
+    )
+    check(
+        "the clippy step does not cap or silence the lint levels",
+        "--cap-lints" not in run_of(s) and not re.search(r"(^|\s)-A\s", run_of(s)),
+        run_of(s),
+    )
+
 # Windows checks out with `core.autocrlf=true`: the tests that read this repo's own sources
 # (`include_str!("lib.rs")`, workflows, gradle files) would see CRLF where Linux and macOS see the
 # committed LF, and split on "\n" would find nothing. LF is pinned BEFORE the checkout.
@@ -300,6 +330,15 @@ check(
     "the `scripts` job runs every `scripts/*.test.sh` and `scripts/tests/*.test.sh` by glob",
     loop is not None,
     f"runs are {script_runs!r}",
+)
+# The size and function-limit checks compare their exceptions with the commit where HEAD leaves
+# `main` (their merge-base): a checkout of one commit has neither `origin/main` nor the history
+# between them, and the checks would stop with «cannot judge».
+scripts_checkout = next((s for s in script_steps if "actions/checkout" in str(s.get("uses", ""))), None)
+check(
+    "the `scripts` job checks out the whole history (`fetch-depth: 0`), so the merge-base with `main` exists",
+    scripts_checkout is not None and str((scripts_checkout.get("with") or {}).get("fetch-depth")) == "0",
+    f"checkout is {scripts_checkout!r}",
 )
 if loop is not None:
     check(

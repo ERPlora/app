@@ -41,17 +41,30 @@ cargo tauri android build --apk --aab # Android: JDK 17, SDK 36, NDK 27.1.122970
 
 ```bash
 cargo test --workspace --no-fail-fast      # los tres crates (erplora-tauri, plugin Android, peripherals)
+cargo clippy --workspace --all-targets     # niveles de lint y límites de función (Cargo.toml + clippy.toml)
 scripts/kotlin-plugin-tests.sh             # tests Kotlin del plugin: JDK 17 + platforms;android-36, tras un cargo build
-for t in scripts/*.test.sh scripts/tests/*.test.sh; do bash "$t"; done   # contratos de los workflows y scripts de CI (PyYAML)
+for t in scripts/*.test.sh scripts/tests/*.test.sh; do bash "$t"; done   # contratos de los workflows y scripts de CI (PyYAML; bash 5 en el Mac)
 actionlint -shellcheck= -pyflakes=         # los workflows (versión fijada en CI: 1.7.12)
 cargo test -p erplora-peripherals --test hardware_smoke -- --ignored --nocapture   # a mano, con impresora real
 ```
 
-En CI, `test-shell.yml` tiene dos jobs: `test` corre el `cargo test` en Linux, Windows y macOS y, solo
-en Linux, los tests Kotlin; `scripts` corre `actionlint` y **todos** los `scripts/*.test.sh` y
-`scripts/tests/*.test.sh` por glob (en el monorepo cinco de ellos solo los corría `actionlint.yml`,
-que no se trajo). Se dispara en push a `main` y en PR cuando cambia algo de la app, de `scripts/` o
-de un workflow, y lo **llama** `tauri-release.yml` antes de construir nada.
+En CI, `test-shell.yml` tiene dos jobs: `test` corre el `cargo test` y el `cargo clippy` en Linux,
+Windows y macOS y, solo en Linux, los tests Kotlin; `scripts` corre `actionlint` y **todos** los
+`scripts/*.test.sh` y `scripts/tests/*.test.sh` por glob (en el monorepo cinco de ellos solo los
+corría `actionlint.yml`, que no se trajo). Se dispara en push a `main` y en PR cuando cambia algo de
+la app, de `scripts/` o de un workflow, y lo **llama** `tauri-release.yml` antes de construir nada.
+
+**Tamaño y límites de función.** Un fichero de código no pasa de 1.000 líneas (1.500 si es de tests;
+en Rust, lo que no es un bloque `#[cfg(test)]` cuenta como producción y el fichero entero no pasa de
+1.500), y una función de Rust no pasa de 100 líneas ni de 7 argumentos. Lo comprueban
+`scripts/ci/file-size.sh` y `scripts/ci/function-limits.sh`, que corren en **toda** PR y todo push a
+`main` sin filtro de rutas (`code-limits.yml`, segundos) y cuyos tests corren en el job `scripts`,
+y clippy. Lo que hoy incumple está en `.file-size-allow` (ficheros, con un techo y su issue) y en
+los `#[expect(clippy::…, reason = "…")]` (funciones), y las dos listas solo encogen frente al commit
+donde la rama sale de `main` (su merge-base, no la punta: una release de un tag anterior conserva sus
+techos): ninguna gana una entrada ni sube un techo, el total de excusas de cada lint no crece (mover
+una función excusada a otro fichero, al partirlo, sí vale), un techo baja con el fichero y un
+`expect` que ya no hace falta da error.
 
 ## CI/CD
 
