@@ -27,7 +27,9 @@
 # MSIX packaging, the apt lock, the Android SDK setup, the Play reviewer preflight, the check
 # that the code cites nothing its reader does not have, and the size and function limits of the
 # code (`scripts/ci/file-size.sh`, `scripts/ci/function-limits.sh`), which only let their
-# exceptions shrink against `main`: the job fetches it first.
+# exceptions shrink against the merge-base with `main`: the job checks out the whole history.
+# Those two checks also run on EVERY pull request and push to `main`, in `code-limits.yml`,
+# because the path filter below would miss a big file added anywhere else.
 #
 # The `test` job also runs `cargo clippy --workspace --all-targets` on the three systems: the lint
 # levels and the function limits live in the root `Cargo.toml` and `clippy.toml`, and only clippy
@@ -127,8 +129,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # The whole history (the repo is small): the size and function-limit checks compare their
+      # exception lists with the merge-base of HEAD and `main`, which a one-commit checkout lacks.
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # Pinned version + official downloader (a static Go binary, no package manager). Bump the
       # version deliberately, not via a moving tag.
@@ -144,11 +150,6 @@ jobs:
       # the verdict must not depend on what the runner happens to have installed.
       - name: actionlint (all workflows)
         run: '"${RUNNER_TEMP}/actionlint" -color -shellcheck= -pyflakes='
-
-      # The size and function-limit checks only let their exceptions shrink against `main`, and
-      # the checkout brings only the commit under test.
-      - name: Fetch main (the base of the size and function limits)
-        run: git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
 
       # Every test runs and every red is listed: stopping at the first one hides the others for a
       # whole round trip.

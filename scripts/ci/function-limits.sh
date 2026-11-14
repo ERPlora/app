@@ -4,15 +4,17 @@
 # arguments (`too_many_arguments`), denied for the whole workspace. A function over them today is
 # excused with `#[expect(clippy::…, reason = "…")]`, which becomes an error once it is no longer
 # needed (`unfulfilled_lint_expectations` is denied as well); an `allow` would stay silent forever,
-# so it is refused. Against the base (default `origin/main`) no file may gain an excuse.
+# so it is refused. The repo's total of excuses of each lint may not grow against the commit where
+# HEAD leaves `origin/main` (their merge-base): moving an excused function to another file, as a
+# file split does, keeps the total, and a release of an older tag keeps the excuses it was built with.
 #
-# Usage: function-limits.sh [checkout] [base]   (defaults: the current directory, origin/main)
+# Usage: function-limits.sh [checkout] [main]   (defaults: the current directory, origin/main)
 # Exit:  0 the limits hold · 1 a setting or an excuse breaks them, one line each
-#        2 cannot judge: not a git checkout or the base is missing
+#        2 cannot judge: not a git checkout, or main is missing or shares no history with HEAD
 set -uo pipefail
 
 root=${1:-.}
-base=${2:-origin/main}
+main=${2:-origin/main}
 
 if ! top=$(git -C "$root" rev-parse --show-toplevel 2>/dev/null); then
     echo "::error::$root is not a git checkout" >&2
@@ -20,10 +22,15 @@ if ! top=$(git -C "$root" rev-parse --show-toplevel 2>/dev/null); then
 fi
 cd "$top" || exit 2
 
-if ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
-    echo "::error::the base $base is not in this checkout: run git fetch origin main (the excuses can only shrink against it)" >&2
+if ! git rev-parse --verify --quiet "$main^{commit}" >/dev/null; then
+    echo "::error::$main is not in this checkout: run git fetch origin main (the excuses can only shrink against it)" >&2
     exit 2
 fi
+if ! base=$(git merge-base HEAD "$main" 2>/dev/null); then
+    echo "::error::HEAD and $main share no history in this checkout: fetch the whole history (git fetch --unshallow origin) so the excuses have a base to shrink against" >&2
+    exit 2
+fi
+base_label="$main@$(git rev-parse --short "$base")"
 
 found=0
 error() { echo "::error file=$1::$2"; found=$((found + 1)); }
@@ -89,24 +96,30 @@ if [ ${#rust_files[@]} -gt 0 ]; then
     fi
 fi
 
+# excuses_by_lint [<commit>]: "<lint> <count>" for every lint excused in the tracked Rust files, of
+# that commit or, without one, of the working tree.
+excuses_by_lint() {
+    git grep -h -o -E "$lints" "$@" -- '*.rs' | sed -E 's/[^A-Za-z0-9_:]$//' | sort | uniq -c \
+        | awk '{ print $2, $1 }'
+}
+
 if git cat-file -e "$base:clippy.toml" 2>/dev/null; then
-    # Excuses per file, here and in the base: no file may have more than the base had.
-    gained=$(awk -F: -v base="$base" '
+    gained=$(awk -v base="$base_label" '
         FILENAME == ARGV[1] { had[$1] = $2; next }
-        $2 > had[$1] + 0 { printf "%s: %d function-limit excuse(s), %s has %d\n", $1, $2, base, had[$1] + 0 }
-    ' <(git grep -c -E "$lints" "$base" -- '*.rs' | sed "s#^$base:##") \
-        <(git grep -c -E "$lints" -- '*.rs'))
+        $2 > had[$1] + 0 { printf "%s: %d excuse(s) in the repo, %s has %d\n", $1, $2, base, had[$1] + 0 }
+    ' <(excuses_by_lint "$base") <(excuses_by_lint))
     while IFS= read -r line; do
         [ -n "$line" ] || continue
-        error "${line%%:*}" "$line"
+        echo "::error::$line"
+        found=$((found + 1))
     done <<< "$gained"
 else
     # Only true on the commit that brings the limits: after it, the base always has them.
-    echo "$base has no clippy.toml: the function limits start here"
+    echo "$base_label has no clippy.toml: the function limits start here"
 fi
 
 if [ "$found" -eq 0 ]; then
-    echo "clippy's function limits are on, and no file gained an excuse from them"
+    echo "clippy's function limits are on, and the repo has no more excuses from them than $base_label"
     exit 0
 fi
 cat >&2 <<'HINT'

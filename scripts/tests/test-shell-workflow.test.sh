@@ -15,9 +15,10 @@
 # Also: a push (to `main`) finishes; only a PR's newer head cancels its older run.
 #
 # And the lint gate: `cargo clippy --workspace --all-targets` on the three systems (the lint levels
-# and the function limits live in `Cargo.toml` and `clippy.toml`), and the `scripts` job fetches
-# `main` first, because the size and function-limit checks only let their exceptions shrink
-# against it.
+# and the function limits live in `Cargo.toml` and `clippy.toml`), and the `scripts` job checks out
+# the whole history, because the size and function-limit checks only let their exceptions shrink
+# against the merge-base with `main`. Those two checks also run on EVERY pull request and push to
+# `main`, path filter or not, in `code-limits.yml` (its own contract).
 #
 # And the workflow is also CALLED by `tauri-release.yml` (`workflow_call`), whose builds need it —
 # nothing is published on red. Its `scripts` job runs actionlint over every workflow and EVERY
@@ -330,17 +331,14 @@ check(
     loop is not None,
     f"runs are {script_runs!r}",
 )
-# The size and function-limit checks compare their exceptions with `main`'s, and the checkout
-# brings only the commit under test: `main` is fetched before the loop or they cannot judge.
-fetch_at = next(
-    (i for i, s in enumerate(script_steps) if "git fetch" in run_of(s) and "refs/remotes/origin/main" in run_of(s)),
-    None,
-)
-loop_at = next((i for i, s in enumerate(script_steps) if s is loop), None)
+# The size and function-limit checks compare their exceptions with the commit where HEAD leaves
+# `main` (their merge-base): a checkout of one commit has neither `origin/main` nor the history
+# between them, and the checks would stop with «cannot judge».
+scripts_checkout = next((s for s in script_steps if "actions/checkout" in str(s.get("uses", ""))), None)
 check(
-    "the `scripts` job fetches `main` into `refs/remotes/origin/main` before the script tests",
-    fetch_at is not None and loop_at is not None and fetch_at < loop_at,
-    f"runs are {script_runs!r}",
+    "the `scripts` job checks out the whole history (`fetch-depth: 0`), so the merge-base with `main` exists",
+    scripts_checkout is not None and str((scripts_checkout.get("with") or {}).get("fetch-depth")) == "0",
+    f"checkout is {scripts_checkout!r}",
 )
 if loop is not None:
     check(

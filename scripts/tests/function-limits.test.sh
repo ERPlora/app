@@ -2,7 +2,8 @@
 # Tests for scripts/ci/function-limits.sh, which keeps clippy's function limits switched on (a
 # function of at most 100 lines and 7 arguments) and keeps the functions excused from them from
 # growing in number: an excuse is an `#[expect(clippy::…, reason = "…")]`, never an `allow`, and
-# against `origin/main` no file gains one.
+# the repo's total of excuses of each lint does not grow against the commit where HEAD leaves
+# `origin/main` (moving an excused function to another file is fine).
 #
 # Run:  bash scripts/tests/function-limits.test.sh
 set -uo pipefail
@@ -61,6 +62,16 @@ new_repo() {
 
 # write <path> <text>: replaces a file in the branch and stages it.
 write() { mkdir -p "$(dirname "$repo/$1")"; printf '%s\n' "$2" > "$repo/$1"; git -C "$repo" add -A; }
+
+# main_moves_on: what is staged becomes a new commit of origin/main on top of HEAD, while HEAD and
+# the working tree stay where they were (a release of an older commit, or a branch cut before it).
+main_moves_on() {
+    local tree commit
+    tree=$(git -C "$repo" write-tree)
+    commit=$(git -C "$repo" commit-tree "$tree" -p HEAD -m "main moved on")
+    git -C "$repo" update-ref refs/remotes/origin/main "$commit"
+    git -C "$repo" read-tree -u --reset HEAD
+}
 
 echo
 echo "function-limits.sh (clippy's function limits stay on; the excused functions only shrink)"
@@ -146,21 +157,26 @@ expect_status "the same excuse rewrapped over several lines → exit 0" 0
 new_repo
 write a/src/other.rs "$excused"
 run "$repo"
-expect_status "a file that gains an excuse → exit 1" 1
-expect_says "…as a new exception" "a/src/other.rs: 1 function-limit excuse(s), origin/main has 0"
+expect_status "a new excuse in another file, the base's one kept → exit 1" 1
+expect_says "…counting the whole repo, per lint" "clippy::too_many_lines: 2 excuse(s) in the repo, origin/main@"
+
+new_repo
+write a/src/lib.rs 'fn render() {}'
+write a/src/receipt.rs "$excused"$'\nfn render() {}'
+run "$repo"
+expect_status "an excused function moved to another file (a file split) → exit 0" 0
 
 new_repo
 write a/src/lib.rs $'#[expect(clippy::too_many_arguments, reason = "the row has eight columns")]\nfn upsert() {}\n'"$excused"$'\nfn render() {}'
 run "$repo"
 expect_status "a second excuse in the same file → exit 1" 1
+expect_says "…named by its lint" "clippy::too_many_arguments: 1 excuse(s) in the repo"
 
 new_repo
 write a/src/lib.rs $'#![expect(clippy::pedantic, reason = "generated bindings")]\nfn render() {}'
 run "$repo"
-expect_status "excusing a whole lint group in place of the base's excuse → exit 0 (same count)" 0
-write a/src/other.rs '#[expect(clippy::complexity, reason = "x")]'
-run "$repo"
-expect_status "a new excuse of a group that holds a limit → exit 1" 1
+expect_status "a whole lint group excused in place of the base's single lint → exit 1" 1
+expect_says "…the group is a new excuse" "clippy::pedantic: 1 excuse(s) in the repo"
 
 new_repo
 write a/src/lib.rs 'fn render() {}'
@@ -172,7 +188,20 @@ git -C "$repo" update-ref refs/remotes/origin/main HEAD
 write a/src/lib.rs "$excused"
 run "$repo"
 expect_status "a base with no excuse at all, and the branch adds one → exit 1" 1
-expect_says "…as a new exception" "a/src/lib.rs: 1 function-limit excuse(s), origin/main has 0"
+expect_says "…as a new exception" "clippy::too_many_lines: 1 excuse(s) in the repo, origin/main@"
+
+new_repo
+write a/src/lib.rs 'fn render() {}'
+main_moves_on
+run "$repo"
+expect_status "an older commit that still has an excuse main removed later (a release of a tag) → exit 0" 0
+
+new_repo
+git -C "$repo" update-ref refs/remotes/origin/main \
+    "$(git -C "$repo" commit-tree "$(git -C "$repo" write-tree)" -m "unrelated history")"
+run "$repo"
+expect_status "origin/main with no history in common with HEAD → exit 2, never a silent pass" 2
+expect_says "…asking for the history" "fetch the whole history"
 
 new_repo
 write a/Cargo.toml $'[package]\nname = "a"\n\n[lints]\nworkspace = true'
@@ -195,7 +224,7 @@ clippy_toml > "$repo/clippy.toml"
 write a/src/other.rs "$excused"
 run "$repo"
 expect_status "origin/main without clippy.toml (the limits' first commit) → exit 0" 0
-expect_says "…and it says so" "origin/main has no clippy.toml"
+expect_says "…and it says so" "has no clippy.toml: the function limits start here"
 
 mkdir -p "$tmp_dir/not-a-repo"
 run "$tmp_dir/not-a-repo"

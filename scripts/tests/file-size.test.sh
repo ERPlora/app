@@ -2,7 +2,8 @@
 # Tests for scripts/ci/file-size.sh, which keeps every tracked code file under its size cap:
 # production 1000 lines, tests 1500. In a Rust source file the code outside its `#[cfg(test)]`
 # blocks is production (cap 1000) and the whole file is capped at 1500. Files over their cap today
-# are listed in `.file-size-allow` with a ceiling, and that list can only shrink against `origin/main`.
+# are listed in `.file-size-allow` with a ceiling, and that list can only shrink against the commit
+# where the branch leaves `origin/main` (their merge-base).
 #
 # Run:  bash scripts/tests/file-size.test.sh
 set -uo pipefail
@@ -63,6 +64,23 @@ rust_file() {
 # allow <line>...: replaces the working allow-list (the branch's), leaving origin/main's as it was.
 allow() { printf '%s\n' "$@" > "$repo/.file-size-allow"; git -C "$repo" add -A; }
 
+# commit_base <message>: commits what is staged and makes it origin/main as well.
+commit_base() {
+    git -C "$repo" commit -qm "$1"
+    git -C "$repo" update-ref refs/remotes/origin/main HEAD
+}
+
+# main_moves_on: what is staged becomes a new commit of origin/main on top of HEAD, while HEAD and
+# the working tree stay where they were (a release of an older commit, or a branch cut before it).
+main_moves_on() {
+    local tree commit
+    git -C "$repo" add -A
+    tree=$(git -C "$repo" write-tree)
+    commit=$(git -C "$repo" commit-tree "$tree" -p HEAD -m "main moved on")
+    git -C "$repo" update-ref refs/remotes/origin/main "$commit"
+    git -C "$repo" read-tree -u --reset HEAD
+}
+
 echo
 echo "file-size.sh (no code file over its size cap; the exceptions only shrink)"
 echo
@@ -100,11 +118,12 @@ for f in scripts/tests/big.test.sh android/src/test/java/BigTest.kt src-tauri/te
     expect_says "…$f is over the tests cap" "$f: 1501 lines, over the tests cap of 1500"
 done
 
+exts="rs kt kts java gradle ts tsx js jsx mjs cjs sh html css py ps1 yml"
 new_repo
-for ext in rs kt kts ts js sh html css py ps1 yml; do lines 1001 "src/file.$ext"; done
+for ext in $exts; do lines 1001 "src/file.$ext"; done
 run "$repo"
 expect_status "every code extension is measured → exit 1" 1
-for ext in rs kt kts ts js sh html css py ps1 yml; do expect_says "…the .$ext file" "src/file.$ext: 1001"; done
+for ext in $exts; do expect_says "…the .$ext file" "src/file.$ext: 1001"; done
 
 new_repo
 lines 3000 src-tauri/gen/android/app/Big.kt
@@ -192,7 +211,7 @@ lines 1150 src/other.sh
 allow '2000 src/big.sh app#1' '1200 src/other.sh app#9'
 run "$repo"
 expect_status "a path that origin/main's list does not have → exit 1" 1
-expect_says "…as a new exception" "src/other.sh: new exception, not in origin/main's .file-size-allow"
+expect_says "…as a new exception" "src/other.sh: new exception, not in the .file-size-allow of origin/main@"
 
 new_repo '2000 src/big.sh app#1' '-/2300 src/plugin.rs app#3'
 lines 2050 src/big.sh
@@ -218,7 +237,36 @@ lines 1150 src/big.sh
 allow '1200 src/big.sh app#1'
 run "$repo"
 expect_status "origin/main without an allow-list (the list's first commit) → exit 0" 0
-expect_says "…and it says so" "origin/main has no .file-size-allow"
+expect_says "…and it says so" "has no .file-size-allow: the ratchet starts with this list"
+
+# ── The base is where the branch leaves origin/main, not its tip ─────────────────────────────
+new_repo '2000 src/big.sh app#1'
+lines 1950 src/big.sh
+commit_base "big file"
+lines 1850 src/big.sh
+allow '1900 src/big.sh app#1'
+main_moves_on
+run "$repo"
+expect_status "an older commit, after main lowered a ceiling (a release of a tag) → exit 0" 0
+
+lines 10 src/other.sh
+git -C "$repo" commit -qm "branch work"
+run "$repo"
+expect_status "a branch cut before main lowered a ceiling, which keeps the old one → exit 0" 0
+
+lines 2050 src/big.sh
+allow '2100 src/big.sh app#1'
+run "$repo"
+expect_status "…but raising the ceiling it branched from is still caught → exit 1" 1
+expect_says "…against that commit" "src/big.sh: raises its ceiling from 2000 to 2100"
+
+new_repo '1200 src/big.sh app#1'
+lines 1150 src/big.sh
+git -C "$repo" update-ref refs/remotes/origin/main \
+    "$(git -C "$repo" commit-tree "$(git -C "$repo" write-tree)" -m "unrelated history")"
+run "$repo"
+expect_status "origin/main with no history in common with HEAD → exit 2, never a silent pass" 2
+expect_says "…asking for the history" "fetch the whole history"
 
 # ── Malformed lines and odd places ────────────────────────────────────────────────────────────
 for line in '1200 src/big.sh' '12a0 src/big.sh app#1' '1200/1600 src/big.sh app#1' '1600 src/lib.rs app#1' \
