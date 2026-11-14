@@ -24,8 +24,14 @@
 #
 # Its `scripts` job runs `actionlint` over every workflow and EVERY `scripts/*.test.sh` and
 # `scripts/tests/*.test.sh`: this workflow's own contract, the rules of both release gates, the
-# MSIX packaging, the apt lock, the Android SDK setup, the Play reviewer preflight and the check
-# that the code cites nothing its reader does not have.
+# MSIX packaging, the apt lock, the Android SDK setup, the Play reviewer preflight, the check
+# that the code cites nothing its reader does not have, and the size and function limits of the
+# code (`scripts/ci/file-size.sh`, `scripts/ci/function-limits.sh`), which only let their
+# exceptions shrink against `main`: the job fetches it first.
+#
+# The `test` job also runs `cargo clippy --workspace --all-targets` on the three systems: the lint
+# levels and the function limits live in the root `Cargo.toml` and `clippy.toml`, and only clippy
+# reads them.
 #
 # Contract: `scripts/tests/test-shell-workflow.test.sh`, run by the `scripts` job below.
 # ==============================================================================
@@ -57,6 +63,9 @@ on:
       # Every script and its test: the `scripts` job runs all of them (both release gates, the
       # MSIX packer, the apt wrapper, the Play preflight…) and the `test` job the Kotlin runner.
       - "scripts/**"
+      # The size exceptions and the function limits: a change to either alone must be checked.
+      - ".file-size-allow"
+      - "clippy.toml"
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
@@ -81,6 +90,9 @@ on:
       # Every script and its test: the `scripts` job runs all of them (both release gates, the
       # MSIX packer, the apt wrapper, the Play preflight…) and the `test` job the Kotlin runner.
       - "scripts/**"
+      # The size exceptions and the function limits: a change to either alone must be checked.
+      - ".file-size-allow"
+      - "clippy.toml"
   workflow_dispatch:
   # `tauri-release.yml` calls this workflow and builds only after it is green.
   workflow_call:
@@ -132,6 +144,11 @@ jobs:
       # the verdict must not depend on what the runner happens to have installed.
       - name: actionlint (all workflows)
         run: '"${RUNNER_TEMP}/actionlint" -color -shellcheck= -pyflakes='
+
+      # The size and function-limit checks only let their exceptions shrink against `main`, and
+      # the checkout brings only the commit under test.
+      - name: Fetch main (the base of the size and function limits)
+        run: git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
 
       # Every test runs and every red is listed: stopping at the first one hides the others for a
       # whole round trip.
@@ -246,6 +263,17 @@ jobs:
       # This is the only place the tests of `erplora-peripherals` run.
       - name: cargo test -p erplora-tauri
         run: cargo test --no-fail-fast -p erplora-tauri -p tauri-plugin-erplora-android -p erplora-peripherals
+
+      # The lint gate. Its levels (correctness denied; functions of at most 100 lines and 7
+      # arguments) live in the root `Cargo.toml` and `clippy.toml`, which `cargo test` never reads.
+      # On every system: code behind `cfg(windows)` or `cfg(target_os = "macos")` is linted only
+      # there. No `-D warnings`: the levels are set in the table, not on the command line.
+      - name: cargo clippy (lint levels + function limits)
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup component add clippy
+          cargo clippy --workspace --all-targets
 
       # ── Kotlin tests of the Android plugin — Linux only ───────────────────────────────────
       #

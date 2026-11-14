@@ -732,6 +732,7 @@ fn render_tax_breakdown(b: &mut EscposBuilder, data: &serde_json::Value, t: Loca
 }
 
 /// The receipt; with [`Fiscal::FullInvoice`] it is also the full invoice.
+#[expect(clippy::too_many_lines, reason = "renders the whole receipt top to bottom in one pass")]
 fn render_receipt(b: &mut EscposBuilder, data: &serde_json::Value, kind: Fiscal) {
     let t = Locale::from_document(data);
 
