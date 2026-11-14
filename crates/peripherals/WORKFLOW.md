@@ -550,7 +550,7 @@ Contra `origin/develop` del hub (05/10/2026). Una línea por discrepancia; manda
   queda pendiente en la cola y uno que venía de la cola del hub vuelve «fallido» sin aviso (F06).
 - **`README.md` del crate y `usb.rs`** hablan de «un recibo con logo»: no hay imágenes en el
   renderizador (F16).
-- **Comentario de `escpos.rs` («80 mm ≈ 32 caracteres»)**: en una térmica de 80 mm con la fuente A caben
+- **Comentario de `escpos/mod.rs` («80 mm ≈ 32 caracteres»)**: en una térmica de 80 mm con la fuente A caben
   48 columnas; el crate compone a 32 siempre (F16).
 - **`architecture/hub/crates/peripherals.md`** presenta el crate como «el camino vivo» de la cola; hoy
   lo recorren la impresión directa de la caja y los trabajos que el hub entrega a un dispositivo con impresora de red o Bluetooth, la hoja de prueba y el cajón; una USB solo recibe la hoja de prueba («Probar»): ni tiques, ni comandas, ni trabajos de la cola, ni el cajón al cobrar (F07, F15).
