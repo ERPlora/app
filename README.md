@@ -56,7 +56,7 @@ la app, de `scripts/` o de un workflow, y lo **llama** `tauri-release.yml` antes
 
 **Tamaño y límites de función.** Un fichero de código no pasa de 1.000 líneas (1.500 si es de tests;
 en Rust, lo que no es un bloque `#[cfg(test)]` cuenta como producción y el fichero entero no pasa de
-1.500), y una función de Rust no pasa de 100 líneas ni de 7 argumentos. Lo comprueban
+1.500, y los tests sacados de un módulo a su `tests.rs` cuentan como tests), y una función de Rust no pasa de 100 líneas ni de 7 argumentos. Lo comprueban
 `scripts/ci/file-size.sh` y `scripts/ci/function-limits.sh`, que corren en **toda** PR y todo push a
 `main` sin filtro de rutas (`code-limits.yml`, segundos) y cuyos tests corren en el job `scripts`,
 y clippy. Lo que hoy incumple está en `.file-size-allow` (ficheros, con un techo y su issue) y en

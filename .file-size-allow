@@ -1,5 +1,4 @@
 # Code files over their size cap today, checked by scripts/ci/file-size.sh. The list only shrinks.
 # <ceiling> <path> <issue>: ceiling = lines today rounded up to the hundred; a Rust source file takes <production>/<whole file>, "-" for a part within its cap.
-1600/4300 crates/peripherals/src/escpos.rs app#43
 2400/3800 src-tauri/src/lib.rs app#44
 -/1800 crates/peripherals/src/usb.rs app#46
