@@ -104,7 +104,7 @@ if checkout_at is not None:
         depth == "0",
         f"fetch-depth is {depth!r}",
     )
-for script in ("scripts/ci/file-size.sh", "scripts/ci/function-limits.sh"):
+for script in ("scripts/ci/file-size.py", "scripts/ci/function-limits.sh"):
     at = next((i for i, s in enumerate(steps) if script in run_of(s)), None)
     check(f"a step runs `{script}`", at is not None, f"steps are {[run_of(s) for s in steps]!r}")
     if at is not None and checkout_at is not None:

@@ -1,3 +1,10 @@
-# Code files over their size cap today, checked by scripts/ci/file-size.sh. The list only shrinks.
-# <ceiling> <path> <issue>: ceiling = lines today rounded up to the hundred; a Rust source file takes <production>/<whole file>, "-" for a part within its cap.
--/1800 crates/peripherals/src/usb.rs app#46
+# Code files over their size cap today, checked by scripts/ci/file-size.py. The list only shrinks.
+# <ceiling> <path> <issue>: the ceiling is the file's exact size in lines; a Rust source file takes <production>/<whole file>, "-" for a part within its cap.
+677/1226 crates/peripherals/src/discovery.rs erplora-next#78
+696/1121 crates/peripherals/src/registry.rs erplora-next#78
+744/1717 crates/peripherals/src/usb.rs erplora-next#89
+650 crates/tauri-plugin-erplora-android/android/src/main/java/com/erplora/android/ErploraAndroidPlugin.kt erplora-next#78
+131 scripts/ci/function-limits.sh erplora-next#78
+525 scripts/ci/play-reviewer-preflight.py erplora-next#78
+213 scripts/release-gate.sh erplora-next#78
+175 scripts/release-version.sh erplora-next#78

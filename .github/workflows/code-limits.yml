@@ -2,7 +2,7 @@
 # ERPlora Shell (ERPlora/app) — size and function limits of the code
 # ==============================================================================
 #
-# Runs `scripts/ci/file-size.sh` and `scripts/ci/function-limits.sh` on EVERY pull request and
+# Runs `scripts/ci/file-size.py` and `scripts/ci/function-limits.sh` on EVERY pull request and
 # every push to `main`, whatever the change touches. `test-shell.yml` only runs when certain trees
 # change, so a big file added in another folder or a new crate would go unchecked there.
 #
@@ -43,8 +43,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: File size (scripts/ci/file-size.sh)
-        run: bash scripts/ci/file-size.sh
+      - name: File size (scripts/ci/file-size.py)
+        run: python3 scripts/ci/file-size.py
 
       - name: Function limits (scripts/ci/function-limits.sh)
         run: bash scripts/ci/function-limits.sh
