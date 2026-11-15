@@ -123,7 +123,7 @@ class DownloadPublisherTest {
     fun `the refusal travels under the word the whole chain reads`() {
         // Kotlin rejects with this code, Tauri renders it as `[code] - message`, Rust recognises it
         // and the page turns it into "open your business in a browser". One word end to end; there
-        // is a test in `src/tests.rs` holding the other end.
+        // is a test in `src/downloads.rs` holding the other end.
         assertEquals("downloads_unreachable", DownloadPublisher.DOWNLOADS_UNREACHABLE)
     }
 }
