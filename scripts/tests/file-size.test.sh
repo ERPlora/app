@@ -297,6 +297,34 @@ run "$repo"
 expect_status "a file main had under its cap never enters the list → exit 1" 1
 expect_says "…as a new exception" "src/Small.kt: new exception, not in the .file-size-allow of origin/main@"
 
+# ── A cap only comes down against origin/main ──────────────────────────────────────────────────
+# A copy of this checker at origin/main with the given caps changed (sed expressions), and the
+# branch bringing this checker as it is.
+checker_on_main() {
+    mkdir -p "$repo/scripts/ci"
+    sed "$@" "$GUARD" > "$repo/scripts/ci/file-size.py"
+    git -C "$repo" add -A
+    commit_base "the checker"
+    cp "$GUARD" "$repo/scripts/ci/file-size.py"
+    git -C "$repo" add -A
+}
+
+new_repo
+checker_on_main -e 's/^KOTLIN_CAP = 500$/KOTLIN_CAP = 400/' -e 's/^RUST_WHOLE_CAP = 1000$/RUST_WHOLE_CAP = 900/'
+run "$repo"
+expect_status "a cap above the one origin/main's checker sets → exit 1" 1
+expect_says "…naming the cap" "scripts/ci/file-size.py: KOTLIN_CAP 500 is over 400, the one on origin/main@"
+expect_says "…every cap" "scripts/ci/file-size.py: RUST_WHOLE_CAP 1000 is over 900, the one on origin/main@"
+
+new_repo
+checker_on_main -e 's/^KOTLIN_CAP = 500$/KOTLIN_CAP = 600/'
+run "$repo"
+expect_status "a cap below the one origin/main's checker sets → exit 0" 0
+
+new_repo
+run "$repo"
+expect_says "origin/main without this checker (its first commit) says so" "has no scripts/ci/file-size.py: the caps start with this one"
+
 # ── The base is where the branch leaves origin/main, not its tip ─────────────────────────────
 new_repo '2000 src/big.sh app#1'
 lines 2000 src/big.sh
