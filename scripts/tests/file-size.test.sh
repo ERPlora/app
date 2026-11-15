@@ -298,6 +298,26 @@ run "$repo"
 expect_status "a file main had under its cap never enters the list → exit 1" 1
 expect_says "…as a new exception" "src/Small.kt: new exception, not in the .file-size-allow of origin/main@"
 
+new_repo '# the list'
+lines 650 src/Plugin.kt
+commit_base "a file over today's cap, written under the old one"
+lines 651 src/Plugin.kt
+allow '651 src/Plugin.kt app#9'
+git -C "$repo" commit -qm "the branch grows the file and commits it"
+run "$repo"
+expect_status "a file that grew in a commit of the branch enters at its size on main, not at HEAD → exit 1" 1
+expect_says "…the size is the one on main" "src/Plugin.kt: raises its ceiling from 650 to 651"
+
+new_repo '2000 src/big.sh app#1'
+lines 2000 src/big.sh
+commit_base "big file"
+lines 2050 src/big.sh
+allow '2050 src/big.sh app#1'
+git -C "$repo" commit -qm "the branch raises the ceiling and commits it"
+run "$repo"
+expect_status "a ceiling raised in a commit of the branch is judged against main's list, not HEAD's → exit 1" 1
+expect_says "…the ceiling is the one on main" "src/big.sh: raises its ceiling from 2000 to 2050"
+
 # ── A cap only comes down against origin/main ──────────────────────────────────────────────────
 # A copy of this checker at origin/main with the given caps changed (sed expressions), and the
 # branch bringing this checker as it is.
@@ -316,6 +336,11 @@ run "$repo"
 expect_status "a cap above the one origin/main's checker sets → exit 1" 1
 expect_says "…naming the cap" "scripts/ci/file-size.py: KOTLIN_CAP 500 is over 400, the one on origin/main@"
 expect_says "…every cap" "scripts/ci/file-size.py: RUST_WHOLE_CAP 1000 is over 900, the one on origin/main@"
+
+git -C "$repo" commit -qm "the branch raises the caps and commits it"
+run "$repo"
+expect_status "a cap raised in a commit of the branch is judged against main's checker, not HEAD's → exit 1" 1
+expect_says "…the cap is the one on main" "scripts/ci/file-size.py: KOTLIN_CAP 500 is over 400, the one on origin/main@"
 
 new_repo
 checker_on_main -e 's/^KOTLIN_CAP = 500$/KOTLIN_CAP = 600/'
