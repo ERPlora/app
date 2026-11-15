@@ -121,6 +121,7 @@ cap_case ui/page.test.ts 500 tests
 cap_case shell-dist/index.html 1000 production
 cap_case .github/workflows/release.yml 1000 production
 cap_case scripts/pack-msix.ps1 1000 production
+cap_case src-tauri/tests/fixtures/receipt.html 1500 tests
 
 new_repo
 lines 101 scripts/deploy.sh
