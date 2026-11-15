@@ -54,17 +54,22 @@ Windows y macOS y, solo en Linux, los tests Kotlin; `scripts` corre `actionlint`
 corría `actionlint.yml`, que no se trajo). Se dispara en push a `main` y en PR cuando cambia algo de
 la app, de `scripts/` o de un workflow, y lo **llama** `tauri-release.yml` antes de construir nada.
 
-**Tamaño y límites de función.** Un fichero de código no pasa de 1.000 líneas (1.500 si es de tests;
-en Rust, lo que no es un bloque `#[cfg(test)]` cuenta como producción y el fichero entero no pasa de
-1.500, y los tests sacados de un módulo a su `tests.rs` cuentan como tests), y una función de Rust no pasa de 100 líneas ni de 7 argumentos. Lo comprueban
-`scripts/ci/file-size.sh` y `scripts/ci/function-limits.sh`, que corren en **toda** PR y todo push a
-`main` sin filtro de rutas (`code-limits.yml`, segundos) y cuyos tests corren en el job `scripts`,
-y clippy. Lo que hoy incumple está en `.file-size-allow` (ficheros, con un techo y su issue) y en
-los `#[expect(clippy::…, reason = "…")]` (funciones), y las dos listas solo encogen frente al commit
-donde la rama sale de `main` (su merge-base, no la punta: una release de un tag anterior conserva sus
+**Tamaño y límites de función.** Cada lenguaje tiene su tope, en líneas físicas (producción / tests):
+Rust 500 fuera de los bloques `#[cfg(test)]` y 1.000 el fichero entero (si pasa, los tests salen a
+`<módulo>/tests.rs`, que cuenta como tests, con 1.000); Kotlin y Python, 500 / 1.000; un script de
+Bash, 100 (uno más largo se escribe en Python); TypeScript y JavaScript, 300 / 500; lo demás (HTML,
+YAML, PowerShell…), 1.000 / 1.500. Una función de Rust no pasa de 100 líneas ni de 7 argumentos. Lo
+comprueban `scripts/ci/file-size.py` y `scripts/ci/function-limits.sh`, que corren en **toda** PR y
+todo push a `main` sin filtro de rutas (`code-limits.yml`, segundos) y cuyos tests corren en el job
+`scripts`, y clippy. Lo que hoy incumple está en `.file-size-allow` (ficheros, con su tamaño exacto
+y su issue) y en los `#[expect(clippy::…, reason = "…")]` (funciones). Un fichero de la lista se
+puede cambiar sin partirlo, pero no crece: lo que añade un cambio va a un módulo nuevo, y el cambio
+que lo encoge baja su número al tamaño nuevo. Las dos listas solo encogen frente al commit donde la
+rama sale de `main` (su merge-base, no la punta: una release de un tag anterior conserva sus
 techos): ninguna gana una entrada ni sube un techo, el total de excusas de cada lint no crece (mover
-una función excusada a otro fichero, al partirlo, sí vale), un techo baja con el fichero y un
-`expect` que ya no hace falta da error.
+una función excusada a otro fichero, al partirlo, sí vale) y un `expect` que ya no hace falta da
+error. La única entrada posible en `.file-size-allow` es la del cambio que baja un tope: lo que
+`main` ya tenía por encima entra, como mucho, con el tamaño que tenía allí.
 
 ## CI/CD
 

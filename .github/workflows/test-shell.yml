@@ -26,7 +26,7 @@
 # `scripts/tests/*.test.sh`: this workflow's own contract, the rules of both release gates, the
 # MSIX packaging, the apt lock, the Android SDK setup, the Play reviewer preflight, the check
 # that the code cites nothing its reader does not have, and the size and function limits of the
-# code (`scripts/ci/file-size.sh`, `scripts/ci/function-limits.sh`), which only let their
+# code (`scripts/ci/file-size.py`, `scripts/ci/function-limits.sh`), which only let their
 # exceptions shrink against the merge-base with `main`: the job checks out the whole history.
 # Those two checks also run on EVERY pull request and push to `main`, in `code-limits.yml`,
 # because the path filter below would miss a big file added anywhere else.
