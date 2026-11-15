@@ -261,7 +261,7 @@ expect_status "a lowered ceiling and a removed line → exit 0" 0
 
 run "$repo" refs/remotes/upstream/main
 expect_status "a base that does not exist → exit 2, never a silent pass" 2
-expect_says "…saying how to get it" "git fetch"
+expect_says "…saying how to get it" "refs/remotes/upstream/main is not in this checkout: run git fetch origin main"
 
 new_repo
 lines 1150 src/big.sh
@@ -317,6 +317,16 @@ allow '2050 src/big.sh app#1'
 run "$repo"
 expect_status "…but raising the ceiling it branched from is still caught → exit 1" 1
 expect_says "…against that commit" "src/big.sh: raises its ceiling from 2000 to 2050"
+
+new_repo '-/1800 src/usb.rs app#46'
+rust_file src/usb.rs 744 973 0
+commit_base "a ceiling above the file's size, from when ceilings were rounded"
+allow '744/1717 src/usb.rs app#46'
+main_moves_on
+rust_file src/usb.rs 744 1006 0
+allow '744/1750 src/usb.rs app#46'
+run "$repo"
+expect_status "the ceilings are the list's where the branch leaves main, not at its tip → exit 0" 0
 
 new_repo '# the list'
 lines 400 src/Small.kt
