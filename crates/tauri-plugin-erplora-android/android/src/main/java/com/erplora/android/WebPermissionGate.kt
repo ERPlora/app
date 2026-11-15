@@ -29,9 +29,10 @@ import java.util.Locale
  * of those pages could record with no dialog at all.
  *
  * So the app decides by ORIGIN, with the rule its Rust half already uses for «one of ours»
- * (`trusted_hub_origin`, `is_hub_domain` in `src-tauri/src/lib.rs`): an https hub
- * `<label>(.<label>)*.erplora.com`, the SaaS at the apex, and the loopback for development. A
- * refused page gets its `NotAllowedError` / `PERMISSION_DENIED` and Android is never asked.
+ * (`trusted_hub_origin` in `src-tauri/src/hub_url.rs`, `is_hub_domain` in
+ * `src-tauri/src/links.rs`): an https hub `<label>(.<label>)*.erplora.com`, the SaaS at the apex,
+ * and the loopback for development. A refused page gets its `NotAllowedError` /
+ * `PERMISSION_DENIED` and Android is never asked.
  */
 object WebPermissionGate {
 

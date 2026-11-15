@@ -437,17 +437,17 @@ fn the_configured_saas_is_policed_as_well() {
 
 // ── …and the window actually asks ────────────────────────────────────────────────────────────────
 
-/// A top-level function of the shell, from the real source, without its comments: prose is not
+/// A top-level function of the main window's module, from the real source, without its comments: prose is not
 /// code, and a comment that names a call must not satisfy the checks below.
 fn shell_function(name: &str) -> String {
-    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs");
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/window.rs");
     let source = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
     source
         .find(&format!("fn {name}"))
         .map(|at| &source[at..])
         .and_then(|rest| rest.find("\n}").map(|end| &rest[..end]))
-        .unwrap_or_else(|| panic!("src/lib.rs no longer defines `{name}`"))
+        .unwrap_or_else(|| panic!("src/window.rs no longer defines `{name}`"))
         .lines()
         .map(|line| line.find("//").map_or(line, |at| &line[..at]))
         .collect::<Vec<_>>()

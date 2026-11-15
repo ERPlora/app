@@ -284,7 +284,7 @@ mod desktop {
         let notice = ToastNotification::CreateToastNotification(&xml).map_err(|e| e.to_string())?;
         // The Store copy is a package and shows notices under its own identity; one installed by the
         // `.exe`/`.msi` does it under the identifier its Start-menu entry carries.
-        let notifier = if crate::distribution_channel() == "msstore" {
+        let notifier = if crate::device::distribution_channel() == "msstore" {
             ToastNotificationManager::CreateToastNotifier()
         } else if installed() {
             ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app.config().identifier.as_str()))

@@ -55,7 +55,7 @@ fn only_the_hub_pwa_gets_to_listen() {
 fn the_page_and_the_shell_name_the_same_event_and_argument() {
     // The page half lives in the hub's web app, outside this repo; only the shell half is checked
     // here.
-    let shell = read("src/lib.rs");
+    let shell = read("src/notices.rs");
     assert!(
         shell.contains(
             "fn erplora_notify(app: tauri::AppHandle, title: String, body: String, id: Option<i64>, path: Option<String>)"
@@ -94,12 +94,13 @@ fn the_page_claims_the_tap_the_shell_kept() {
 
 #[test]
 fn the_hub_pwa_may_claim_a_kept_tap() {
-    let lib = read("src/lib.rs");
-    assert!(lib.contains("fn erplora_take_notice_tap("), "the claim command is gone");
+    let notices = read("src/notices.rs");
+    assert!(notices.contains("fn erplora_take_notice_tap("), "the claim command is gone");
     assert!(
-        lib.contains("launch_tap_payload(app.erplora_android().take_notice_tap())"),
+        notices.contains("launch_tap_payload(app.erplora_android().take_notice_tap())"),
         "the claim no longer asks Kotlin for the tap that started the app"
     );
+    let lib = read("src/lib.rs");
     let handler = &lib[lib.find("generate_handler![").expect("generate_handler!")..];
     assert!(handler.contains("erplora_take_notice_tap"), "the claim command is not registered");
     assert!(
