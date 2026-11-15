@@ -14,7 +14,7 @@
   This file is the durable half. The Android manifest merger folds a library module's
   `<uses-permission>` tags into the app at build time, and this module is a hand-written crate, so
   regenerating the Android project cannot take the declaration with it. The app manifest keeps its
-  own copy on purpose; guards in `crates/tauri-plugin-erplora-android/src/lib.rs` and
+  own copy on purpose; guards in `crates/tauri-plugin-erplora-android/src/permissions.rs` and
   `src-tauri/tests/android_local_network.rs` fail loudly if either copy loses one, and the release
   job reads the list back off the built APK, which is the only place the MERGED manifest exists.
 
