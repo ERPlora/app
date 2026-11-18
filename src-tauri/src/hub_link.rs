@@ -58,6 +58,9 @@ struct LinkState {
     /// from the moment a navigation starts (WKWebView's `URL`, WebView2's `Source`), while the page
     /// that started it keeps running until the new one commits: between the two, nothing drives.
     landed: Option<String>,
+    /// The origin of the page that last finished loading, which a navigation that starts does not
+    /// clear: the page the window still shows when that navigation is not loaded after all.
+    finished: Option<String>,
 }
 
 /// The hub this installation is linked to, and the page the window is on.
@@ -79,6 +82,7 @@ impl HubLink {
                 linked: None,
                 showing: showing.map(origin_of),
                 landed: showing.map(origin_of),
+                finished: showing.map(origin_of),
             }),
         }
     }
@@ -132,10 +136,21 @@ impl HubLink {
         Some(origin)
     }
 
+    /// The window did not load the page it was heading to (sent to the system browser, or refused,
+    /// maybe after an allowed page answered with a redirect): the page that last finished loading
+    /// is still the one running, and the one it shows.
+    pub fn stayed(&self) {
+        let mut state = self.state();
+        state.showing = state.finished.clone();
+        state.landed = state.finished.clone();
+    }
+
     /// The page at `url` finished loading (`PageLoadEvent::Finished`, wired by `open_main_window`):
     /// whatever page started the navigation is gone, and this one may drive if it is the hub.
     pub fn landed(&self, url: &Url) {
-        self.state().landed = Some(origin_of(url));
+        let mut state = self.state();
+        state.landed = Some(origin_of(url));
+        state.finished = state.landed.clone();
     }
 
     /// May the page at `page` call the commands that belong to the linked hub? Only when it is the
@@ -289,6 +304,28 @@ mod tests {
     }
 
     // ── The gate: only the linked hub drives the device ────────────────────────────────────────
+
+    #[test]
+    fn the_hub_still_drives_when_a_page_it_opened_leaves_the_window_with_a_redirect() {
+        // The hub opens an allowed page whose redirect goes to the system browser: the window
+        // never leaves the hub, so nothing else finishes loading to give it the device back.
+        let link = linked_to_the_hub();
+        link.follow(&url("https://erplora.com/go/elsewhere"));
+        link.stayed();
+        assert!(link.drives(&url("https://panaderia.a.erplora.com/m/sales")));
+    }
+
+    #[test]
+    fn a_page_that_stayed_cannot_drive_for_the_hub_it_was_sending_the_window_to() {
+        // A foreign page sends the window to the linked hub and, before that page has loaded, to a
+        // page the browser takes: the page still running is the foreign one.
+        let link = linked_to_the_hub();
+        link.follow(&url("https://www.erplora.com/"));
+        link.landed(&url("https://www.erplora.com/"));
+        link.follow(&url(HUB));
+        link.stayed();
+        assert!(!link.drives(&url(HUB)), "the page left behind drives the drawer of the hub");
+    }
 
     #[test]
     fn the_linked_hub_drives_the_device_on_any_of_its_pages() {

@@ -24,7 +24,7 @@ mod hub_link;
 mod link_consent;
 mod navigation;
 mod notice_tap;
-pub use navigation::{NavigationVerdict, navigation_verdict};
+pub use navigation::{navigation_verdict, NavigationVerdict, WindowPages, FOREIGN_PAGES_LEAVE};
 mod native_print;
 pub use native_print::{
     check_print_document, native_print_supported, print_document_id, print_document_url, print_window_label,
@@ -423,7 +423,9 @@ mod tests {
         assert!(!navigation.contains("shell_capture_origin(nav)"), "a navigation links a hub without asking who chose it");
         let loaded = window.split(".on_page_load(").nth(1).unwrap_or_default();
         assert!(
-            loaded.contains("PageLoadEvent::Finished") && loaded.contains(".landed("),
+            loaded.contains("PageLoadEvent::Finished")
+                && loaded.contains("page_finished(&window, payload.url())")
+                && body_of(window_code, "fn page_finished<").contains("link.landed(url)"),
             "the hardware opens before the hub's page has finished loading: the page that sent the window there may still run"
         );
         assert!(body_of(window_code, "fn forget_hub(").contains("forget_linked_hub(&app)"), "«Change business» keeps the old hub linked");

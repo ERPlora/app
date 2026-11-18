@@ -64,10 +64,10 @@ pub(crate) fn trusted_hub_origin(url: &tauri::Url) -> Option<String> {
 /// Capture contract: when the navigation carries the `?shell=1` marker **and** the destination is
 /// one of ours ([`trusted_hub_origin`]), returns the ORIGIN to persist as `hub_url`.
 ///
-/// The marker says "remember me", not "trust me": it rides on the URL being navigated to, and
-/// `on_navigation` only refuses pages of the SaaS, and only in the Play copy
-/// ([`navigation_verdict`]) — so without the second filter one link is enough to leave the
-/// till booting on somebody else's page, for good.
+/// The marker says "remember me", not "trust me": it rides on the URL being navigated to, and the
+/// window still loads many pages that are not a hub ([`navigation_verdict`]): the SaaS, Google's
+/// sign-in and, on the desktop, any foreign page. Without the second filter one link is enough to
+/// leave the till booting on somebody else's page, for good.
 ///
 /// [`navigation_verdict`]: crate::navigation_verdict
 pub fn shell_capture_origin(url: &tauri::Url) -> Option<String> {
@@ -390,12 +390,12 @@ mod tests {
     // ── The marker says "remember me"; it does not say WHO may ask ────────────────────────────
     //
     // If `?shell=1` were the whole capture contract, ANY https origin that carried it would become
-    // the origin this installation boots at, for good. The shell blocks no navigation to a foreign
-    // host (`on_navigation` refuses only SaaS pages, in the Play copy), so one link would be
-    // enough: an open redirect on the SaaS, an injection into the third-party checkout the same
-    // window loads, or simply a link a user taps. From then on the till would open full-screen,
-    // chrome-less and titled "ERPlora" on somebody else's page, and the operator would type the
-    // hub password into it.
+    // the origin this installation boots at, for good. The window still loads pages that are not a
+    // hub: the SaaS, Google's sign-in and, on the desktop, any foreign page (on Android a foreign
+    // page opens in the system browser instead). So one link would be enough: an open redirect on
+    // the SaaS, an injection into a third-party page the same window loads, or simply a link a user
+    // taps. From then on the till would open full-screen, chrome-less and titled "ERPlora" on
+    // somebody else's page, and the operator would type the hub password into it.
     //
     // The destination rule is therefore the SAME one the deep link applies and the same one
     // `capabilities/*.json` declares: only a hub of ours, or the loopback of this machine. The

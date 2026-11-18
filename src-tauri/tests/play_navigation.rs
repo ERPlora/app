@@ -11,13 +11,13 @@
 //! refused in the Play copy — whatever the templates say. The other copies (direct install,
 //! Microsoft Store) keep following every link.
 //!
-//! What is deliberately NOT policed: pages that are not the SaaS. Hubs are where the app lives, the
-//! loopback is development, the bundled page is ours, and foreign hosts keep their usual behaviour
-//! — the payment pages this guard exists for are reached through the SaaS, and the SaaS is what the
-//! list covers. And it governs the WINDOW only: the doors that leave for the system browser
-//! (through `openExternal`) are the web's guard.
+//! What this list does NOT police: pages that are not the SaaS. Hubs are where the app lives, the
+//! loopback is development, the bundled page is ours, and a foreign page never stays in the window
+//! (`tests/foreign_navigation.rs`) — the payment pages this guard exists for are reached through the
+//! SaaS, and the SaaS is what the list covers. And it governs the WINDOW only: the doors that leave
+//! for the system browser (through `openExternal`) are the web's guard.
 
-use erplora_tauri_lib::{NavigationVerdict, navigation_verdict};
+use erplora_tauri_lib::{NavigationVerdict, WindowPages, navigation_verdict};
 
 const SAAS: &str = "https://erplora.com";
 const PLAY: &str = "play";
@@ -26,7 +26,8 @@ fn verdict_in(distribution: &str, raw: &str) -> NavigationVerdict {
     let url: tauri::Url = raw
         .parse()
         .unwrap_or_else(|e| panic!("{raw} is not a URL: {e}"));
-    navigation_verdict(distribution, SAAS, &url)
+    // The Android window, where the Play copy lives.
+    navigation_verdict(distribution, &WindowPages::new(SAAS, vec![SAAS.to_string()], true), &url)
 }
 
 fn in_play(raw: &str) -> NavigationVerdict {
@@ -417,7 +418,8 @@ fn the_configured_saas_is_policed_as_well() {
     // app boots on is the SaaS, so the list applies to it too — judged by ORIGIN, so a hub served
     // from the same machine on another port is still a hub.
     let local = "http://127.0.0.1:8001";
-    let judge = |raw: &str| navigation_verdict(PLAY, local, &raw.parse().expect("url"));
+    let window = WindowPages::new(local, vec![local.to_string()], true);
+    let judge = |raw: &str| navigation_verdict(PLAY, &window, &raw.parse().expect("url"));
     assert_eq!(
         judge("http://127.0.0.1:8001/pricing/"),
         NavigationVerdict::Refuse
@@ -537,7 +539,7 @@ fn pages_that_are_not_the_saas_are_followed_as_before() {
             // The app's own bundled page (the offline screen).
             "http://tauri.localhost/index.html",
             "tauri://localhost/index.html",
-            // Foreign hosts and non-web schemes: not the SaaS, not this guard.
+            // Google's sign-in, which the window walks through, and a non-web scheme.
             "https://accounts.google.com/o/oauth2/v2/auth?client_id=x",
             "about:blank",
         ],
