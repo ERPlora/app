@@ -279,9 +279,15 @@ pub(crate) fn open_main_window(app: &tauri::App, cache_dir: Option<PathBuf>) -> 
         .on_navigation(move |nav| {
             // A page the window does not show goes to the system browser, and the Play copy follows
             // only the SaaS pages that cannot take money. First, so a page sent out or refused is
-            // neither remembered as the hub nor watched by the guard below.
+            // neither remembered as the hub nor watched by the guard below; and when it is the
+            // redirect of an allowed page, what that page already moved goes back to the page the
+            // window still shows.
             let verdict = navigation_verdict(distribution_channel(), &pages, nav);
             if verdict != NavigationVerdict::Allow {
+                if let Some(link) = refusals.try_state::<hub_link::HubLink>() {
+                    link.stayed();
+                }
+                watched.stayed();
                 refuse_navigation(&refusals, verdict, &saas_base, nav);
                 return false;
             }

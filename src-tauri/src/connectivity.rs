@@ -139,6 +139,8 @@ pub fn remote_target(url: &Url) -> Option<Url> {
 /// Where the window should be, and how the last few probes went.
 struct NavState {
     target: Url,
+    /// The remote page the window last finished loading, which is the one it shows.
+    last_landed: Option<Url>,
     screen: ShellScreen,
     consecutive_failures: u32,
 }
@@ -156,6 +158,7 @@ impl ShellNav {
         Self {
             state: Mutex::new(NavState {
                 target,
+                last_landed: None,
                 screen: ShellScreen::Target,
                 consecutive_failures: 0,
             }),
@@ -195,8 +198,23 @@ impl ShellNav {
     /// Back takes it to one from the history — becomes the target here, as a navigation would make
     /// it; the page a navigation already made the target asks for no second probe.
     pub fn landed(&self, target: Url) {
-        if self.locked().target != target {
-            self.set_target(target);
+        {
+            let mut state = self.locked();
+            state.last_landed = Some(target.clone());
+            if state.target == target {
+                return;
+            }
+        }
+        self.set_target(target);
+    }
+
+    /// The window did not load the page it was heading to (sent to the system browser, or refused,
+    /// maybe after an allowed page answered with a redirect): it still shows the page it last
+    /// finished loading, and that is where it is meant to be.
+    pub fn stayed(&self) {
+        let showing = self.locked().last_landed.clone();
+        if let Some(page) = showing {
+            self.landed(page);
         }
     }
 
@@ -549,6 +567,29 @@ mod tests {
         nav.landed(page.clone());
         assert!(!probe_pending(&nav), "every page that loads would cost a second request");
         assert_eq!(nav.target(), page);
+    }
+
+    #[test]
+    fn a_page_whose_redirect_leaves_the_window_is_not_where_the_guard_brings_it_back() {
+        // An allowed page answers with a redirect to a page the window does not show: that page
+        // opens in the system browser and the window never leaves the one it showed.
+        let help = Url::parse("https://a.erplora.com/m/help").unwrap();
+        let nav = ShellNav::new(help.clone());
+        nav.landed(help.clone());
+        nav.set_target(Url::parse("https://erplora.com/go/elsewhere").unwrap());
+        nav.stayed();
+        assert_eq!(nav.target(), help);
+    }
+
+    #[test]
+    fn a_page_refused_before_the_window_moved_asks_for_no_probe() {
+        let help = Url::parse("https://a.erplora.com/m/help").unwrap();
+        let nav = ShellNav::new(help.clone());
+        nav.landed(help.clone());
+        let _ = probe_pending(&nav);
+        nav.stayed();
+        assert!(!probe_pending(&nav), "every page sent to the browser would cost a request");
+        assert_eq!(nav.target(), help);
     }
 
     // ── …and the window actually moves ───────────────────────────────────────────────────────────

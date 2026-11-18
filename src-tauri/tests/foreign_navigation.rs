@@ -337,6 +337,26 @@ fn the_main_window_judges_with_this_system_s_rule_and_the_origins_it_boots_on() 
 }
 
 #[test]
+fn a_page_the_window_does_not_load_leaves_it_on_the_page_it_showed() {
+    // An allowed page may answer with a redirect that is sent out or refused: the first hop already
+    // moved the link state and the guard's target, and the window never left the page it showed.
+    let window = window_function("open_main_window");
+    let refused = window
+        .find("if verdict != NavigationVerdict::Allow {")
+        .expect("the handler no longer refuses a page");
+    let returns = window[refused..]
+        .find("return false")
+        .map(|at| refused + at)
+        .expect("the handler never refuses a page");
+    for stays in ["link.stayed()", "watched.stayed()"] {
+        assert!(
+            window[refused..returns].contains(stays),
+            "a refused page leaves `{stays}` out: the state follows a page the window never showed"
+        );
+    }
+}
+
+#[test]
 fn a_page_the_window_does_not_show_opens_in_the_system_browser_off_the_handler() {
     let refuse = window_function("refuse_navigation");
     let off_the_handler = refuse
