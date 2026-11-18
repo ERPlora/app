@@ -23,9 +23,10 @@
 //! ## What it costs
 //!
 //! Nothing while the network is fine. The guard probes once shortly after boot, once per remote
-//! navigation, and then sleeps on a [`Notify`] with no timer at all; it only polls — with backoff —
-//! while it is showing the offline page, which is exactly when someone is waiting for the network
-//! to come back. That matters: this runs on tablets on mobile data.
+//! navigation (Back to a page the window left included), and then sleeps on a [`Notify`] with no
+//! timer at all; it only polls — with backoff — while it is showing the offline page, which is
+//! exactly when someone is waiting for the network to come back. That matters: this runs on
+//! tablets on mobile data.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -142,7 +143,8 @@ struct NavState {
     consecutive_failures: u32,
 }
 
-/// Shared between the guard task, the `on_navigation` handler and the `shell_retry` command.
+/// Shared between the guard task, the `on_navigation` and page-load handlers and the `shell_retry`
+/// command.
 pub struct ShellNav {
     state: Mutex<NavState>,
     /// Raised when something wants a probe NOW: a fresh navigation, or the retry button.
@@ -187,6 +189,15 @@ impl ShellNav {
             state.consecutive_failures = 0;
         }
         self.wake.notify_one();
+    }
+
+    /// The window finished loading `target`. A page `on_navigation` never heard the window go to —
+    /// Back takes it to one from the history — becomes the target here, as a navigation would make
+    /// it; the page a navigation already made the target asks for no second probe.
+    pub fn landed(&self, target: Url) {
+        if self.locked().target != target {
+            self.set_target(target);
+        }
     }
 
     /// Fold one probe into the state and answer with the screen the window must move to.
@@ -494,6 +505,50 @@ mod tests {
         assert_eq!(nav.record(Reachability::Online).2, 0);
         // So a blip needs two NEW failures to strand the window again.
         assert_eq!(nav.record(Reachability::Offline).0, None);
+    }
+
+    /// Whether something asked the guard for a probe and nobody took the request yet.
+    fn probe_pending(nav: &ShellNav) -> bool {
+        tauri::async_runtime::block_on(async {
+            tokio::time::timeout(Duration::from_millis(20), nav.wake.notified())
+                .await
+                .is_ok()
+        })
+    }
+
+    #[test]
+    fn a_page_reached_with_back_becomes_the_target() {
+        // Back loads a page from the history without `on_navigation` hearing it: the guard would
+        // keep watching the page the window left, and bring the window back there after an outage.
+        let hub = Url::parse("https://a.erplora.com/m/sales/pos").unwrap();
+        let nav = ShellNav::new(hub.clone());
+        nav.set_target(Url::parse("https://erplora.com/shell/").unwrap());
+        nav.landed(hub.clone());
+        assert_eq!(nav.target(), hub);
+    }
+
+    #[test]
+    fn a_page_reached_with_back_drops_the_strikes_of_the_page_it_left() {
+        // Measured on the Android emulator: one failed probe of the page left, Back to the hub, and
+        // the second strike against the page left took the window off a hub that answered.
+        let nav = ShellNav::new(Url::parse("https://b.example.test/").unwrap());
+        assert_eq!(nav.record(Reachability::Offline).0, None);
+        let _ = probe_pending(&nav);
+        nav.landed(Url::parse("https://a.erplora.com/").unwrap());
+        assert_eq!(failures_of(&nav), 0);
+        assert_eq!(nav.screen(), ShellScreen::Target);
+        assert!(probe_pending(&nav), "the page reached with Back is never checked");
+    }
+
+    #[test]
+    fn the_page_a_navigation_already_made_the_target_asks_for_no_second_probe() {
+        let page = Url::parse("https://a.erplora.com/").unwrap();
+        let nav = ShellNav::new(Url::parse("https://erplora.com/shell/").unwrap());
+        nav.set_target(page.clone());
+        assert!(probe_pending(&nav), "a navigation asks for its probe");
+        nav.landed(page.clone());
+        assert!(!probe_pending(&nav), "every page that loads would cost a second request");
+        assert_eq!(nav.target(), page);
     }
 
     // ── …and the window actually moves ───────────────────────────────────────────────────────────

@@ -1,4 +1,10 @@
-//! Which pages of the SaaS the main window follows.
+//! Which pages the main window follows.
+//!
+//! The window is the till: the printer, the cash drawer and the card reader answer the linked hub in
+//! it. It shows the hubs, the SaaS, the origins it boots on, this device, the app's own page and
+//! Google's sign-in; on Android any other page opens in the system browser instead, and the window
+//! stays where it was ([`FOREIGN_PAGES_LEAVE`]). Without it, one tap on the YouTube logo of a video
+//! player inside a hub page took the whole till to youtube.com.
 //!
 //! The app boots on the SaaS (`/shell/`) and shows its sign-in, sign-up and account pages inside
 //! its own window. If `on_navigation` answered `true` without looking, that window could walk to
@@ -12,16 +18,18 @@
 //! refused, whatever the page links to. The list is judged on every navigation, so a page on it may
 //! carry links to pages that are not: those are judged when tapped.
 //!
-//! Only the SaaS is policed. Hubs are where the app lives (and carry their own guard, the
+//! The list polices the SaaS only. Hubs are where the app lives (and carry their own guard, the
 //! `no-purchase-steering` test of the web app), the loopback is development, the bundled page is
-//! ours, and foreign hosts keep the behaviour they had: the pages this exists for are reached
-//! through the SaaS.
+//! ours, and a foreign page is sent out before the list is asked: the pages the list exists for are
+//! reached through the SaaS.
 //!
 //! This governs the WINDOW. What leaves for the system browser (`open_external_url`) and the
 //! panel's in-page navigation (its own router, without a full load) never reach `on_navigation`,
 //! so neither is judged here.
 
 use tauri::Url;
+
+use crate::links::{is_hub_domain, is_loopback_host};
 
 /// What `on_navigation` does with a page the window is about to load.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +40,69 @@ pub enum NavigationVerdict {
     Refuse,
     /// Do not load it; the window goes to the app's own start instead (`/shell/`).
     Home,
+    /// Do not load it; it opens in the system browser and the window stays where it is.
+    Browser,
+}
+
+/// Whether this system sends a page the window does not show to the system browser: only Android,
+/// where `on_navigation` hears the window's own loads and none of its frames'. WKWebView and
+/// WebKitGTK hand it the video player, the payment field and the captcha a page loads inside
+/// itself, with nothing to tell them apart from the window's pages, so judging there would empty
+/// every frame. WebView2 hears the window alone too, but the Store and direct copies show the Stripe
+/// pages of the SaaS panel (an invoice to pay, the customer portal) in the window.
+pub const FOREIGN_PAGES_LEAVE: bool = cfg!(target_os = "android");
+
+/// The app's own page (the offline screen) where Tauri serves it over `http`: Windows and Android.
+const BUNDLED_PAGE_HOST: &str = "tauri.localhost";
+
+/// Google's sign-in, which «Continue with Google» walks the window through (`PLAY_SAAS_PAGES`).
+const GOOGLE_SIGN_IN_HOST: &str = "accounts.google.com";
+
+/// The pages the main window shows, fixed when it opens.
+#[derive(Debug, Clone)]
+pub struct WindowPages {
+    /// The SaaS this build boots on (`ERPLORA_SAAS_URL` or the baked default).
+    saas_base: String,
+    /// The origins the window boots on: the SaaS, and the development override.
+    entries: Vec<String>,
+    /// [`FOREIGN_PAGES_LEAVE`] of the system the window runs on.
+    foreign_pages_leave: bool,
+}
+
+impl WindowPages {
+    pub fn new(saas_base: &str, entries: Vec<String>, foreign_pages_leave: bool) -> Self {
+        Self {
+            saas_base: saas_base.to_string(),
+            entries,
+            foreign_pages_leave,
+        }
+    }
+
+    /// Does `target` leave for the system browser? Only a web page can: any other address is the
+    /// webview's own business (`about:`, `data:`, `blob:`, the `tauri:` page).
+    fn sends_out(&self, target: &Url) -> bool {
+        self.foreign_pages_leave
+            && matches!(target.scheme(), "http" | "https")
+            && !self.shows(target)
+    }
+
+    /// Is `target` a page the window shows? Hubs and this device by host, whatever the scheme or
+    /// port, like the SaaS; the origins the window boots on whole; Google's sign-in over https.
+    fn shows(&self, target: &Url) -> bool {
+        if is_saas(&self.saas_base, target)
+            || self.entries.contains(&target.origin().ascii_serialization())
+        {
+            return true;
+        }
+        let Some(host) = target.host_str() else {
+            return false;
+        };
+        let host = host.strip_suffix('.').unwrap_or(host);
+        is_hub_domain(host)
+            || is_loopback_host(host)
+            || host == BUNDLED_PAGE_HOST
+            || (target.scheme() == "https" && host == GOOGLE_SIGN_IN_HOST)
+    }
 }
 
 /// The copy of the app that is held to Google Play's payments policy (`distribution_channel`).
@@ -90,13 +161,17 @@ const PLAY_SAAS_PAGES: &[&str] = &[
     "/cookies/",
 ];
 
-/// The verdict for `target` in the `distribution` copy of the app, `saas_base` being the SaaS this
-/// build boots on (`ERPLORA_SAAS_URL` or the baked default).
+/// The verdict for `target` in the `distribution` copy of the app, whose main window shows `window`.
 ///
-/// Every copy but Play follows every link: Microsoft Store allows paying outside the
-/// store for non-game apps, and the direct install has no store at all.
-pub fn navigation_verdict(distribution: &str, saas_base: &str, target: &Url) -> NavigationVerdict {
-    if distribution != PLAY || !is_saas(saas_base, target) {
+/// A page the window does not show leaves for the system browser in every copy, where this system
+/// sends such pages out ([`FOREIGN_PAGES_LEAVE`]). Of the SaaS, every copy but Play follows every
+/// link: Microsoft Store allows paying outside the store for non-game apps, and the direct install
+/// has no store at all.
+pub fn navigation_verdict(distribution: &str, window: &WindowPages, target: &Url) -> NavigationVerdict {
+    if window.sends_out(target) {
+        return NavigationVerdict::Browser;
+    }
+    if distribution != PLAY || !is_saas(&window.saas_base, target) {
         return NavigationVerdict::Allow;
     }
     let path = target.path();

@@ -12,7 +12,7 @@ use crate::hub_url::{
     trusted_hub_origin, ColdStartLink, HubProbe,
 };
 use crate::links::deep_link_from_args;
-use crate::navigation::{navigation_verdict, NavigationVerdict};
+use crate::navigation::{navigation_verdict, NavigationVerdict, WindowPages, FOREIGN_PAGES_LEAVE};
 use crate::{hub_link, link_consent, ShellError, DEFAULT_SAAS_URL, ENV_SHELL_URL};
 
 /// Forgets the captured hub and sends the window back to the SaaS onboarding. Two callers: the
@@ -243,7 +243,8 @@ pub(crate) fn open_main_window(app: &tauri::App, cache_dir: Option<PathBuf>) -> 
     }
 
     // Where the window is MEANT to be, so the connectivity guard can put it back there. Seeded
-    // with the URL the window is about to load; `on_navigation` keeps it current afterwards.
+    // with the URL the window is about to load; `on_navigation` and every page that finishes
+    // loading keep it current afterwards.
     let initial_target = match &url {
         WebviewUrl::External(u) => u.clone(),
         // The degraded arm above: the env URL is unusable, so the address to come back to is the
@@ -253,6 +254,8 @@ pub(crate) fn open_main_window(app: &tauri::App, cache_dir: Option<PathBuf>) -> 
             .parse()
             .map_err(tauri::Error::InvalidUrl)?,
     };
+    let saas_base = saas_base_url();
+    let pages = WindowPages::new(&saas_base, entries.clone(), FOREIGN_PAGES_LEAVE);
     let hub_link = hub_link::HubLink::new(entries, Some(&initial_target));
     if let Some(origin) = linked {
         hub_link.link(&origin);
@@ -263,25 +266,21 @@ pub(crate) fn open_main_window(app: &tauri::App, cache_dir: Option<PathBuf>) -> 
 
     let last = std::sync::Mutex::new(persisted);
     let watched = nav_state.clone();
-    let saas_base = saas_base_url();
     let refusals = app.handle().clone();
     let window = WebviewWindowBuilder::new(app, "main", url)
         .title("ERPlora")
         .inner_size(1280.0, 800.0)
         .min_inner_size(960.0, 600.0)
-        // The hardware waits for the page to have LOADED: the window's URL flips at the
-        // start of a navigation, while the page that started it still runs until the new one commits.
         .on_page_load(|window, payload| {
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
-                if let Some(link) = window.try_state::<hub_link::HubLink>() {
-                    link.landed(payload.url());
-                }
+                page_finished(&window, payload.url());
             }
         })
         .on_navigation(move |nav| {
-            // The Play copy follows only the SaaS pages that cannot take money. First,
-            // so a refused page is neither remembered as the hub nor watched by the guard below.
-            let verdict = navigation_verdict(distribution_channel(), &saas_base, nav);
+            // A page the window does not show goes to the system browser, and the Play copy follows
+            // only the SaaS pages that cannot take money. First, so a page sent out or refused is
+            // neither remembered as the hub nor watched by the guard below.
+            let verdict = navigation_verdict(distribution_channel(), &pages, nav);
             if verdict != NavigationVerdict::Allow {
                 refuse_navigation(&refusals, verdict, &saas_base, nav);
                 return false;
@@ -324,16 +323,45 @@ pub(crate) fn open_main_window(app: &tauri::App, cache_dir: Option<PathBuf>) -> 
 const REFUSAL_NOTICE_EN: &str = "This page is not available in the app.";
 const REFUSAL_NOTICE_ES: &str = "Esta página no está disponible en la aplicación.";
 
+/// A page finished loading in the main window, whichever way it got there: Back loads one from the
+/// history that `on_navigation` never hears. From now on it may drive the device if it is the linked
+/// hub — the window's URL flips at the start of a navigation, while the page that started it still
+/// runs until the new one commits — and it is where the connectivity guard brings the window back.
+fn page_finished<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>, url: &tauri::Url) {
+    use tauri::Manager;
+    if let Some(link) = window.try_state::<hub_link::HubLink>() {
+        link.landed(url);
+    }
+    let target = connectivity::remote_target(url);
+    if let (Some(nav), Some(target)) = (window.try_state::<Arc<ShellNav>>(), target) {
+        nav.landed(target);
+    }
+}
+
+/// The notice for a page the system browser did not open (no browser, or it said no): English
+/// source plus its `es` translation. Without it the tap that sent the page out does nothing at all.
+const BROWSER_FAILURE_NOTICE_EN: &str = "The browser could not be opened to show this page.";
+const BROWSER_FAILURE_NOTICE_ES: &str = "No se ha podido abrir el navegador para mostrar esta página.";
+
+fn browser_failure_notice_script() -> String {
+    notice_script(BROWSER_FAILURE_NOTICE_EN, BROWSER_FAILURE_NOTICE_ES)
+}
+
 /// The script that shows the refusal notice on the page the window stayed on.
-///
-/// The refused page is the SaaS's, not ours, so there is no i18n runtime to lean on: the language is
-/// picked the way the bundled offline page picks it — Spanish unless the device says otherwise. An
-/// `alert` because it is the one dialog every webview already paints natively (wry's Android client
-/// answers it with an `AlertDialog`). The texts reach the page as JSON string literals, never as
-/// code.
 fn refusal_notice_script() -> String {
-    let es = serde_json::Value::from(REFUSAL_NOTICE_ES);
-    let en = serde_json::Value::from(REFUSAL_NOTICE_EN);
+    notice_script(REFUSAL_NOTICE_EN, REFUSAL_NOTICE_ES)
+}
+
+/// The script that shows a notice of the app on the page the window stayed on.
+///
+/// That page is not ours (the SaaS's, a hub's), so there is no i18n runtime to lean on: the language
+/// is picked the way the bundled offline page picks it — Spanish unless the device says otherwise.
+/// An `alert` because it is the one dialog every webview already paints natively (wry's Android
+/// client answers it with an `AlertDialog`). The texts reach the page as JSON string literals, never
+/// as code.
+fn notice_script(en: &str, es: &str) -> String {
+    let es = serde_json::Value::from(es);
+    let en = serde_json::Value::from(en);
     format!(
         "alert(String(navigator.language || \"es\").toLowerCase().indexOf(\"es\") === 0 ? {es} : {en});"
     )
@@ -347,7 +375,7 @@ fn answer_refusal<R: tauri::Runtime>(
     saas_base: &str,
 ) -> tauri::Result<()> {
     match verdict {
-        NavigationVerdict::Allow => Ok(()),
+        NavigationVerdict::Allow | NavigationVerdict::Browser => Ok(()),
         NavigationVerdict::Home => {
             let start = onboarding_url(saas_base)
                 .parse::<tauri::Url>()
@@ -358,7 +386,8 @@ fn answer_refusal<R: tauri::Runtime>(
     }
 }
 
-/// Records a refused page and answers it on the main window.
+/// Records a page the window does not load and answers it: a page the window does not show opens in
+/// the system browser, and the main window answers one the Play copy refused.
 ///
 /// The answer is sent OFF the handler: on Android `on_navigation` runs inside the webview client's
 /// `shouldOverrideUrlLoading`, on the UI thread and under wry's own lock, and it has to return
@@ -372,15 +401,20 @@ fn refuse_navigation(
     use tauri::Manager;
 
     // Origin and path, never the query: it can carry a one-time code.
-    log::warn!(
-        "shell: the {} copy refused {}{} ({verdict:?})",
-        distribution_channel(),
-        target.origin().ascii_serialization(),
-        target.path()
-    );
+    let page = format!("{}{}", target.origin().ascii_serialization(), target.path());
+    if verdict == NavigationVerdict::Browser {
+        log::info!("shell: {page} is not a page of the window; it opens in the system browser");
+    } else {
+        log::warn!("shell: the {} copy refused {page} ({verdict:?})", distribution_channel());
+    }
     let app = app.clone();
     let saas_base = saas_base.to_string();
+    let target = target.clone();
     tauri::async_runtime::spawn(async move {
+        if verdict == NavigationVerdict::Browser {
+            open_in_browser(&app, &target);
+            return;
+        }
         let Some(window) = app.get_webview_window("main") else {
             log::error!("shell: no main window to answer a refused page on");
             return;
@@ -389,6 +423,27 @@ fn refuse_navigation(
             log::error!("shell: could not answer a refused page ({verdict:?}): {e}");
         }
     });
+}
+
+/// Hands `target` to the system browser as its own app, the way `open_external_url` does. When no
+/// browser opens it, the window says so: otherwise the tap that sent it out did nothing at all.
+fn open_in_browser(app: &tauri::AppHandle, target: &tauri::Url) {
+    use tauri::Manager;
+    use tauri_plugin_opener::OpenerExt;
+
+    let Err(e) = app.opener().open_url(target.as_str(), None::<&str>) else {
+        return;
+    };
+    log::error!(
+        "shell: the system browser did not open {}: {e}",
+        target.origin().ascii_serialization()
+    );
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    if let Err(e) = window.eval(browser_failure_notice_script()) {
+        log::error!("shell: could not say that the system browser did not open: {e}");
+    }
 }
 
 #[cfg(test)]
@@ -549,6 +604,77 @@ mod tests {
         let window = mock_window_at(here);
         answer_refusal(&window, NavigationVerdict::Refuse, "https://erplora.com").expect("answer");
         assert_eq!(window.url().expect("url").as_str(), here);
+    }
+
+    #[test]
+    fn a_page_sent_to_the_system_browser_leaves_the_window_where_it_was() {
+        let here = "https://panaderia.a.erplora.com/m/help";
+        let window = mock_window_at(here);
+        answer_refusal(&window, NavigationVerdict::Browser, "https://erplora.com").expect("answer");
+        assert_eq!(window.url().expect("url").as_str(), here);
+    }
+
+    #[test]
+    fn the_notice_of_a_browser_that_did_not_open_speaks_both_languages() {
+        let script = browser_failure_notice_script();
+        assert!(script.contains(BROWSER_FAILURE_NOTICE_EN), "{script}");
+        assert!(script.contains(BROWSER_FAILURE_NOTICE_ES), "{script}");
+        assert!(script.contains("navigator.language"), "{script}");
+        assert!(script.starts_with("alert("), "{script}");
+    }
+
+    // ── The page the window finished loading ─────────────────────────────────────────────────────
+
+    const HUB_PAGE: &str = "https://panaderia.a.erplora.com/m/sales/pos";
+
+    /// The main window of a till linked to the bakery, after it went from the hub to `away`.
+    fn till_that_went_to(away: &str) -> tauri::App<tauri::test::MockRuntime> {
+        use tauri::Manager;
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        let link = hub_link::HubLink::new(vec!["https://erplora.com".into()], Some(&url(HUB_PAGE)));
+        link.link(BAKERY);
+        link.follow(&url(away));
+        app.manage(link);
+        let nav = Arc::new(ShellNav::new(url(HUB_PAGE)));
+        nav.set_target(url(away));
+        app.manage(nav);
+        tauri::WebviewWindowBuilder::new(&app, "main", tauri::WebviewUrl::External(url(HUB_PAGE)))
+            .build()
+            .expect("mock window");
+        app
+    }
+
+    fn finish_loading(app: &tauri::App<tauri::test::MockRuntime>, page: &str) {
+        use tauri::Manager;
+        page_finished(&app.get_webview_window("main").expect("window"), &url(page));
+    }
+
+    #[test]
+    fn the_page_reached_with_back_is_the_one_the_guard_brings_the_window_back_to() {
+        use tauri::Manager;
+        let app = till_that_went_to("https://erplora.com/shell/");
+        finish_loading(&app, HUB_PAGE);
+        assert_eq!(app.state::<Arc<ShellNav>>().target().as_str(), HUB_PAGE);
+    }
+
+    #[test]
+    fn the_hub_reached_with_back_drives_the_device_again() {
+        use tauri::Manager;
+        let app = till_that_went_to("https://erplora.com/shell/");
+        assert!(!app.state::<hub_link::HubLink>().drives(&url(HUB_PAGE)));
+        finish_loading(&app, HUB_PAGE);
+        assert!(app.state::<hub_link::HubLink>().drives(&url(HUB_PAGE)));
+    }
+
+    #[test]
+    fn the_app_s_own_page_is_never_where_the_guard_brings_the_window_back() {
+        use tauri::Manager;
+        let app = till_that_went_to(HUB_PAGE);
+        finish_loading(&app, "http://tauri.localhost/index.html");
+        finish_loading(&app, "tauri://localhost/index.html");
+        assert_eq!(app.state::<Arc<ShellNav>>().target().as_str(), HUB_PAGE);
     }
 
     #[test]
