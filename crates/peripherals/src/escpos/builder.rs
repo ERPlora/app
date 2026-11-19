@@ -1,5 +1,5 @@
 use super::{LINE_WIDTH, QR_MODULE_DOTS};
-use icu_normalizer::DecomposingNormalizerBorrowed;
+use icu_normalizer::{ComposingNormalizerBorrowed, DecomposingNormalizerBorrowed};
 use oem_cp::{Cp437, StrExt};
 
 /// Horizontal alignment (`ESC a n`).
@@ -207,10 +207,11 @@ impl EscposBuilder {
 /// having, so this is the layer that copes.
 ///
 /// cp437 has á é í ó ú ñ Ñ É Ü but not Á Í Ó Ú (nor À, Ã, Ê, õ…): a letter it lacks prints without
-/// its accent, «CRUSTÁCEOS» as «CRUSTACEOS», rather than as «CRUST?CEOS».
+/// its accent, «CRUSTÁCEOS» as «CRUSTACEOS», rather than as «CRUST?CEOS». An accent that arrives as
+/// a separate combining character is first joined to its letter, so it prints the same.
 pub(super) fn to_printable(txt: &str) -> String {
     let mut out = String::with_capacity(txt.len());
-    for c in txt.chars() {
+    for c in ComposingNormalizerBorrowed::new_nfc().normalize_iter(txt.chars()) {
         match c {
             // Hyphen..horizontal bar (en/em dash included) and the minus sign.
             '\u{2010}'..='\u{2015}' | '\u{2212}' => out.push('-'),
@@ -221,8 +222,11 @@ pub(super) fn to_printable(txt: &str) -> String {
             '\u{00A0}' | '\u{2007}' | '\u{2009}' | '\u{202F}' => out.push(' '),
             // cp437 predates the euro. A footer saying `EUR` beats one saying `?`.
             '\u{20AC}' => out.push_str("EUR"),
-            other if Cp437::try_from(other).is_ok() => out.push(other),
-            other => push_without_accent(&mut out, other),
+            // Only letters lose their accent: «≠» is «=» plus a stroke, and must not print as «=».
+            other if other.is_alphabetic() && Cp437::try_from(other).is_err() => {
+                push_without_accent(&mut out, other);
+            }
+            other => out.push(other),
         }
     }
     out
