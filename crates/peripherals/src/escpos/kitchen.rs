@@ -1,6 +1,7 @@
 use super::builder::{wrap_to_width, Align, EscposBuilder};
 use super::fields::{fmt_qty, is_truthy, modifier_lines, now_hm, str_field};
 use super::locale::{Label, Locale};
+use super::receipt::print_duplicate_mark;
 use super::LINE_WIDTH;
 
 pub(super) fn render_kitchen_order(b: &mut EscposBuilder, data: &serde_json::Value) {
@@ -15,6 +16,16 @@ pub(super) fn render_kitchen_order(b: &mut EscposBuilder, data: &serde_json::Val
         .or_else(|| data.get("order_number").and_then(|v| v.as_str()))
         .unwrap_or("");
     b.text(&format!("#{order_number}\n"));
+
+    // The cook reads these before the first dish; rush and allergy keep the number's loud mode.
+    if let Some(rush) = rush_mark(data, t) {
+        b.text(&format!("{rush}\n"));
+    }
+    let allergy = str_field(data, "allergy", "");
+    if !allergy.is_empty() {
+        b.text(&format!("{allergy}\n"));
+    }
+    print_duplicate_mark(b, data, t);
 
     b.set(Align::Center, false, false, false);
     b.text("================================\n");
@@ -138,13 +149,16 @@ pub(super) fn render_kitchen_order(b: &mut EscposBuilder, data: &serde_json::Val
     }
 
     b.text("================================\n");
-
-    let priority = str_field(data, "priority", "NORMAL");
-    if priority == "HIGH" {
-        b.set(Align::Center, true, true, false);
-        b.text(&format!("{}\n", t.label(Label::Rush)));
-    }
-
     b.text("\n");
     b.cut();
+}
+
+/// The Hub sends the mark already written in the business's language; `HIGH` is the word of the
+/// older contract and still means rush.
+fn rush_mark(data: &serde_json::Value, t: Locale) -> Option<&str> {
+    match str_field(data, "priority", "") {
+        "HIGH" => Some(t.label(Label::Rush)),
+        "" | "NORMAL" => None,
+        text => Some(text),
+    }
 }
