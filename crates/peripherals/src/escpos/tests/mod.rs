@@ -3,6 +3,7 @@ use oem_cp::Cp437;
 use serde_json::json;
 
 mod cash_report;
+mod delivery_note;
 mod document;
 mod invoice;
 mod item_lines;
