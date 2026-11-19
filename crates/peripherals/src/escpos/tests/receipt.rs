@@ -334,3 +334,17 @@ fn every_qr_prints_at_its_contracted_module_size() {
     let bytes = render_document(receipt, &without).unwrap();
     assert_eq!(qr_module_sizes(&bytes), vec![4, 4], "byte for byte what it printed before");
 }
+
+#[test]
+fn a_ticket_prints_accented_capitals_without_question_marks_and_keeps_the_rest() {
+    let bytes = render_document(DocumentType::Receipt, &json!({
+        "business_name": "Café Único",
+        "items": [{ "name": "ALBÓNDIGAS", "quantity": 1, "total": 6.5 }],
+        "total": 6.5,
+    }))
+    .unwrap();
+    let text = roll_lines(&bytes).join("\n");
+    assert!(text.contains("Café Unico"), "{text}");
+    assert!(text.contains("ALBONDIGAS"), "{text}");
+    assert!(!text.contains('?'), "{text}");
+}

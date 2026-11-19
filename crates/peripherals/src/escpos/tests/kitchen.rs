@@ -110,6 +110,17 @@ fn the_first_round_is_not_announced() {
     assert!(!text.contains("Ronda"), "the round is not:\n{text}");
 }
 
+/// The Hub writes the allergy lines in capitals, and cp437 has no Á: it prints as A, never `?`.
+#[test]
+fn an_allergy_in_capitals_prints_its_letters_not_question_marks() {
+    let text = paper(&json!({
+        "items": [{ "name": "ALBÓNDIGAS", "quantity": 1, "modifiers": ["*** ALERGIA: CRUSTÁCEOS ***"] }],
+    }));
+    assert!(text.contains("1x ALBONDIGAS"), "{text}");
+    assert!(text.contains("*** ALERGIA: CRUSTACEOS ***"), "{text}");
+    assert!(!text.contains('?'), "{text}");
+}
+
 /// **A long supplement is wrapped keeping its indent, not cut by the printer.** At 32 columns,
 /// «Al punto, sin cebolla, sin sal, extra salsa» overflows; if the thermal printer cuts it, the
 /// rest starts at the margin and reads as one more dish of the order.

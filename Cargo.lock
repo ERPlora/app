@@ -995,6 +995,7 @@ name = "erplora-peripherals"
 version = "1.0.0"
 dependencies = [
  "chrono",
+ "icu_normalizer",
  "if-addrs",
  "mdns-sd",
  "oem_cp",
