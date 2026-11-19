@@ -68,6 +68,30 @@ fn the_duplicate_mark_speaks_the_language_of_the_paper() {
     assert!(!says(&lines, "DUPLICADO"), "and not the Spanish word");
 }
 
+/// The kitchen chit prints the same mark, so its bytes are pinned here: a copy is the original
+/// plus the centred bold word, and nothing else on the paper moves.
+#[test]
+fn a_copy_is_the_original_plus_the_centred_bold_mark_and_nothing_else() {
+    let mark: Vec<u8> = [&[0x1b, 0x61, 1, 0x1b, 0x45, 1, 0x1d, 0x21, 0][..], b"DUPLICADO\n"].concat();
+    let render = |doc, extra: serde_json::Value| {
+        let mut data = json!({ "business_name": "Bar Manolo", "receipt_id": "T-42", "items": [] });
+        if doc == DocumentType::Invoice {
+            data = full_invoice();
+        }
+        data["duplicate"] = extra;
+        render_document(doc, &data).expect("a well-formed document renders")
+    };
+    for doc in [DocumentType::Receipt, DocumentType::Invoice] {
+        let original = render(doc, json!(false));
+        let copy = render(doc, json!(true));
+        let at = copy.windows(mark.len()).position(|w| w == mark).unwrap_or_else(|| panic!("{doc:?}"));
+        let without_mark = [&copy[..at], &copy[at + mark.len()..]].concat();
+        assert_eq!(without_mark, original, "{doc:?}");
+    }
+    let chit = render(DocumentType::KitchenOrder, json!(true));
+    assert!(chit.windows(mark.len()).any(|w| w == mark), "the chit carries the very same bytes");
+}
+
 // ── A full invoice on the thermal roll ─────────────────────────────────────────────────────
 
 fn invoice_paper(data: &serde_json::Value) -> Vec<(String, bool, bool)> {
