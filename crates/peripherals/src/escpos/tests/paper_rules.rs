@@ -22,6 +22,59 @@ fn typographic_punctuation_reaches_the_paper_as_punctuation() {
     assert!(text.contains("..."), "the ellipsis prints as three dots: {text}");
 }
 
+fn bytes_of(txt: &str) -> Vec<u8> {
+    let mut b = EscposBuilder::new();
+    b.text(txt);
+    b.finish()
+}
+
+/// cp437 has no Á, Í, Ó or Ú (nor À, Â, Ã, È, Ê… or ã, õ, ý): the letter prints without its accent
+/// rather than as `?`.
+#[test]
+fn an_accented_letter_the_printer_lacks_prints_without_its_accent() {
+    for (written, printed) in [
+        ("CRUSTÁCEOS", "CRUSTACEOS"),
+        ("ALBÓNDIGAS", "ALBONDIGAS"),
+        ("ÍNDICE", "INDICE"),
+        ("ÚLTIMA", "ULTIMA"),
+        ("ÀÂÃ ÈÊË ÌÎÏ ÒÔÕ ÙÛ Ý", "AAA EEE III OOO UU Y"),
+        ("ã õ ý", "a o y"),
+    ] {
+        let expected: Vec<u8> = printed.chars().map(|c| c as u8).collect();
+        assert_eq!(bytes_of(written), expected, "{written:?}");
+    }
+}
+
+/// The accented letters cp437 does have keep their accent, byte for byte.
+#[test]
+fn the_accented_letters_cp437_has_keep_their_accent() {
+    assert_eq!(
+        bytes_of("áéíóúñÑÉÜçü"),
+        [0xA0, 0x82, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x90, 0x9A, 0x87, 0x81]
+    );
+}
+
+/// What has no letter inside still prints as `?`: the paper shows something is missing.
+#[test]
+fn a_character_with_no_printable_letter_still_prints_as_a_question_mark() {
+    assert_eq!(bytes_of("✓ 中"), b"? ?");
+}
+
+/// «≠» decomposes into «=» plus a stroke: printing the «=» alone would say the opposite.
+#[test]
+fn a_negated_sign_does_not_print_as_the_sign_it_negates() {
+    assert_eq!(bytes_of("1 ≠ 2 ≤ 3"), b"1 ? 2 \xF3 3");
+    assert_eq!(bytes_of("≮ ≯ ≢"), b"? ? ?");
+}
+
+/// A keyboard or a pasted text may send the accent as a separate combining character.
+#[test]
+fn a_letter_followed_by_a_combining_accent_prints_like_the_single_character() {
+    assert_eq!(bytes_of("cafe\u{301} pin\u{303}a"), bytes_of("café piña"));
+    assert_eq!(bytes_of("CRUSTA\u{301}CEOS"), b"CRUSTACEOS");
+    assert_eq!(to_printable("cafe\u{301} con pin\u{303}a"), "café con piña", "one column per letter");
+}
+
 // ── The paper speaks the language the document asks for ─────────────────────────────────────
 //
 // A hub running in another language must not paint a translated KDS and push a Spanish chit

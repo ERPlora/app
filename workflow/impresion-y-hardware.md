@@ -148,7 +148,9 @@ Pasos:
 1. Una venta cobrada, una comanda disparada o un trabajo de la cola llegan a la aplicación con la
    impresora de su función, el tipo de documento y el documento estructurado.
 2. La aplicación comprueba el identificador, que el tipo es uno de los ocho conocidos y que el documento
-   se puede componer; si no, **rechaza ya** y el error vuelve a quien pidió el papel.
+   se puede componer; si no, **rechaza ya** y el error vuelve a quien pidió el papel. Al componer, una
+   letra con tilde que el juego de caracteres de la impresora (cp437) no tiene sale sin la tilde
+   (Á → A, Õ → O), nunca como «?»; las que tiene (á, é, í, ó, ú, ñ, Ñ, É, Ü) salen con ella.
 3. **Red**: pone los bytes en una cola interna en memoria y **espera** a que salgan (`erplora_print` →
    `print_to_network`, hub#2494). Un único trabajador la vacía: 3 intentos, 3 s para conectar, 10 s para
    escribir, 2 s entre intentos. Contesta «correcto» cuando la impresora se queda los bytes y el error

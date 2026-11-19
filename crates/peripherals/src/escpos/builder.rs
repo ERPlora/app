@@ -1,4 +1,5 @@
 use super::{LINE_WIDTH, QR_MODULE_DOTS};
+use icu_normalizer::{ComposingNormalizerBorrowed, DecomposingNormalizerBorrowed};
 use oem_cp::{Cp437, StrExt};
 
 /// Horizontal alignment (`ESC a n`).
@@ -86,8 +87,8 @@ impl EscposBuilder {
     }
 
     /// Text in cp437, with whatever it cannot represent replaced by `?`. [`to_printable`]
-    /// transliterates first: without it the typographic punctuation of a translated text reaches
-    /// the paper as `?`.
+    /// transliterates first: without it the typographic punctuation of a translated text and the
+    /// accented capitals cp437 lacks reach the paper as `?`.
     pub fn text(&mut self, txt: &str) -> &mut Self {
         for cp in to_printable(txt).to_cp_lossy::<Cp437>() {
             self.buf.push(cp.0);
@@ -197,16 +198,20 @@ impl EscposBuilder {
     }
 }
 
-/// **Typographic punctuation → what a cp437 printer can actually produce.**
+/// **Typographic punctuation and accented letters → what a cp437 printer can actually produce.**
 ///
 /// The encoder replaces whatever cp437 cannot represent with `?`, so the translated bill notice
 /// («Cuenta — no es una factura», with the em dash a translator naturally types) would reach the
 /// paper as «Cuenta ? no es una factura». Curly quotes, ellipses and non-breaking spaces do the
 /// same, and they come from people writing in a text editor — not a habit anybody is going to stop
-/// having, so this is the layer that copes. Accented Spanish needs none of this: cp437 has it.
+/// having, so this is the layer that copes.
+///
+/// cp437 has á é í ó ú ñ Ñ É Ü but not Á Í Ó Ú (nor À, Ã, Ê, õ…): a letter it lacks prints without
+/// its accent, «CRUSTÁCEOS» as «CRUSTACEOS», rather than as «CRUST?CEOS». An accent that arrives as
+/// a separate combining character is first joined to its letter, so it prints the same.
 pub(super) fn to_printable(txt: &str) -> String {
     let mut out = String::with_capacity(txt.len());
-    for c in txt.chars() {
+    for c in ComposingNormalizerBorrowed::new_nfc().normalize_iter(txt.chars()) {
         match c {
             // Hyphen..horizontal bar (en/em dash included) and the minus sign.
             '\u{2010}'..='\u{2015}' | '\u{2212}' => out.push('-'),
@@ -217,10 +222,27 @@ pub(super) fn to_printable(txt: &str) -> String {
             '\u{00A0}' | '\u{2007}' | '\u{2009}' | '\u{202F}' => out.push(' '),
             // cp437 predates the euro. A footer saying `EUR` beats one saying `?`.
             '\u{20AC}' => out.push_str("EUR"),
+            // Only letters lose their accent: «≠» is «=» plus a stroke, and must not print as «=».
+            other if other.is_alphabetic() && Cp437::try_from(other).is_err() => {
+                push_without_accent(&mut out, other);
+            }
             other => out.push(other),
         }
     }
     out
+}
+
+/// What has no printable letter inside (a symbol, an ideogram) is left for the encoder's `?`.
+fn push_without_accent(out: &mut String, c: char) {
+    let base: String = DecomposingNormalizerBorrowed::new_nfd()
+        .normalize_iter(std::iter::once(c))
+        .filter(|part| Cp437::try_from(*part).is_ok())
+        .collect();
+    if base.is_empty() {
+        out.push(c);
+    } else {
+        out.push_str(&base);
+    }
 }
 
 /// Splits a text into lines of at most `width` columns, **by words**.

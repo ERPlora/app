@@ -14,6 +14,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 mdns-sd = "0.11"
 if-addrs = "0.13"    # the device's own addresses: which networks to sweep, without a route out (app#17)
 oem_cp = "2"          # cp437 encoding for escpos::text
+icu_normalizer = { version = "2", default-features = false, features = ["compiled_data"] }  # strips the accent of a letter cp437 lacks (Á → A)
 
 # Inherits `[workspace.lints]` from the root manifest. Without these two lines the crate is
 # silently EXEMPT from the lint gate.
