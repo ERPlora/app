@@ -489,3 +489,124 @@ fn a_long_listed_supplement_wraps_keeping_its_indent() {
         );
     }
 }
+
+// ── The marks in the header: rush, allergy and copy ─────────────────────────────────────────
+//
+// The Hub sends `priority` and `allergy` already written in the business's language (or
+// empty) and `duplicate: true` on a reprint. A cook reads them under the order number, before
+// the first dish.
+
+/// The lines between the order number and the first rule.
+fn header_marks(data: &serde_json::Value) -> Vec<String> {
+    paper(data)
+        .lines()
+        .skip_while(|l| !l.starts_with('#'))
+        .skip(1)
+        .take_while(|l| !l.starts_with("===="))
+        .map(str::to_string)
+        .collect()
+}
+
+fn chit(extra: serde_json::Value) -> serde_json::Value {
+    let mut data = json!({
+        "order_number": "20261119-0001", "label": "Mesa 4", "locale": "es",
+        "items": [{ "name": "Hamburguesa", "quantity": 1.0, "modifiers": ["*** ALERGIA: GLUTEN ***"] }],
+    });
+    for (key, value) in extra.as_object().expect("an object") {
+        data[key] = value.clone();
+    }
+    data
+}
+
+#[test]
+fn the_three_marks_print_under_the_number_in_order() {
+    let marks = header_marks(&chit(json!({
+        "priority": "!! URGENTE !!", "allergy": "!! ALERGIA !!", "duplicate": true,
+    })));
+    assert_eq!(marks, ["!! URGENTE !!", "!! ALERGIA !!", "DUPLICADO"]);
+}
+
+/// The text of `priority` prints as it comes: the Hub already wrote it in the business's language.
+#[test]
+fn a_rush_round_prints_the_text_the_hub_sends() {
+    let marks = header_marks(&chit(json!({ "priority": "!! URGENT !!", "locale": "en" })));
+    assert_eq!(marks, ["!! URGENT !!"]);
+}
+
+/// `HIGH` is what producers sent before the text came translated; it still means rush, and the
+/// mark is printed once, in the header.
+#[test]
+fn the_legacy_high_priority_still_prints_the_rush_mark_once() {
+    let data = chit(json!({ "priority": "HIGH" }));
+    assert_eq!(header_marks(&data), ["!! URGENTE !!"]);
+    assert_eq!(paper(&data).matches("URGENTE").count(), 1, "{}", paper(&data));
+    let english = chit(json!({ "priority": "HIGH", "locale": "en" }));
+    assert_eq!(header_marks(&english), ["!! RUSH !!"]);
+}
+
+#[test]
+fn a_round_that_is_not_urgent_prints_no_rush_mark() {
+    for priority in [json!(""), json!("NORMAL"), json!(null)] {
+        let data = chit(json!({ "priority": priority }));
+        assert!(header_marks(&data).is_empty(), "{priority}: {:?}", header_marks(&data));
+        assert!(!paper(&data).contains("NORMAL"), "{priority}:\n{}", paper(&data));
+    }
+}
+
+#[test]
+fn a_sheet_with_an_allergy_says_so_in_the_header() {
+    assert_eq!(header_marks(&chit(json!({ "allergy": "!! ALERGIA !!" }))), ["!! ALERGIA !!"]);
+}
+
+#[test]
+fn a_sheet_without_an_allergy_prints_no_allergy_mark() {
+    for allergy in [json!(""), json!(null)] {
+        let data = chit(json!({ "allergy": allergy }));
+        assert!(header_marks(&data).is_empty(), "{allergy}: {:?}", header_marks(&data));
+    }
+}
+
+#[test]
+fn a_reprint_says_it_is_a_copy() {
+    assert_eq!(header_marks(&chit(json!({ "duplicate": true }))), ["DUPLICADO"]);
+    let english = chit(json!({ "duplicate": true, "locale": "en" }));
+    assert_eq!(header_marks(&english), ["DUPLICATE"]);
+}
+
+/// Only an explicit `true` makes the paper a copy, as on the ticket.
+#[test]
+fn a_first_print_is_not_marked_as_a_copy() {
+    for duplicate in [json!(false), json!(null), json!("true"), json!(1)] {
+        let data = chit(json!({ "duplicate": duplicate }));
+        assert!(header_marks(&data).is_empty(), "{duplicate}: {:?}", header_marks(&data));
+    }
+}
+
+/// Rush and allergy shout like the order number; the copy mark prints like the ticket's.
+#[test]
+fn the_marks_print_as_loud_as_what_they_announce() {
+    let bytes = render_document(
+        DocumentType::KitchenOrder,
+        &chit(json!({ "priority": "!! URGENTE !!", "allergy": "!! ALERGIA !!", "duplicate": true })),
+    )
+    .unwrap();
+    let modes = lines_with_modes(&bytes);
+    let mode = |text: &str| {
+        let (_, bold, double) = modes.iter().find(|(t, _, _)| t == text).expect(text);
+        (*bold, *double)
+    };
+    assert_eq!(mode("!! URGENTE !!"), (true, true));
+    assert_eq!(mode("!! ALERGIA !!"), (true, true));
+    assert_eq!(mode("DUPLICADO"), (true, false));
+    let ticket = render_document(DocumentType::Receipt, &json!({ "duplicate": true, "items": [] })).unwrap();
+    let on_ticket = lines_with_modes(&ticket).into_iter().find(|(t, _, _)| t == "DUPLICADO").unwrap();
+    assert_eq!((on_ticket.1, on_ticket.2), mode("DUPLICADO"));
+}
+
+/// Empty fields print the paper of today, byte for byte.
+#[test]
+fn a_sheet_with_empty_marks_prints_exactly_as_without_them() {
+    let without = paper(&chit(json!({})));
+    let empty = paper(&chit(json!({ "priority": "", "allergy": "", "duplicate": false })));
+    assert_eq!(empty, without);
+}

@@ -114,6 +114,16 @@ fn render_tax_breakdown(b: &mut EscposBuilder, data: &serde_json::Value, t: Loca
     b.text("--------------------------------\n");
 }
 
+/// Only one original of an invoice may exist (RD 1619/2012 art. 14): a reprint is a duplicate and
+/// has to say so. Only an explicit `true` prints it, because the word is a statement about the
+/// paper, not decoration a truthy string should switch on.
+pub(super) fn print_duplicate_mark(b: &mut EscposBuilder, data: &serde_json::Value, t: Locale) {
+    if data.get("duplicate").and_then(|v| v.as_bool()) == Some(true) {
+        b.set(Align::Center, true, false, false);
+        b.text(&format!("{}\n", t.label(Label::Duplicate)));
+    }
+}
+
 /// The receipt; with [`Fiscal::FullInvoice`] it is also the full invoice.
 #[expect(clippy::too_many_lines, reason = "renders the whole receipt top to bottom in one pass")]
 pub(super) fn render_receipt(b: &mut EscposBuilder, data: &serde_json::Value, kind: Fiscal) {
@@ -158,13 +168,7 @@ pub(super) fn render_receipt(b: &mut EscposBuilder, data: &serde_json::Value, ki
         b.text(&format!("{}{}\n", t.label(Label::Phone), str_field(data, "phone", "")));
     }
 
-    // Only one original of an invoice may exist (RD 1619/2012 art. 14): a reprint is a
-    // duplicate and has to say so. Only an explicit `true` prints it, because the word is a legal
-    // statement about the paper, not decoration a truthy string should switch on.
-    if data.get("duplicate").and_then(|v| v.as_bool()) == Some(true) {
-        b.set(Align::Center, true, false, false);
-        b.text(&format!("{}\n", t.label(Label::Duplicate)));
-    }
+    print_duplicate_mark(b, data, t);
 
     b.text("================================\n");
 

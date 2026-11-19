@@ -156,6 +156,10 @@ Pasos:
 4. **Bluetooth**: manda los bytes por el canal serie y contesta cuando se han escrito; el fallo vuelve.
 5. **USB**: la orden existe pero la puerta no se la da (HUB_APP-F16).
 Entra: el identificador de la impresora, el tipo de documento y el documento (nunca HTML).
+   En la comanda (`kitchen_order`), bajo el número y en este orden: la marca de urgencia (el texto de
+   `priority` tal como llega del Hub; `HIGH`, la palabra del contrato anterior, sale como «!! URGENTE !!»
+   en el idioma del papel), la de alergia (el texto de `allergy`) y la de copia («DUPLICADO», la misma
+   del tique) solo con `duplicate: true`. Sin esos campos, o vacíos, la comanda sale como siempre.
 Sale: lo que **se le devuelve a la pantalla** por caso:
 
    | Caso | Qué recibe quien pidió el papel |
