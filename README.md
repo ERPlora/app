@@ -42,7 +42,7 @@ cargo tauri android build --apk --aab # Android: JDK 17, SDK 36, NDK 27.1.122970
 ```bash
 cargo test --workspace --no-fail-fast      # los tres crates (erplora-tauri, plugin Android, peripherals)
 cargo clippy --workspace --all-targets     # niveles de lint y límites de función (Cargo.toml + clippy.toml)
-scripts/kotlin-plugin-tests.sh             # tests Kotlin del plugin: JDK 17 + platforms;android-36, tras un cargo build
+scripts/kotlin-plugin-tests.sh             # detekt y tests Kotlin del plugin: JDK 17 + platforms;android-36, tras un cargo build
 for t in scripts/*.test.sh scripts/tests/*.test.sh; do bash "$t"; done   # contratos de los workflows y scripts de CI (PyYAML; bash 5 en el Mac)
 actionlint -shellcheck= -pyflakes=         # los workflows (versión fijada en CI: 1.7.12)
 cargo test -p erplora-peripherals --test hardware_smoke -- --ignored --nocapture   # a mano, con impresora real
@@ -70,6 +70,18 @@ techos): ninguna gana una entrada ni sube un techo, el total de excusas de cada 
 una función excusada a otro fichero, al partirlo, sí vale) y un `expect` que ya no hace falta da
 error. La única entrada posible en `.file-size-allow` es la del cambio que baja un tope: lo que
 `main` ya tenía por encima entra, como mucho, con el tamaño que tenía allí.
+
+**Límites de función en Kotlin.** El código Kotlin del plugin Android pasa por detekt 1.23 con sus
+umbrales por defecto y solo en sus reglas de tamaño: `LongMethod` (60 líneas), `LongParameterList`
+(6 argumentos en una función y 7 en un constructor), `CyclomaticComplexMethod` (15),
+`NestedBlockDepth` (4), `LargeClass` (600) y `TooManyFunctions` (11). Lo corre
+`scripts/kotlin-plugin-tests.sh` antes de los tests, desde la raíz mínima `android-tests/`, cuyo
+`detekt.yml` solo apaga las demás reglas. Lo que hoy incumple está en
+`android-tests/detekt-baseline.xml`, y esa lista solo encoge: la tarea `detektBaselineUpToDate`
+falla si excusa código que ya cumple (se borra su línea), y `scripts/ci/kotlin-function-limits.py`,
+en `code-limits.yml`, falla si el total de excusas de una regla crece frente al merge-base con
+`main`, si `detekt.yml` fija un valor o apaga un límite, o si un `@Suppress` silencia uno. Para
+regenerar la lista, el mismo `gradlew` que lanza el script con la tarea `detektBaseline`.
 
 ## CI/CD
 

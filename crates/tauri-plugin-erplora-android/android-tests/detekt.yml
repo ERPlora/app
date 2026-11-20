@@ -1,0 +1,24 @@
+# detekt checks only the function and class limits of the plugin's Kotlin code: `LongMethod`,
+# `LongParameterList`, `CyclomaticComplexMethod`, `NestedBlockDepth`, `LargeClass` and
+# `TooManyFunctions`, at detekt's default thresholds (the Gradle build sets
+# `buildUponDefaultConfig`). This file only switches the other rules off; it never sets a value,
+# and `scripts/ci/kotlin-function-limits.py` refuses one that does.
+comments:
+  active: false
+coroutines:
+  active: false
+empty-blocks:
+  active: false
+exceptions:
+  active: false
+naming:
+  active: false
+performance:
+  active: false
+potential-bugs:
+  active: false
+style:
+  active: false
+complexity:
+  ComplexCondition:
+    active: false

@@ -1,0 +1,10 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>NestedBlockDepth:ErploraAndroidPlugin.kt$ErploraAndroidPlugin$@Command fun bluetoothBondedPrinters(invoke: Invoke)</ID>
+    <ID>TooManyFunctions:ErploraAndroidPlugin.kt$ErploraAndroidPlugin : Plugin</ID>
+    <ID>TooManyFunctions:SystemVoice.kt$SystemVoice</ID>
+    <ID>TooManyFunctions:WebPermissionGate.kt$OriginGuardedChromeClient : WebChromeClient</ID>
+  </CurrentIssues>
+</SmellBaseline>

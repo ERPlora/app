@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Contract of .github/workflows/code-limits.yml — run with:  bash scripts/tests/code-limits-workflow.test.sh
 #
-# What it pins: the size of every code file and the function-limit excuses are checked on EVERY
-# pull request and every push to `main`, whatever the change touches. `test-shell.yml` only runs
-# when certain trees change, so a big file added anywhere else (another folder, a new crate) would
-# go unchecked there.
+# What it pins: the size of every code file and the function-limit excuses, Rust and Kotlin, are
+# checked on EVERY pull request and every push to `main`, whatever the change touches.
+# `test-shell.yml` only runs when certain trees change, so a big file added anywhere else (another
+# folder, a new crate) would go unchecked there.
 #
 # And it stays cheap: one Linux job with the whole history (the checks compare their exception
 # lists with the merge-base of HEAD and `main`) and no cargo build.
@@ -104,7 +104,7 @@ if checkout_at is not None:
         depth == "0",
         f"fetch-depth is {depth!r}",
     )
-for script in ("scripts/ci/file-size.py", "scripts/ci/function-limits.sh"):
+for script in ("scripts/ci/file-size.py", "scripts/ci/function-limits.sh", "scripts/ci/kotlin-function-limits.py"):
     at = next((i for i, s in enumerate(steps) if script in run_of(s)), None)
     check(f"a step runs `{script}`", at is not None, f"steps are {[run_of(s) for s in steps]!r}")
     if at is not None and checkout_at is not None:

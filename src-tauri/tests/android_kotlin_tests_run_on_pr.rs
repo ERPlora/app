@@ -150,6 +150,53 @@ fn the_standalone_project_pins_the_same_agp_and_kotlin_as_the_release() {
     }
 }
 
+/// The runner checks the length and shape of the Kotlin code before running its tests.
+///
+/// clippy keeps the Rust functions short and `file-size.py` measures every file, but nothing else
+/// reads a Kotlin function: without these two tasks a 200-line function with seven arguments goes
+/// through the pull request green. `detekt` fails on a new finding; `detektBaselineUpToDate` fails
+/// on an excuse whose code was fixed, so the list of excused code only shrinks.
+#[test]
+fn the_runner_checks_the_kotlin_function_limits() {
+    let script = code_of(&read(RUNNER_SCRIPT), "#");
+    let words: Vec<&str> = script.split_whitespace().collect();
+
+    for task in ["detekt", "detektBaselineUpToDate"] {
+        assert!(
+            words.contains(&task),
+            "{RUNNER_SCRIPT} no longer runs the Gradle task `{task}`: the function and class limits \
+             of the Kotlin code would stop being checked on pull requests",
+        );
+    }
+}
+
+/// detekt runs at its defaults, fails on what it finds and excuses only what its baseline lists.
+///
+/// Its config only switches off the rules that are not limits (`kotlin-function-limits.py` holds
+/// it to that), so what keeps the limits at their documented values is building upon detekt's
+/// default config. `ignoreFailures` would print the findings and pass anyway.
+#[test]
+fn the_standalone_project_runs_detekt_at_its_defaults() {
+    let build = code_of(&read(STANDALONE_BUILD), "//");
+
+    for needle in [
+        "io.gitlab.arturbosch.detekt",
+        "buildUponDefaultConfig = true",
+        "detekt.yml",
+        "detekt-baseline.xml",
+    ] {
+        assert!(
+            build.contains(needle),
+            "{STANDALONE_BUILD} must configure detekt with `{needle}`: the limits run at detekt's \
+             defaults, with the repo's config and its baseline of excused code",
+        );
+    }
+    assert!(
+        !build.contains("ignoreFailures"),
+        "{STANDALONE_BUILD} must not set ignoreFailures: detekt would report a finding and pass",
+    );
+}
+
 /// Pulls `1.2.3` out of a `classpath("group:artifact:1.2.3")` line.
 fn version_of(gradle: &str, artifact: &str) -> Option<String> {
     let needle = format!("{artifact}:");
