@@ -180,7 +180,7 @@ pub(crate) async fn erplora_discover_printers(
     // keep seeing them when the CUPS client tools are missing. Logged, so it is not a silent zero.
     #[cfg(not(target_os = "android"))]
     let usb = tokio::task::spawn_blocking(|| {
-        erplora_peripherals::usb::discover_usb_printers(&erplora_peripherals::usb::SystemCups)
+        erplora_peripherals::usb::discovery::discover_usb_printers(&erplora_peripherals::usb::cups::SystemCups)
     })
     .await
     .unwrap_or_else(|e| {

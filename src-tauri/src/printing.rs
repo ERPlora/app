@@ -38,7 +38,7 @@ fn bluetooth_send(
 /// reports the job `failed`.
 #[cfg(not(target_os = "android"))]
 fn usb_send(target: &print_target::UsbTarget, payload: &[u8]) -> Result<(), HardwareError> {
-    erplora_peripherals::usb::send_raw(&erplora_peripherals::usb::SystemCups, target, payload)?;
+    erplora_peripherals::usb::send_raw(&erplora_peripherals::usb::cups::SystemCups, target, payload)?;
     Ok(())
 }
 

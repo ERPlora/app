@@ -548,7 +548,7 @@ Contra `origin/develop` del hub (05/10/2026). Una línea por discrepancia; manda
   («impresora sin papel/offline: el trabajo queda pendiente y la UI informa»): con una impresora de red
   del propio dispositivo apagada, la caja avisa y deja reintentar (hub#2494), pero el trabajo no
   queda pendiente en la cola y uno que venía de la cola del hub vuelve «fallido» sin aviso (F06).
-- **`README.md` del crate y `usb.rs`** hablan de «un recibo con logo»: no hay imágenes en el
+- **`README.md` del crate y `usb/cups.rs`** hablan de «un recibo con logo»: no hay imágenes en el
   renderizador (F16).
 - **Comentario de `escpos/mod.rs` («80 mm ≈ 32 caracteres»)**: en una térmica de 80 mm con la fuente A caben
   48 columnas; el crate compone a 32 siempre (F16).
