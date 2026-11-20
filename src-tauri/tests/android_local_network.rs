@@ -60,12 +60,6 @@ const REQUIRED: &[&str] = &[
     // permission — no dialog, so it is not in `PermissionPolicy` — but the same "declared or
     // nothing" rule applies: without it `enableReaderMode` throws and a tablet cannot enrol a card.
     "android.permission.NFC",
-    // Staying alive to hear the next notice with the screen off. Both are install-time `normal`
-    // permissions, so there is no dialog either; but without them `startForeground` throws a
-    // SecurityException and Android freezes the page the moment the screen goes dark. See
-    // [`FOREGROUND_SERVICE`].
-    FOREGROUND_SERVICE,
-    FOREGROUND_SERVICE_SPECIAL_USE,
     // A module asking where the device is; the first one is `attendance`, which can
     // require the employee to clock in near the venue. RUNTIME permissions: wry's
     // `RustWebChromeClient.onGeolocationPermissionsShowPrompt` asks for them when a page calls
@@ -78,12 +72,11 @@ const REQUIRED: &[&str] = &[
     MODIFY_AUDIO_SETTINGS,
 ];
 
-/// The foreground service that keeps the app listening with the screen off.
-/// Google Play takes a build with them only once Play Console has their declaration (`specialUse`,
-/// with a video of the service running): `GOOGLE-PLAY.md`, «Formularios de Play que dependen de un
-/// permiso».
+/// What no manifest may declare: Google Play refuses every build with a foreground-service
+/// permission until Play Console has its declaration, with a video of the service running. The app
+/// keeps the screen on while it is open instead (`android_keep_screen_on.rs`). A prefix, so the
+/// typed variants (`_SPECIAL_USE`, `_DATA_SYNC`…) count too.
 const FOREGROUND_SERVICE: &str = "android.permission.FOREGROUND_SERVICE";
-const FOREGROUND_SERVICE_SPECIAL_USE: &str = "android.permission.FOREGROUND_SERVICE_SPECIAL_USE";
 
 /// The hardware feature the NFC permission drags in behind it.
 ///
@@ -425,16 +418,21 @@ fn the_dictation_permissions_are_declared_in_both_manifests() {
     }
 }
 
-// ── The foreground service is checked like any other permission ─────────────────────────────────
+// ── The release step reads the permissions of the APK ───────────────────────────────────────────
+
+/// The release job's «Check hardware permissions on the APK» step, up to the next step.
+fn hardware_check_step() -> &'static str {
+    RELEASE_WORKFLOW
+        .split("- name: Check hardware permissions on the APK")
+        .nth(1)
+        .and_then(|rest| rest.split("\n      - name:").next())
+        .expect("the release workflow has no «Check hardware permissions on the APK» step")
+}
 
 /// The permissions the release job's «Check hardware permissions on the APK» step loops over
 /// (`for P in … ; do`), word by word.
 fn permissions_checked_on_the_apk() -> Vec<String> {
-    let step = RELEASE_WORKFLOW
-        .split("- name: Check hardware permissions on the APK")
-        .nth(1)
-        .expect("the release workflow has no «Check hardware permissions on the APK» step");
-    let list = step
+    let list = hardware_check_step()
         .split("for P in")
         .nth(1)
         .and_then(|rest| rest.split("; do").next())
@@ -451,19 +449,82 @@ fn the_release_check_reads_whole_permission_names() {
     assert!(!checked.iter().any(|p| p == "android.permission.INTER"), "{checked:?}");
 }
 
+// ── No foreground service ───────────────────────────────────────────────────────────────────────
+
+/// What makes a manifest declare a foreground service: one of its permissions (the general one or a
+/// typed variant, `_SPECIAL_USE`, `_DATA_SYNC`…) or a `<service>` with a type. Read as live tags, so
+/// the prose that explains why there is none does not count as one.
+fn foreground_service_declarations(manifest: &str) -> Vec<String> {
+    let mut found: Vec<String> =
+        declared_permissions(manifest).into_iter().filter(|p| p.starts_with(FOREGROUND_SERVICE)).collect();
+    if without_comments(manifest).contains("android:foregroundServiceType") {
+        found.push("android:foregroundServiceType".to_string());
+    }
+    found
+}
+
 #[test]
-fn the_release_build_does_not_refuse_the_listening_service() {
-    // The app declares a foreground service on purpose and the release REQUIRES it (above), so
-    // the step that refused any foreground service on the APK
-    // (`scripts/ci/apk-foreground-service-guard.sh`, app#23) must not come back: with both steps,
-    // every build would stop there.
-    assert!(
-        !RELEASE_WORKFLOW.contains("apk-foreground-service-guard"),
-        "the release job still refuses an APK with a foreground service, and the app declares the \
-         listening service: every release would stop before publishing"
+fn the_foreground_service_check_catches_what_the_listening_service_declared() {
+    // The check has to see the positive before it may certify the negative: the declaration the
+    // listening service had, and a commented-out copy of it, which declares nothing.
+    let declared = r#"<manifest>
+        <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+        <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+        <application>
+            <service android:name="com.erplora.android.NoticeListeningService"
+                android:exported="false" android:foregroundServiceType="specialUse" />
+        </application>
+    </manifest>"#;
+    assert_eq!(
+        foreground_service_declarations(declared),
+        [
+            "android.permission.FOREGROUND_SERVICE",
+            "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
+            "android:foregroundServiceType",
+        ]
     );
+    let commented = format!("<manifest><!-- {declared} --></manifest>");
+    assert!(foreground_service_declarations(&commented).is_empty());
+}
+
+#[test]
+fn no_manifest_declares_a_foreground_service() {
+    let plugin = fs::read_to_string(plugin_manifest_path()).expect("the plugin manifest");
+    for (label, manifest) in [("gen/android", APP_MANIFEST), ("plugin", plugin.as_str())] {
+        let found = foreground_service_declarations(manifest);
+        assert!(
+            found.is_empty(),
+            "the {label} manifest declares a foreground service: {found:?}. Google Play refuses \
+             every build with one until Play Console has its declaration, with a video of it \
+             running; the app keeps the screen on while it is open instead"
+        );
+    }
+}
+
+/// How the release step refuses a foreground service on the APK: `aapt2 dump permissions` prints
+/// `uses-permission: name='…'`, and the name is a prefix so the typed variants are refused too.
+const REFUSE_FOREGROUND_SERVICE: &str =
+    r#"if grep -q "name='android.permission.FOREGROUND_SERVICE" <<<"$PERMISSIONS"; then"#;
+
+#[test]
+fn the_release_build_refuses_an_apk_that_declares_a_foreground_service() {
+    // The source manifests are not the whole story: the merger folds in every library the app
+    // links, and the manifest Google Play reads is the merged one, inside the APK.
+    let checked = permissions_checked_on_the_apk();
     assert!(
-        !RELEASE_WORKFLOW.contains("Check no foreground service on the APK"),
-        "the release job still has the step that refuses the listening service"
+        !checked.iter().any(|p| p.starts_with(FOREGROUND_SERVICE)),
+        "the release job still REQUIRES a foreground-service permission on the APK: {checked:?}"
+    );
+    let refusal = hardware_check_step()
+        .split(REFUSE_FOREGROUND_SERVICE)
+        .nth(1)
+        .and_then(|rest| rest.split("\n          fi\n").next())
+        .expect(
+            "the release job never refuses an APK that declares a foreground service, so one would \
+             reach Google Play and stop the release there",
+        );
+    assert!(
+        refusal.contains("exit 1"),
+        "the release job sees a foreground service on the APK and publishes it anyway"
     );
 }

@@ -5,7 +5,6 @@ const COMMANDS: &[&str] = &[
     "request_permissions",
     "leave_app",
     "open_app_settings",
-    "keep_listening",
     "tts_available",
     "tts_speak",
     "tts_stop",

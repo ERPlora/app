@@ -488,8 +488,6 @@ jobs:
                    android.permission.POST_NOTIFICATIONS \
                    android.permission.BLUETOOTH_CONNECT \
                    android.permission.NFC \
-                   android.permission.FOREGROUND_SERVICE \
-                   android.permission.FOREGROUND_SERVICE_SPECIAL_USE \
                    android.permission.ACCESS_FINE_LOCATION \
                    android.permission.ACCESS_COARSE_LOCATION \
                    android.permission.RECORD_AUDIO \
@@ -497,6 +495,13 @@ jobs:
             echo "$PERMISSIONS" | grep -q "name='$P'" \
               || { echo "::error::the APK does NOT declare $P — the hardware would die SILENTLY"; exit 1; }
           done
+          # 🔴 No foreground service: Google Play refuses the build until Play Console has its
+          # declaration, with a video of it running. A prefix, so the typed variants
+          # (`_SPECIAL_USE`, `_DATA_SYNC`…) and one a library folds into the merged manifest count too.
+          if grep -q "name='android.permission.FOREGROUND_SERVICE" <<<"$PERMISSIONS"; then
+            echo "::error::the APK declares a foreground service — Google Play refuses the build until Play Console has its declaration"
+            exit 1
+          fi
           # 🔴 The NFC permission drags an IMPLICIT requirement of `android.hardware.nfc`:
           # Play hides the app from every device without the chip — the cheap counter tablets —
           # unless the manifest says it is optional. Only the MERGED manifest knows, and
