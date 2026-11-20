@@ -1,6 +1,5 @@
 # Code files over their size cap today, checked by scripts/ci/file-size.py. The list only shrinks.
 # <ceiling> <path> <issue>: the ceiling is the file's exact size in lines; a Rust source file takes <production>/<whole file>, "-" for a part within its cap.
-677/1226 crates/peripherals/src/discovery.rs erplora-next#78
 696/1121 crates/peripherals/src/registry.rs erplora-next#78
 744/- crates/peripherals/src/usb.rs erplora-next#78
 592 crates/tauri-plugin-erplora-android/android/src/main/java/com/erplora/android/ErploraAndroidPlugin.kt erplora-next#78

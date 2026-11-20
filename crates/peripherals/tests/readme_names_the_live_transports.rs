@@ -16,7 +16,7 @@
 //! is the regression itself. When USB printing lands on Windows, `Windows` comes off the list in
 //! the same commit.
 
-use erplora_peripherals::discovery::{parse_print_target, PrintTarget};
+use erplora_peripherals::print_target::{parse_print_target, PrintTarget};
 
 /// The crate's README, pulled in at compile time: moving or renaming it cannot leave this test
 /// green. It holds the transports table a reader checks before touching printing.
