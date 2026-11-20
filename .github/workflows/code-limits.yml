@@ -2,12 +2,14 @@
 # ERPlora Shell (ERPlora/app) — size and function limits of the code
 # ==============================================================================
 #
-# Runs `scripts/ci/file-size.py` and `scripts/ci/function-limits.sh` on EVERY pull request and
-# every push to `main`, whatever the change touches. `test-shell.yml` only runs when certain trees
-# change, so a big file added in another folder or a new crate would go unchecked there.
+# Runs `scripts/ci/file-size.py`, `scripts/ci/function-limits.sh` (Rust) and
+# `scripts/ci/kotlin-function-limits.py` (the detekt settings and excuses of the Kotlin code) on
+# EVERY pull request and every push to `main`, whatever the change touches. `test-shell.yml` only
+# runs when certain trees change, so a big file added in another folder or a new crate would go
+# unchecked there. detekt itself runs in `scripts/kotlin-plugin-tests.sh`, which needs a JDK.
 #
-# Seconds, not minutes: no cargo build. The whole history is checked out because both checks only
-# let their exception lists shrink against the merge-base of HEAD and `main`.
+# Seconds, not minutes: no cargo or Gradle build. The whole history is checked out because the
+# checks only let their exception lists shrink against the merge-base of HEAD and `main`.
 #
 # Contract: `scripts/tests/code-limits-workflow.test.sh`, run by the `scripts` job of
 # `test-shell.yml`.
@@ -48,3 +50,6 @@ jobs:
 
       - name: Function limits (scripts/ci/function-limits.sh)
         run: bash scripts/ci/function-limits.sh
+
+      - name: Kotlin function limits (scripts/ci/kotlin-function-limits.py)
+        run: python3 scripts/ci/kotlin-function-limits.py

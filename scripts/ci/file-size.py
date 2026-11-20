@@ -28,11 +28,11 @@ Exit:  0 within the caps · 1 a file or a list line breaks them, one line each
 
 from __future__ import annotations
 
-import os
 import re
-import subprocess
 import sys
 from typing import Dict, List, Optional, Tuple
+
+from ratchet import git, merge_base, run_check
 
 LIST = ".file-size-allow"
 SELF = "scripts/ci/file-size.py"
@@ -81,10 +81,6 @@ a shell script past its cap is written in Python. A listed file may change witho
 never grows past its ceiling: what a change adds goes to a new module. When it shrinks, its ceiling
 comes down to its exact size, and a new file never joins the list.
 """
-
-
-class Unjudgeable(Exception):
-    """The check cannot judge this checkout; exits 2."""
 
 
 class Part:
@@ -153,10 +149,6 @@ def parts_of(path: str, data: bytes) -> List[Part]:
             Part(whole, RUST_WHOLE_CAP, "lines in all", "whole-file"),
         ]
     return [Part(whole, cap_of(path), "lines", "tests" if TEST.search(path) else "production")]
-
-
-def git(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", *args], capture_output=True, check=False)
 
 
 def git_text(*args: str) -> Optional[str]:
@@ -335,20 +327,6 @@ def cap_problems(base: str, base_label: str) -> List[Tuple[str, str]]:
     ]
 
 
-def merge_base(main: str) -> str:
-    if git("rev-parse", "--verify", "--quiet", f"{main}^{{commit}}").returncode != 0:
-        raise Unjudgeable(
-            f"{main} is not in this checkout: run git fetch origin main (the list can only shrink against it)"
-        )
-    base = git_text("merge-base", "HEAD", main)
-    if base is None:
-        raise Unjudgeable(
-            f"HEAD and {main} share no history in this checkout: fetch the whole history "
-            "(git fetch --unshallow origin) so the list has a base to shrink against"
-        )
-    return base
-
-
 def read_working_list() -> str:
     try:
         with open(LIST, encoding="utf-8") as handle:
@@ -358,7 +336,7 @@ def read_working_list() -> str:
 
 
 def judge(main: str) -> int:
-    base = merge_base(main)
+    base = merge_base(main, "the list")
     base_label = f"{main}@{git_text('rev-parse', '--short', base)}"
     ceilings, malformed = read_list(read_working_list())
     if malformed:
@@ -381,20 +359,5 @@ def judge(main: str) -> int:
     return 0
 
 
-def main(argv: List[str]) -> int:
-    root = argv[1] if len(argv) > 1 else "."
-    main_ref = argv[2] if len(argv) > 2 else "origin/main"
-    top = subprocess.run(["git", "-C", root, "rev-parse", "--show-toplevel"], capture_output=True, check=False)
-    if top.returncode != 0:
-        print(f"::error::{root} is not a git checkout", file=sys.stderr)
-        return 2
-    try:
-        os.chdir(top.stdout.decode().strip())
-        return judge(main_ref)
-    except Unjudgeable as error:
-        print(f"::error::{error}", file=sys.stderr)
-        return 2
-
-
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(run_check(sys.argv, judge))

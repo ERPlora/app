@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Kotlin unit tests of the Android plugin, WITHOUT building the app.
+# Kotlin unit tests of the Android plugin, WITHOUT building the app, after detekt's function and
+# class limits of its code (`android-tests/detekt.yml`; the code excused today is listed in
+# `android-tests/detekt-baseline.xml`, and that list only shrinks).
 #
 # The tests under `crates/tauri-plugin-erplora-android/android/src/test` hold which permission is
 # asked for at each API level and how an SPP printer is spoken to. The real Gradle project
@@ -57,5 +59,6 @@ echo "tauri-android SDK: $TAURI_ANDROID_DIR"
 exec "$REPO_ROOT/src-tauri/gen/android/gradlew" \
     -p "$REPO_ROOT/crates/tauri-plugin-erplora-android/android-tests" \
     -PtauriAndroidDir="$TAURI_ANDROID_DIR" \
+    detekt detektBaselineUpToDate \
     :tauri-plugin-erplora-android:testDebugUnitTest \
     "$@"

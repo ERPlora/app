@@ -307,7 +307,8 @@ jobs:
         run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
 
       # After `cargo test`: the script takes `tauri`'s Kotlin SDK from the crate already UNPACKED
-      # in the registry, and the build above is what unpacks it.
+      # in the registry, and the build above is what unpacks it. Before the tests it runs detekt's
+      # function and class limits over the plugin's Kotlin code.
       - name: Kotlin unit tests (permissions plugin + SPP)
         if: matrix.label == 'linux'
         run: ./scripts/kotlin-plugin-tests.sh
