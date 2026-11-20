@@ -2,7 +2,7 @@
 # <ceiling> <path> <issue>: the ceiling is the file's exact size in lines; a Rust source file takes <production>/<whole file>, "-" for a part within its cap.
 677/1226 crates/peripherals/src/discovery.rs erplora-next#78
 696/1121 crates/peripherals/src/registry.rs erplora-next#78
-744/1717 crates/peripherals/src/usb.rs erplora-next#89
+744/- crates/peripherals/src/usb.rs erplora-next#78
 592 crates/tauri-plugin-erplora-android/android/src/main/java/com/erplora/android/ErploraAndroidPlugin.kt erplora-next#78
 131 scripts/ci/function-limits.sh erplora-next#78
 525 scripts/ci/play-reviewer-preflight.py erplora-next#78
