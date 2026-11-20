@@ -58,7 +58,7 @@ pub(crate) fn build_peripherals_state(devices_path: PathBuf) -> PeripheralsState
     // Registry watchdog: recovers devices after DHCP changes their IP.
     let watchdog_registry = registry.clone();
     tauri::async_runtime::spawn(async move {
-        use erplora_peripherals::registry::{Watchdog, WatchdogConfig, WatchdogEvent};
+        use erplora_peripherals::registry::watchdog::{Watchdog, WatchdogConfig, WatchdogEvent};
         let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel::<WatchdogEvent>();
         tauri::async_runtime::spawn(async move {
             while let Some(ev) = events_rx.recv().await {
