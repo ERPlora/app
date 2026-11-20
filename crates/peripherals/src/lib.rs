@@ -22,6 +22,7 @@
 pub mod discovery;
 pub mod drawer;
 pub mod escpos;
+pub mod print_target;
 pub mod protocol;
 pub mod queue;
 pub mod registry;

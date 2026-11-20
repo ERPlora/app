@@ -9,7 +9,7 @@ use std::process::Command;
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
-use crate::discovery::{local_subnet_prefixes, sweep_targets};
+use crate::discovery::sweep::{local_subnet_prefixes, sweep_targets};
 use crate::protocol::Device;
 use crate::{Result, ESCPOS_NETWORK_PORT};
 
@@ -245,13 +245,13 @@ impl DeviceRegistry {
     /// expects to be able to say about the counter printer even when it is on a cable.
     ///
     /// The `printer_id` is validated with the SAME parser as the print path
-    /// ([`crate::discovery::parse_print_target`]): an id with no queue behind it — or one of
+    /// ([`crate::print_target::parse_print_target`]): an id with no queue behind it — or one of
     /// another transport, which has its own identity — would create a ghost entry the next queue
     /// would inherit, role included.
     pub fn register_queue(&self, printer_id: &str, name: &str) -> Result<Device> {
         let printer_id = printer_id.trim();
-        match crate::discovery::parse_print_target(printer_id) {
-            Ok(crate::discovery::PrintTarget::Usb(_)) => {}
+        match crate::print_target::parse_print_target(printer_id) {
+            Ok(crate::print_target::PrintTarget::Usb(_)) => {}
             Ok(_) => {
                 return Err(crate::PeripheralError::InvalidPrinterId(format!(
                     "`{printer_id}` is not an OS print queue: a transport with a socket registers \

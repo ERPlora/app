@@ -45,8 +45,8 @@ fn el_motivo_no_esta_vacio() {
 
 #[test]
 fn declara_los_servicios_bonjour_que_se_navegan() {
-    // `discovery::discover_mdns` navega EXACTAMENTE estos dos tipos. macOS solo deja resolver los
-    // que estén declarados aquí: si falta uno, ese descubrimiento devuelve vacío sin avisar.
+    // `discovery::mdns::discover_mdns` browses EXACTLY these two types. macOS only resolves the
+    // ones declared here: if one is missing, that discovery comes back empty without a warning.
     for service in ["_pdl-datastream._tcp", "_ipp._tcp"] {
         assert!(
             INFO_PLIST.contains(service),

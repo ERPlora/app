@@ -1,7 +1,7 @@
 //! Printing on the hardware: a document, a test page or the cash drawer's kick, to a network,
 //! Bluetooth or USB printer.
 
-use erplora_peripherals::discovery;
+use erplora_peripherals::print_target;
 use erplora_peripherals::drawer;
 use erplora_peripherals::escpos::{self, DocumentType};
 use erplora_peripherals::queue::{PrintJob, PrintQueue};
@@ -37,7 +37,7 @@ fn bluetooth_send(
 /// already works. The failure stays visible: the error comes back to the caller and the print host
 /// reports the job `failed`.
 #[cfg(not(target_os = "android"))]
-fn usb_send(target: &discovery::UsbTarget, payload: &[u8]) -> Result<(), HardwareError> {
+fn usb_send(target: &print_target::UsbTarget, payload: &[u8]) -> Result<(), HardwareError> {
     erplora_peripherals::usb::send_raw(&erplora_peripherals::usb::SystemCups, target, payload)?;
     Ok(())
 }
@@ -49,7 +49,7 @@ fn usb_send(target: &discovery::UsbTarget, payload: &[u8]) -> Result<(), Hardwar
 /// opened on a tablet keeps the same `printer_id`, so this IS reachable — and a ticket that
 /// vanishes without a word is exactly the failure mode the print chain keeps being bitten by.
 #[cfg(target_os = "android")]
-fn usb_send(target: &discovery::UsbTarget, _payload: &[u8]) -> Result<(), HardwareError> {
+fn usb_send(target: &print_target::UsbTarget, _payload: &[u8]) -> Result<(), HardwareError> {
     Err(HardwareError::from(
         erplora_peripherals::PeripheralError::Unreachable(format!(
             "`usb:{}` is a printer on a desktop till's print queue; this device cannot reach it \
@@ -65,7 +65,7 @@ fn usb_send(target: &discovery::UsbTarget, _payload: &[u8]) -> Result<(), Hardwa
 /// nobody told — the till would hear «done», and so would the hub for a job from its queue.
 async fn print_to_network(
     queue: &PrintQueue,
-    target: discovery::NetworkTarget,
+    target: print_target::NetworkTarget,
     payload: Vec<u8>,
     job_id: Option<String>,
 ) -> Result<(), HardwareError> {
@@ -97,7 +97,7 @@ pub(crate) async fn erplora_print(
     data: serde_json::Value,
     job_id: Option<String>,
 ) -> Result<(), HardwareError> {
-    let target = discovery::parse_print_target(&printer_id)?;
+    let target = print_target::parse_print_target(&printer_id)?;
     let doc = DocumentType::parse(&document_type).ok_or_else(|| {
         HardwareError::from(erplora_peripherals::PeripheralError::UnknownDocumentType(
             document_type.clone(),
@@ -105,11 +105,11 @@ pub(crate) async fn erplora_print(
     })?;
     let payload = escpos::render_document(doc, &data)?;
     match target {
-        discovery::PrintTarget::Network(target) => {
+        print_target::PrintTarget::Network(target) => {
             print_to_network(&state.queue, target, payload, job_id).await?;
         }
-        discovery::PrintTarget::Bluetooth(bt) => bluetooth_send(&app, &bt.mac, &payload)?,
-        discovery::PrintTarget::Usb(usb) => usb_send(&usb, &payload)?,
+        print_target::PrintTarget::Bluetooth(bt) => bluetooth_send(&app, &bt.mac, &payload)?,
+        print_target::PrintTarget::Usb(usb) => usb_send(&usb, &payload)?,
     }
     Ok(())
 }
@@ -124,17 +124,17 @@ pub(crate) async fn erplora_test_print(
     printer_id: String,
     data: Option<serde_json::Value>,
 ) -> Result<(), HardwareError> {
-    let target = discovery::parse_print_target(&printer_id)?;
+    let target = print_target::parse_print_target(&printer_id)?;
     // An `erplora-app` newer than the module that calls it gets `None` here — and the renderer
     // reads an empty document exactly as it reads a missing field, so the sheet still prints.
     let data = data.unwrap_or_else(|| serde_json::json!({}));
     let payload = escpos::render_test_page(&printer_id, &data);
     match target {
-        discovery::PrintTarget::Network(target) => {
+        print_target::PrintTarget::Network(target) => {
             print_to_network(&state.queue, target, payload, None).await?;
         }
-        discovery::PrintTarget::Bluetooth(bt) => bluetooth_send(&app, &bt.mac, &payload)?,
-        discovery::PrintTarget::Usb(usb) => usb_send(&usb, &payload)?,
+        print_target::PrintTarget::Bluetooth(bt) => bluetooth_send(&app, &bt.mac, &payload)?,
+        print_target::PrintTarget::Usb(usb) => usb_send(&usb, &payload)?,
     }
     Ok(())
 }
@@ -148,15 +148,15 @@ pub(crate) async fn erplora_open_drawer(
     printer_id: String,
     pin: Option<u8>,
 ) -> Result<(), HardwareError> {
-    match discovery::parse_print_target(&printer_id)? {
-        discovery::PrintTarget::Network(target) => {
+    match print_target::parse_print_target(&printer_id)? {
+        print_target::PrintTarget::Network(target) => {
             drawer::open_drawer(&target, pin.unwrap_or(2)).await?;
         }
-        discovery::PrintTarget::Bluetooth(bt) => {
+        print_target::PrintTarget::Bluetooth(bt) => {
             bluetooth_send(&app, &bt.mac, drawer::kick_command(pin.unwrap_or(2)))?;
         }
         // The kick is ESC/POS like any other document, so it rides the same raw queue.
-        discovery::PrintTarget::Usb(usb) => {
+        print_target::PrintTarget::Usb(usb) => {
             usb_send(&usb, drawer::kick_command(pin.unwrap_or(2)))?;
         }
     }
@@ -192,7 +192,7 @@ mod tests {
             let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind a free port");
             listener.local_addr().expect("its address").port()
         };
-        let target = discovery::NetworkTarget { host: "127.0.0.1".into(), port };
+        let target = print_target::NetworkTarget { host: "127.0.0.1".into(), port };
 
         let printed = tauri::async_runtime::block_on(print_to_network(
             &queue,

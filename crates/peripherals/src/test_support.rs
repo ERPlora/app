@@ -12,7 +12,7 @@ use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 
-use crate::discovery::NetworkTarget;
+use crate::print_target::NetworkTarget;
 
 /// Listener local que modela una impresora de un solo trabajo: acepta una conexión, lee todo y se
 /// cierra. Captura el contrato de cable real sin hardware.

@@ -21,7 +21,8 @@
 //! It uses paper: `smoke_prints_a_test_page` only prints when asked with `ERPLORA_SMOKE_PRINT=1`,
 //! so the printer can be looked for without leaving tickets on the floor.
 
-use erplora_peripherals::discovery::{discover_printers, parse_printer_id, LocalNetworkAccess};
+use erplora_peripherals::discovery::{discover_printers, LocalNetworkAccess};
+use erplora_peripherals::print_target::parse_printer_id;
 use erplora_peripherals::escpos::render_test_page;
 use erplora_peripherals::queue::{PrintJob, PrintQueue, RetryPolicy};
 use erplora_peripherals::registry::DeviceRegistry;

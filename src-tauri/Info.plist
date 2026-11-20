@@ -21,9 +21,9 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>ERPlora needs access to your local network to find and print to the receipt and kitchen printers in your business.</string>
 
-	<!-- Servicios Bonjour que la app navega. macOS solo permite resolver los declarados aquí, y
-	     estos son exactamente los que sondea `discovery::discover_mdns`: si falta uno, esas
-	     impresoras no aparecen y no hay ningún error que lo delate. -->
+	<!-- Bonjour services the app browses. macOS only resolves the ones declared here, and these
+	     are exactly the ones `discovery::mdns::discover_mdns` probes: if one is missing, those
+	     printers do not show up and no error gives it away. -->
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_pdl-datastream._tcp</string>
