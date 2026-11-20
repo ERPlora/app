@@ -80,13 +80,13 @@ pub(crate) fn is_cups_queue_name(name: &str) -> bool {
 pub fn parse_print_target(printer_id: &str) -> Result<PrintTarget> {
     match printer_id.split_once(':') {
         Some(("bluetooth", mac)) => {
-            if !crate::registry::is_mac(mac) {
+            if !crate::registry::mac::is_mac(mac) {
                 return Err(crate::PeripheralError::InvalidPrinterId(format!(
                     "malformed bluetooth MAC in: {printer_id}"
                 )));
             }
             Ok(PrintTarget::Bluetooth(BluetoothTarget {
-                mac: crate::registry::normalize_mac(mac),
+                mac: crate::registry::mac::normalize_mac(mac),
             }))
         }
         Some(("usb", queue)) => {

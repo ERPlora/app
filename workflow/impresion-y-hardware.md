@@ -81,7 +81,7 @@ Pasos:
 3. Un tique, una comanda o un trabajo de la cola **no llegan a ella**: la puerta de impresión y el
    alta del puesto solo reconocen impresoras con dirección de red o Bluetooth con MAC
    (`apps/web/src/lib/print.ts:199-202`); una USB entra en el registro con dirección vacía
-   (`crates/peripherals/src/registry.rs:259-273`).
+   (`crates/peripherals/src/registry.rs:155-168`).
 4. En Android no hay cola del sistema: un identificador `usb:` falla con «impresora inalcanzable… usa una
    de red o una Bluetooth emparejada».
 Entra: el identificador `usb:<cola>`.
@@ -108,13 +108,13 @@ Entra: la clave de la impresora (MAC o identificador) y el valor; la función `r
 `label`.
 Sale: el registro de **este dispositivo**; el hub lo sabe solo cuando el puesto se da de alta (HUB_APP-F18).
 Si falla: una impresora que el registro no tiene («escanea otra vez»). **Un nombre puesto a mano lo
-sobrescribe la siguiente búsqueda** del mismo equipo (`crates/peripherals/src/registry.rs:300-310`,
+sobrescribe la siguiente búsqueda** del mismo equipo (`crates/peripherals/src/registry.rs:199-212`,
 `existing.name = name`). Quitar la entrada del registro no retira al dispositivo del hub ni la función
 queda sin dar de baja: el dispositivo se vuelve a dar de alta solo mientras tenga otra función, y una
 función ya anunciada no se retira (`HUB-F197`). No existe la acción «dejar sin función». La orden de
 renombrar y la de quitar existen y están concedidas, pero **ninguna pantalla las llama** (el SDK no tiene
 `setDeviceName` ni `removeDevice`; el módulo Impresión solo usa `setDeviceRole`, `addNetworkPrinter` y
-`testPrint`) y, con una clave que no existe, contestan «correcto» (`registry.rs:431-434,476-479`).
+`testPrint`) y, con una clave que no existe, contestan «correcto» (`registry.rs:326-328,371-373`).
 Implicados: HUB-F196, HUB-F197, HUB_PERIPHERALS-F04, PRINTING-F04
 QA: qa-hub §8
 

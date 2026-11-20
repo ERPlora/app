@@ -233,7 +233,7 @@ async fn scan_network(registry: &DeviceRegistry) -> Result<Vec<PrinterInfo>> {
         // since Android 10), so registering only with a MAC would leave no printer in
         // `devices.json`: `get_devices` would return `[]` and no kitchen/bar/till role could be
         // assigned.
-        p.mac = crate::registry::get_mac_for_ip(&ip);
+        p.mac = crate::registry::mac::get_mac_for_ip(&ip);
         let _ = registry.register(p.mac.as_deref(), &ip, port, &p.name, "network");
     }
 
