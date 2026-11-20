@@ -8,7 +8,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 
-use crate::discovery::NetworkTarget;
+use crate::print_target::NetworkTarget;
 use crate::{PeripheralError, Result};
 
 #[derive(Debug, Clone)]

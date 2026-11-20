@@ -23,7 +23,7 @@ use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use crate::discovery::{is_cups_queue_name, UsbTarget};
+use crate::print_target::{is_cups_queue_name, UsbTarget};
 use crate::protocol::{default_printer_category, PrinterInfo};
 use crate::{PeripheralError, Result};
 

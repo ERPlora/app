@@ -1,7 +1,7 @@
 //! Cajón portamonedas: comando kick ESC/POS enviado por el socket TCP de la impresora.
 //! Porta `bridge/ERPlora-Bridge-desktop/erplora_bridge/hardware/drawer.py`.
 
-use crate::discovery::NetworkTarget;
+use crate::print_target::NetworkTarget;
 use crate::Result;
 
 /// `ESC p 0 25 50` — pulso por el pin 2 del conector DK (por defecto).

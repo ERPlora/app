@@ -9,7 +9,7 @@
 //! cargo run -p erplora-peripherals --example usb_queue_probe -- <queue> # sends a REAL test page
 //! ```
 
-use erplora_peripherals::discovery::{parse_print_target, PrintTarget};
+use erplora_peripherals::print_target::{parse_print_target, PrintTarget};
 use erplora_peripherals::escpos;
 use erplora_peripherals::usb::{discover_usb_printers, send_raw, SystemCups};
 
