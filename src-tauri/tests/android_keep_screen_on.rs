@@ -15,48 +15,9 @@
 //! the power button still turns the screen off, and in the background the system decides again.
 //! No wake lock, no foreground service and no permission.
 
-use std::path::PathBuf;
+mod common;
 
-fn repo_root() -> PathBuf {
-    // `src-tauri` → up one.
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .canonicalize()
-        .expect("cannot resolve the repository root")
-}
-
-fn read(relative: &str) -> String {
-    let path = repo_root().join(relative);
-    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
-}
-
-/// A Kotlin file without its comments: a commented-out call is not the call. Block comments nest
-/// in Kotlin, and their lines need not start with `*`.
-fn code_of(source: &str) -> String {
-    let mut code = String::new();
-    let mut rest = source;
-    let mut depth = 0;
-    while let Some(c) = rest.chars().next() {
-        if rest.starts_with("/*") {
-            depth += 1;
-            rest = &rest[2..];
-        } else if depth > 0 && rest.starts_with("*/") {
-            depth -= 1;
-            rest = &rest[2..];
-        } else if depth == 0 && rest.starts_with("//") {
-            rest = rest.find('\n').map_or("", |end| &rest[end..]);
-        } else {
-            if depth == 0 {
-                code.push(c);
-            }
-            rest = &rest[c.len_utf8()..];
-        }
-    }
-    code
-}
-
-const MAIN_ACTIVITY: &str =
-    "src-tauri/gen/android/app/src/main/java/com/erplora/app/MainActivity.kt";
+use common::{code_of, function_body, read, MAIN_ACTIVITY};
 
 const ON_CREATE: &str = "override fun onCreate(";
 const KEEP_SCREEN_ON: &str = "ScreenOn.apply(window::addFlags)";
@@ -66,14 +27,12 @@ const KEEP_SCREEN_ON: &str = "ScreenOn.apply(window::addFlags)";
 /// activity, recreations included.
 fn wiring_fault(source: &str) -> Option<&'static str> {
     let activity = code_of(source);
-    let Some(start) = activity.find(ON_CREATE) else {
+    let Some(body) = function_body(&activity, ON_CREATE) else {
         return Some(
             "no longer overrides onCreate: nothing sets FLAG_KEEP_SCREEN_ON on the window, and the \
              till goes dark at the system's sleep timeout (app#26)",
         );
     };
-    let rest = &activity[start + ON_CREATE.len()..];
-    let body = rest.find("fun ").map_or(rest, |next| &rest[..next]);
     if !body.contains(KEEP_SCREEN_ON) {
         return Some(
             "onCreate does not apply ScreenOn to the window: the till goes dark at the system's \

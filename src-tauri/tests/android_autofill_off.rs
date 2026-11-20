@@ -17,48 +17,9 @@
 //! `importantForAutofill` on the WebView is not a lever: Chromium never reads it, and Android 14+
 //! includes a WebView in the autofill structure whatever its importance.
 
-use std::path::PathBuf;
+mod common;
 
-fn repo_root() -> PathBuf {
-    // `src-tauri` → up one.
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .canonicalize()
-        .expect("cannot resolve the repository root")
-}
-
-fn read(relative: &str) -> String {
-    let path = repo_root().join(relative);
-    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
-}
-
-/// A Kotlin file without its comments: a commented-out override is not the override. Block comments
-/// nest in Kotlin, and their lines need not start with `*`.
-fn code_of(source: &str) -> String {
-    let mut code = String::new();
-    let mut rest = source;
-    let mut depth = 0;
-    while let Some(c) = rest.chars().next() {
-        if rest.starts_with("/*") {
-            depth += 1;
-            rest = &rest[2..];
-        } else if depth > 0 && rest.starts_with("*/") {
-            depth -= 1;
-            rest = &rest[2..];
-        } else if depth == 0 && rest.starts_with("//") {
-            rest = rest.find('\n').map_or("", |end| &rest[end..]);
-        } else {
-            if depth == 0 {
-                code.push(c);
-            }
-            rest = &rest[c.len_utf8()..];
-        }
-    }
-    code
-}
-
-const MAIN_ACTIVITY: &str =
-    "src-tauri/gen/android/app/src/main/java/com/erplora/app/MainActivity.kt";
+use common::{code_of, function_body, read, MAIN_ACTIVITY};
 
 const OVERRIDE: &str = "override fun getSystemService(name: String)";
 
@@ -66,14 +27,12 @@ const OVERRIDE: &str = "override fun getSystemService(name: String)";
 /// override's own text counts, up to the next function of the class.
 fn wiring_fault(source: &str) -> Option<&'static str> {
     let activity = code_of(source);
-    let Some(start) = activity.find(OVERRIDE) else {
+    let Some(body) = function_body(&activity, OVERRIDE) else {
         return Some(
             "no longer overrides getSystemService: the WebView gets the platform's \
              AutofillManager again and hands the hub's forms to the autofill service (app#15)",
         );
     };
-    let rest = &activity[start + OVERRIDE.len()..];
-    let body = rest.find("fun ").map_or(rest, |next| &rest[..next]);
     if !body.contains("AutofillOptOut.systemService(name)") {
         return Some(
             "overrides getSystemService without going through AutofillOptOut: the autofill \
