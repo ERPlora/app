@@ -197,6 +197,21 @@ fn the_standalone_project_runs_detekt_at_its_defaults() {
     );
 }
 
+/// The check of stale excuses still works once the code has nothing left to excuse.
+///
+/// detekt writes no baseline file when it finds nothing. Reading that missing file made the task
+/// throw, so the runner would turn red on the very change that fixes the last excused function.
+#[test]
+fn the_stale_excuse_check_reads_a_missing_findings_file_as_no_findings() {
+    let build = code_of(&read(STANDALONE_BUILD), "//");
+
+    assert!(
+        build.contains("if (xml.exists())"),
+        "{STANDALONE_BUILD}: `detektBaselineUpToDate` must read a findings file that detekt did \
+         not write as no findings; detekt writes none when the code keeps every limit",
+    );
+}
+
 /// Pulls `1.2.3` out of a `classpath("group:artifact:1.2.3")` line.
 fn version_of(gradle: &str, artifact: &str) -> Option<String> {
     let needle = format!("{artifact}:");

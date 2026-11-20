@@ -60,8 +60,13 @@ tasks.register("detektBaselineUpToDate") {
     val current = currentFindings.flatMap { it.baseline }
     dependsOn(currentFindings)
     doLast {
+        // detekt writes no file when it finds nothing.
         val idsOf = { xml: File ->
-            Regex("<ID>(.+?)</ID>").findAll(xml.readText()).map { it.groupValues[1] }.toSet()
+            if (xml.exists()) {
+                Regex("<ID>(.+?)</ID>").findAll(xml.readText()).map { it.groupValues[1] }.toSet()
+            } else {
+                emptySet()
+            }
         }
         val fixed = idsOf(excusedCode) - idsOf(current.get().asFile)
         if (fixed.isNotEmpty()) {
