@@ -13,8 +13,7 @@
 //!
 //! `FLAG_KEEP_SCREEN_ON` is the lever because Android honours it only while the window is visible:
 //! the power button still turns the screen off, and in the background the system decides again.
-//! No wake lock and no permission. The listening service is another matter:
-//! it keeps the process with the screen OFF and never holds the screen on.
+//! No wake lock, no foreground service and no permission.
 
 use std::path::PathBuf;
 

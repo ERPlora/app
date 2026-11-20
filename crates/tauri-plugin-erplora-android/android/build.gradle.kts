@@ -37,8 +37,7 @@ android {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
-    // `AppCompatActivity` in `Plugin.onDestroy(activity)`, where the listening service stops and
-    // the system voice shuts down; `PageKeeper` hears the activity's lifecycle through it too. The
+    // `AppCompatActivity` in `Plugin.onDestroy(activity)`, where the system voice shuts down. The
     // same version the Tauri SDK already puts in the app, so the APK carries nothing new.
     implementation("androidx.appcompat:appcompat:1.6.0")
     // `WebViewCompat.getWebChromeClient` (WebPermissionGate): the platform getter is API 26, the

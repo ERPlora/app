@@ -46,13 +46,6 @@
          and the badge keeps arriving through the USB reader. -->
     <uses-feature android:name="android.hardware.nfc" android:required="false" />
 
-    <!-- Hearing the next notice with the screen off: the foreground service
-         `NoticeListeningService`, declared (with its `specialUse` type) in the plugin manifest,
-         which the merger folds in. Install-time permissions; without them `startForeground`
-         throws on Android 14+. -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-
     <!-- Where the device is, for a module that calls `navigator.geolocation`; first
          consumer: the `attendance` module (clock-in near the venue). Runtime permissions, asked
          by wry's `RustWebChromeClient.onGeolocationPermissionsShowPrompt`; undeclared, the

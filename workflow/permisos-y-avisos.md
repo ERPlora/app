@@ -27,7 +27,7 @@ Entra: la operación y la lista de permisos que Android conoce en esta versión:
 anteriores no se pide lo que no existe (en algunos fabricantes colgaría el diálogo).
 Sale: el estado real de cada permiso; un «no» **se contesta, no se rechaza**: sin impresora el TPV tiene
 que seguir vendiendo; un «no» al micrófono deja el dictado sin empezar y el hub dice que el micrófono está
-denegado. El NFC y el servicio en primer plano son permisos de instalación: no hay diálogo. Un dispositivo
+denegado. El NFC es un permiso de instalación: no hay diálogo. Un dispositivo
 sin micrófono puede instalar la aplicación: no se exige.
 Si falla: sin el permiso de red local el barrido y el envío a la red son tiempos de espera, no errores
 (Android los bloquea por debajo de la API): sin protección parecería «no hay impresoras» (HUB_APP-F13).
@@ -131,37 +131,26 @@ Implicados: HUB_SHELL-F64, HUB_SHELL-F67, KITCHEN-F05
 QA: ninguno
 
 ### HUB_APP-F26 Seguir a la escucha con la pantalla apagada (Android)
-Estado: hecho
+Estado: no hecho — descartado: la aplicación no lleva servicio en primer plano. Mantiene la pantalla encendida mientras está abierta (HUB_APP-F02), como los TPV del mercado, y Google Play no publica una versión con un servicio en primer plano sin declararlo con un vídeo y pasar una revisión manual
 Actor: sistema
 Pantalla: Aviso del sistema
 Pasos:
-1. Decisión vigente (erplora-old/hub#2307): **no hay push**; los avisos con la pantalla apagada van por tener la
-   aplicación escuchando durante el turno, como las aplicaciones de pedidos para comercios (Uber Eats Orders,
-   Glovo Partners, Deliveroo Restaurant Hub).
-2. Con sesión iniciada, algo que avisar y los avisos no negados, la página del negocio pide a la aplicación que
-   se quede a la escucha, con las palabras de la notificación en el idioma de la persona (BASE-F113 del Hub,
-   ERPlora/hub#836).
-3. Android arranca un servicio en primer plano `specialUse` y muestra la notificación permanente «ERPlora está a
-   la escucha». Mientras dura, la aplicación mantiene viva la página: la vuelve a mostrar cuando la pantalla se
-   apaga o la aplicación pasa al fondo (sin ello Chromium la congela al minuto), y los avisos de la comanda, la
-   cita o la campana siguen llegando al momento (HUB_APP-F24).
-4. Se para cuando la página lo pide (al cerrar la sesión, también por inactividad, o cuando ya no queda nada que
-   avisar: BASE-F113), al destruirse la actividad y al cerrar la aplicación desde recientes.
-Entra: la orden de la página: encender con sus tres textos (título, cuerpo y nombre del canal) o apagar.
-Sale: el servicio y su notificación silenciosa, sin sonido ni insignia; tocarla abre la aplicación. No se
-reinicia solo (`START_NOT_STICKY`): si el sistema mata la aplicación, lo vuelve a pedir la página al abrirla.
-Si falla: Android 12 o posterior no deja arrancar un servicio en primer plano desde el segundo plano: la
-orden se rechaza (`notice_listening_start_refused`) y los avisos siguen llegando con la aplicación en
-pantalla; la página lo vuelve a pedir en su siguiente arranque. Una orden de encender sin sus textos se
-rechaza (`notice_listening_text_missing`): nunca se muestra una notificación vacía. Si se niegan los avisos en
-los ajustes de Android con la escucha encendida, sigue hasta que la página vuelve a arrancar y la apaga
-(BASE-F113). Una página que no es el negocio enlazado no puede encender ni apagar la escucha: recibe
-`not_the_linked_hub` (HUB_APP-F10, erplora-old/hub#2642). La 1.1.34 y la 1.1.35 no tienen la orden: el Hub lo
-detecta y sigue sin ella. Google Play solo publica una versión con este servicio si Play Console tiene su
-declaración, con un vídeo del servicio funcionando (`GOOGLE-PLAY.md`). En ordenador no hace falta: la
-aplicación no se duerme mientras esté abierta.
-Implicados: HUB-F60, HUB_SHELL-F69, HUB_SHELL-F139, BASE-F113 (ERPlora/hub)
-QA: qa-hub-android Pendiente (con la tablet real: sesión iniciada, pantalla apagada y una comanda que suena, con el aviso fijo a la vista; es también el vídeo de la declaración en Play)
+1. No hay push (decisión vigente, erplora-old/hub#2307) ni servicio en primer plano: los avisos salen de la
+   página del negocio mientras la aplicación está abierta.
+2. Con la aplicación en pantalla, la pantalla no se apaga sola (HUB_APP-F02, paso 6) y los avisos de la
+   comanda, la cita o la campana llegan al momento (HUB_APP-F24).
+3. Si alguien apaga la pantalla con el botón o pasa la aplicación a segundo plano, Android la congela a los
+   pocos minutos y los avisos llegan cuando se vuelve a abrir.
+Entra: nada; la aplicación no ofrece la orden de quedarse a la escucha (`keep_listening`).
+Sale: ningún servicio en primer plano ni notificación permanente. El manifiesto final, el del APK, no declara
+ningún permiso `FOREGROUND_SERVICE*` ni ningún servicio con tipo.
+Si falla: la página del negocio que pide quedarse a la escucha recibe el rechazo de Tauri («Command not
+found»), como con la 1.1.34 y la 1.1.35, y sigue sin ella. Si un permiso `FOREGROUND_SERVICE*` vuelve a un
+manifiesto (el nuestro o el que trae una librería al fusionarlos), `src-tauri/tests/android_local_network.rs`
+y el paso «Check hardware permissions on the APK» de la release se ponen en rojo antes de publicar en ningún
+canal. En ordenador no hace falta: la aplicación no se duerme mientras esté abierta.
+Implicados: HUB_APP-F02, HUB_APP-F24, HUB-F60, HUB_SHELL-F69, HUB_SHELL-F139, BASE-F113 (ERPlora/hub)
+QA: ninguno — no hay comportamiento propio que probar; la pantalla encendida se prueba en HUB_APP-F02
 
 ### HUB_APP-F32 Lo que se escribe en la ventana no va al autocompletado del sistema (Android)
 Estado: hecho

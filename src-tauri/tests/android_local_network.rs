@@ -60,12 +60,6 @@ const REQUIRED: &[&str] = &[
     // permission — no dialog, so it is not in `PermissionPolicy` — but the same "declared or
     // nothing" rule applies: without it `enableReaderMode` throws and a tablet cannot enrol a card.
     "android.permission.NFC",
-    // Staying alive to hear the next notice with the screen off. Both are install-time `normal`
-    // permissions, so there is no dialog either; but without them `startForeground` throws a
-    // SecurityException and Android freezes the page the moment the screen goes dark. See
-    // [`FOREGROUND_SERVICE`].
-    FOREGROUND_SERVICE,
-    FOREGROUND_SERVICE_SPECIAL_USE,
     // A module asking where the device is; the first one is `attendance`, which can
     // require the employee to clock in near the venue. RUNTIME permissions: wry's
     // `RustWebChromeClient.onGeolocationPermissionsShowPrompt` asks for them when a page calls
@@ -78,12 +72,11 @@ const REQUIRED: &[&str] = &[
     MODIFY_AUDIO_SETTINGS,
 ];
 
-/// The foreground service that keeps the app listening with the screen off.
-/// Google Play takes a build with them only once Play Console has their declaration (`specialUse`,
-/// with a video of the service running): `GOOGLE-PLAY.md`, «Formularios de Play que dependen de un
-/// permiso».
+/// What no manifest may declare: Google Play refuses every build with a foreground-service
+/// permission until Play Console has its declaration, with a video of the service running. The app
+/// keeps the screen on while it is open instead (`android_keep_screen_on.rs`). A prefix, so the
+/// typed variants (`_SPECIAL_USE`, `_DATA_SYNC`…) count too.
 const FOREGROUND_SERVICE: &str = "android.permission.FOREGROUND_SERVICE";
-const FOREGROUND_SERVICE_SPECIAL_USE: &str = "android.permission.FOREGROUND_SERVICE_SPECIAL_USE";
 
 /// The hardware feature the NFC permission drags in behind it.
 ///

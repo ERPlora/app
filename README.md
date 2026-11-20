@@ -96,16 +96,15 @@ decide:
 - **no existe** y no es mayor (o no es `X.Y.Z`, o minor/patch ≥ 1000) → **rojo** con el motivo: la
   Store y Play solo aceptan versiones crecientes y el `versionCode` es `major·10⁶ + minor·10³ + patch`.
 
-Para publicar: subir `version` en `src-tauri/tauri.conf.json` (hoy 1.1.35, la que mantiene la pantalla
-encendida con la app Android en primer plano: app#26; la 1.1.34 quitó el servicio en primer plano que
+Para publicar: subir `version` en `src-tauri/tauri.conf.json` (hoy 1.1.36, que vuelve a quitar el servicio en
+primer plano que Google Play no dejaba publicar sin declararlo con un vídeo: app#36; la 1.1.35 mantiene la
+pantalla encendida con la app Android en primer plano: app#26; la 1.1.34 quitó el servicio en primer plano que
 Google Play no dejaba publicar sin declararlo con un vídeo: app#23; la 1.1.33 sacó las fichas del hub del
 autocompletado de Android: app#15; la 1.1.32 tenía que llevar a Google Play el acceso por `/launch` de app#5 y app#6,
 porque la 1.1.31 salió con Play apagado: app#11. La 1.1.32 y la 1.1.33 no llegaron a Play: su `publish-play` falló
 (la 1.1.32, run `41201817578`, con la API de Google Play sin activar en el proyecto; la 1.1.33, run `41931983087`, por
 el servicio en primer plano sin declarar, app#23), así que sus GitHub Releases siguen en borrador y sin tag; la
-Store y S3 sí las recibieron. La primera que subió a Play fue la 1.1.34; la siguiente es 1.1.36 o mayor, y
-lleva de vuelta el servicio en primer plano de ERPlora/hub#836, que Play solo acepta tras declararlo con un
-vídeo: ERPlora/app#36) y
+Store y S3 sí las recibieron. La primera que subió a Play fue la 1.1.34) y
 hacer push a `main`. **La versión se sube a mano**, nada la incrementa solo, y ese push es lo único que
 hace falta: un push a `main` sin cambio de versión no publica nada, tampoco en un canal que se acaba de
 encender (`GOOGLE-PLAY.md`, paso 4).

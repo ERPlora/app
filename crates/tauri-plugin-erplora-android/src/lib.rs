@@ -39,7 +39,6 @@ pub use notices::{LaunchNoticeTap, REMEMBER_NOTICE_COMMAND, WATCH_NOTICE_TAPS_CO
 pub use permissions::{PermissionStatus, ACCESS_LOCAL_NETWORK, BLUETOOTH_CONNECT, POST_NOTIFICATIONS};
 pub use voice::{TtsAvailability, TTS_FAILED, TTS_UNAVAILABLE};
 
-use lifecycle::KeepListeningArgs;
 use voice::{TtsLanguageArgs, TtsSpeakArgs};
 
 #[derive(Debug, thiserror::Error)]
@@ -111,18 +110,6 @@ async fn open_app_settings<R: Runtime>(app: tauri::AppHandle<R>) -> Result<(), E
     app.erplora_android().open_app_settings()
 }
 
-/// The page asks the app to keep listening for notices with the screen off, or to stop.
-#[tauri::command]
-async fn keep_listening<R: Runtime>(
-    app: tauri::AppHandle<R>,
-    on: bool,
-    title: Option<String>,
-    body: Option<String>,
-    channel: Option<String>,
-) -> Result<(), Error> {
-    app.erplora_android().keep_listening(KeepListeningArgs { on, title, body, channel })
-}
-
 /// Whether the system voice reads `language` (`es-ES`): `{ available }`. The
 /// first call waits for the engine to start, so it waits on a blocking thread.
 #[tauri::command]
@@ -181,7 +168,6 @@ where
         request_permissions,
         leave_app,
         open_app_settings,
-        keep_listening,
         tts_available,
         tts_speak,
         tts_stop
