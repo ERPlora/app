@@ -268,8 +268,8 @@ fn the_bill_prints_every_article_byte_for_byte_as_the_ticket() {
     let items = [
         json!({ "name": "Menu del dia", "quantity": 1, "total": 16.5,
                 "components": ["Gazpacho", "Solomillo (+3,00)"], "notes": "Gazpacho · Solomillo" }),
-        json!({ "name": "Hamburguesa", "quantity": 2, "total": 20.0,
-                "modifiers": ["Extra queso", "Sin cebolla y sin pepinillos y con la carne muy hecha"] }),
+        json!({ "name": "Hamburguesa", "quantity": 2, "total": 20.0, "modifiers": [
+                "Extra queso", "Sin cebolla y sin pepinillos y con la carne muy hecha"] }),
         json!({ "name": "Menu", "quantity": 1, "total": 12.0,
                 "components": ["Ensalada"], "modifiers": ["Sin sal"] }),
         json!({ "name": "Cafe solo", "quantity": 1, "total": 1.8, "notes": "sin sal" }),
