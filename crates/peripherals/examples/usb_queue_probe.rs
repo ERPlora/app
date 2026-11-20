@@ -11,7 +11,9 @@
 
 use erplora_peripherals::print_target::{parse_print_target, PrintTarget};
 use erplora_peripherals::escpos;
-use erplora_peripherals::usb::{discover_usb_printers, send_raw, SystemCups};
+use erplora_peripherals::usb::cups::SystemCups;
+use erplora_peripherals::usb::discovery::discover_usb_printers;
+use erplora_peripherals::usb::send_raw;
 
 fn main() {
     match discover_usb_printers(&SystemCups) {
