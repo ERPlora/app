@@ -124,6 +124,52 @@ pub(super) fn print_duplicate_mark(b: &mut EscposBuilder, data: &serde_json::Val
     }
 }
 
+/// What prints under an article's header line, on the ticket and on the bill alike: its menu
+/// components and its supplements, one indented line each, or else its free note.
+pub(super) fn print_item_detail(b: &mut EscposBuilder, item: &serde_json::Value) {
+    // The MENU: `sales` (>= 2.16.10) sends `components: string[]` (labels already
+    // composed, supplement included) besides the one-line `notes`. One indented line per
+    // component, normal weight, NO amount — the header is the line that carries the money,
+    // so it is the components that step back (the opposite emphasis of the kitchen chit,
+    // same indentation). `sales` also joins the same components into `notes`, so when the
+    // list is there the note is skipped: printing both would say everything twice. An item
+    // without the list prints its `notes`.
+    let components: Vec<String> = item
+        .get("components")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|c| c.as_str())
+                .filter(|c| !c.trim().is_empty())
+                .map(|c| c.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    // The SUPPLEMENTS of the line, structured. `components` says what the MENU is made
+    // of; `modifiers` says what the customer CHANGED. They are different axes, so both
+    // print, components first and the change after — the same order the kitchen chit uses.
+    // Chained into `notes` they would wrap at 32 columns and the continuation would start
+    // at the margin, reading as another article; one line each, indented, avoids that.
+    //
+    // No amount of their own: in ERPlora the delta already lives inside the line's
+    // `unit_price` (`authoritative_modifiers`), so the printed `line_total` includes it and
+    // a second number in that column would not add up with the rest.
+    let supplements = modifier_lines(item);
+    if !components.is_empty() || !supplements.is_empty() {
+        b.set(Align::Left, false, false, false);
+        for entry in components.iter().chain(supplements.iter()) {
+            // Wrapped by hand keeping the indent: cut at 32 columns by the printer, the
+            // continuation would start at the margin and read as another item.
+            for line in wrap_to_width(entry, LINE_WIDTH - 2) {
+                b.text(&format!("  {line}\n"));
+            }
+        }
+    } else if is_truthy(item, "notes") {
+        b.set(Align::Left, false, false, false);
+        b.text(&format!("  > {}\n", str_field(item, "notes", "")));
+    }
+}
+
 /// The receipt; with [`Fiscal::FullInvoice`] it is also the full invoice.
 #[expect(clippy::too_many_lines, reason = "renders the whole receipt top to bottom in one pass")]
 pub(super) fn render_receipt(b: &mut EscposBuilder, data: &serde_json::Value, kind: Fiscal) {
@@ -227,47 +273,7 @@ pub(super) fn render_receipt(b: &mut EscposBuilder, data: &serde_json::Value, ki
                 .max(1) as usize;
             b.text(&format!("{line}{}{total_str}\n", " ".repeat(padding)));
 
-            // The MENU: `sales` (>= 2.16.10) sends `components: string[]` (labels already
-            // composed, supplement included) besides the one-line `notes`. One indented line per
-            // component, normal weight, NO amount — the header is the line that carries the money,
-            // so it is the components that step back (the opposite emphasis of the kitchen chit,
-            // same indentation). `sales` also joins the same components into `notes`, so when the
-            // list is there the note is skipped: printing both would say everything twice. An item
-            // without the list prints its `notes`.
-            let components: Vec<String> = item
-                .get("components")
-                .and_then(|v| v.as_array())
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|c| c.as_str())
-                        .filter(|c| !c.trim().is_empty())
-                        .map(|c| c.to_string())
-                        .collect()
-                })
-                .unwrap_or_default();
-            // The SUPPLEMENTS of the line, structured. `components` says what the MENU is made
-            // of; `modifiers` says what the customer CHANGED. They are different axes, so both
-            // print, components first and the change after — the same order the kitchen chit uses.
-            // Chained into `notes` they would wrap at 32 columns and the continuation would start
-            // at the margin, reading as another article; one line each, indented, avoids that.
-            //
-            // No amount of their own: in ERPlora the delta already lives inside the line's
-            // `unit_price` (`authoritative_modifiers`), so the printed `line_total` includes it and
-            // a second number in that column would not add up with the rest.
-            let supplements = modifier_lines(item);
-            if !components.is_empty() || !supplements.is_empty() {
-                b.set(Align::Left, false, false, false);
-                for entry in components.iter().chain(supplements.iter()) {
-                    // Wrapped by hand keeping the indent: cut at 32 columns by the printer, the
-                    // continuation would start at the margin and read as another item.
-                    for line in wrap_to_width(entry, LINE_WIDTH - 2) {
-                        b.text(&format!("  {line}\n"));
-                    }
-                }
-            } else if is_truthy(item, "notes") {
-                b.set(Align::Left, false, false, false);
-                b.text(&format!("  > {}\n", str_field(item, "notes", "")));
-            }
+            print_item_detail(b, item);
         }
     }
 

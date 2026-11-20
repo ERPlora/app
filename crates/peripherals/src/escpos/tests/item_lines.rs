@@ -259,3 +259,43 @@ fn a_long_supplement_on_the_ticket_keeps_its_indent_when_it_wraps() {
         assert!(l.chars().count() <= LINE_WIDTH, "and fits the paper: {l:?}");
     }
 }
+
+/// The bill is the same list of lines as the ticket, so every article prints there byte for byte
+/// as on the ticket: its header, its menu components, its supplements and its free note, with the
+/// same printer modes. Two copies of that code end up saying different things on the two papers.
+#[test]
+fn the_bill_prints_every_article_byte_for_byte_as_the_ticket() {
+    let items = [
+        json!({ "name": "Menu del dia", "quantity": 1, "total": 16.5,
+                "components": ["Gazpacho", "Solomillo (+3,00)"], "notes": "Gazpacho · Solomillo" }),
+        json!({ "name": "Hamburguesa", "quantity": 2, "total": 20.0,
+                "modifiers": ["Extra queso", "Sin cebolla y sin pepinillos y con la carne muy hecha"] }),
+        json!({ "name": "Menu", "quantity": 1, "total": 12.0,
+                "components": ["Ensalada"], "modifiers": ["Sin sal"] }),
+        json!({ "name": "Cafe solo", "quantity": 1, "total": 1.8, "notes": "sin sal" }),
+        json!({ "name": "Agua", "quantity": 1.5, "total": 1.5 }),
+    ];
+    for item in items {
+        let data = json!({ "items": [item], "total": 1.0 });
+        let ticket = render_document(DocumentType::Receipt, &data).expect("valid ticket");
+        let bill = render_document(DocumentType::Prebill, &data).expect("valid bill");
+        assert_eq!(
+            article_lines(&bill),
+            article_lines(&ticket),
+            "the bill and the ticket print this article differently: {item}",
+        );
+    }
+}
+
+/// The bytes between the two dashed rules that frame the articles of a ticket or a bill.
+fn article_lines(paper: &[u8]) -> &[u8] {
+    let rule = "-".repeat(LINE_WIDTH) + "\n";
+    let mut frames = paper
+        .windows(rule.len())
+        .enumerate()
+        .filter(|(_, w)| *w == rule.as_bytes())
+        .map(|(at, _)| at);
+    let start = frames.next().expect("the rule that opens the articles") + rule.len();
+    let end = frames.next().expect("the rule that closes the articles");
+    &paper[start..end]
+}
