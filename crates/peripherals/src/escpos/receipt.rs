@@ -1,5 +1,5 @@
 use super::builder::{print_wrapped, wrap_to_width, Align, EscposBuilder};
-use super::fields::{fmt_qty, is_truthy, modifier_lines, now_dmy_hm, str_field};
+use super::fields::{fmt_qty, is_truthy, modifier_lines, paper_date, str_field};
 use super::locale::{Label, Locale};
 use super::{LINE_WIDTH, PRODUCT_NAME, PROMO_QR_MODULE_DOTS};
 use crate::Result;
@@ -239,7 +239,7 @@ pub(super) fn render_receipt(b: &mut EscposBuilder, data: &serde_json::Value, ki
         Fiscal::FullInvoice => Label::InvoiceNumber,
     };
     b.text(&format!("{}{receipt_id}\n", t.label(number_label)));
-    b.text(&format!("{}{}\n", t.label(Label::Date), now_dmy_hm()));
+    b.text(&format!("{}{}\n", t.label(Label::Date), paper_date(data)));
 
     if is_truthy(data, "cashier") {
         b.text(&format!("{}{}\n", t.label(Label::Cashier), str_field(data, "cashier", "")));

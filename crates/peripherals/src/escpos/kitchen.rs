@@ -1,5 +1,5 @@
 use super::builder::{wrap_to_width, Align, EscposBuilder};
-use super::fields::{fmt_qty, is_truthy, modifier_lines, now_hm, str_field};
+use super::fields::{fmt_qty, is_truthy, modifier_lines, paper_time, str_field};
 use super::locale::{Label, Locale};
 use super::receipt::print_duplicate_mark;
 use super::LINE_WIDTH;
@@ -76,7 +76,7 @@ pub(super) fn render_kitchen_order(b: &mut EscposBuilder, data: &serde_json::Val
         ));
     }
 
-    b.text(&format!("{}{}\n", t.label(Label::Time), now_hm()));
+    b.text(&format!("{}{}\n", t.label(Label::Time), paper_time(data)));
     b.text("--------------------------------\n");
 
     if let Some(items) = data.get("items").and_then(|v| v.as_array()) {

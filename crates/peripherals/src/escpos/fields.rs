@@ -15,6 +15,26 @@ pub(super) fn now_hm() -> String {
     chrono::Local::now().format("%H:%M").to_string()
 }
 
+/// The moment a ticket, an invoice, a bill or a cash report tells: the Hub's `date`, already
+/// written on the business's clock, so a reprint says what the original said. Without it, the
+/// device's clock.
+pub(super) fn paper_date(data: &serde_json::Value) -> String {
+    moment_or(data, "date", now_dmy_hm)
+}
+
+/// The moment a kitchen chit tells, also on its copies: the Hub's `time` (when the round was
+/// sent). Without it, the device's clock.
+pub(super) fn paper_time(data: &serde_json::Value) -> String {
+    moment_or(data, "time", now_hm)
+}
+
+fn moment_or(data: &serde_json::Value, key: &str, device_clock: fn() -> String) -> String {
+    data.get(key)
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map_or_else(device_clock, str::to_string)
+}
+
 /// Reads a string field; missing or not a string → `default`.
 pub(super) fn str_field<'a>(data: &'a serde_json::Value, key: &str, default: &'a str) -> &'a str {
     data.get(key).and_then(|v| v.as_str()).unwrap_or(default)

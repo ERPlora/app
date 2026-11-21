@@ -277,14 +277,14 @@ Implicados: PRINTING-F02
 QA: ninguno
 
 ### HUB_PERIPHERALS-F09 Sacar el tique o la factura
-Estado: parcial — la fecha y la hora del papel son las del momento de imprimir (reloj del dispositivo), no las de la venta: un tique que esperó en la cola, o una reimpresión, sale con otra hora; con una impresora de red apagada, la caja que lo mandó avisa y deja reintentar (hub#2494), pero un tique que iba por la cola del hub vuelve «fallido» sin aviso (HUB_PERIPHERALS-F06)
+Estado: parcial — con una impresora de red apagada, la caja que lo mandó avisa y deja reintentar (hub#2494), pero un tique que iba por la cola del hub vuelve «fallido» sin aviso (HUB_PERIPHERALS-F06)
 Actor: sistema
 Pantalla: ninguna
 Pasos:
 1. Un cobro, o una reimpresión desde Ventas o Facturas, manda el documento compuesto por Ventas.
 2. El papel sale así, de arriba abajo: si lleva QR fiscal, el texto «QR tributario:» y el QR, y
    debajo la leyenda «VERI*FACTU»; el nombre del negocio, su dirección, su NIF y su teléfono; el
-   número del tique y la fecha; el cajero y el cliente si vienen; las líneas con sus suplementos (el
+   número del tique y la fecha del cobro; el cajero y el cliente si vienen; las líneas con sus suplementos (el
    suplemento sin importe, bajo la línea); el subtotal, el IVA, el descuento y el total; el pago, lo
    entregado y el cambio; el QR «pide tu factura» si el documento lo trae; la cabecera y el pie del negocio; «Gracias»; y, si el negocio puso un
    enlace propio, su nota y un QR más pequeño.
@@ -292,7 +292,9 @@ Pasos:
    desglose de IVA por tipo (porcentaje, base y cuota), el NIF y el nombre del cliente.
 4. La marca «DUPLICADO» sale solo con un `true` explícito, debajo de los datos del negocio. «QR tributario:» y «VERI*FACTU» son textos que manda el productor, no fijos.
 5. Se corta el papel.
-Entra: el documento estructurado que compone `sales` (o `invoice`); la moneda llega con su escala de
+Entra: el documento estructurado que compone `sales` (o `invoice`); la fecha llega en `date`, ya escrita en
+el reloj del negocio («21/11/2026 15:41») y la misma en el original y en toda copia, y sale tal cual (sin
+ella, o vacía, la hora del dispositivo); la moneda llega con su escala de
 decimales (euro 2, yen 0, dinar 3) y el idioma con `locale`.
 Sale: el papel. La aplicación no inventa nada fiscal: imprime lo que trae el documento, y rechaza
 una factura completa que no trae emisor, número, cliente, NIF del cliente y desglose de IVA, en vez de
@@ -306,21 +308,21 @@ Implicados: HUB_APP-F15, HUB_SHELL-F76, PRINTING-F07, PRINTING-F08, SALES-F01
 QA: R-09, qa-hub §8
 
 ### HUB_PERIPHERALS-F10 Sacar la comanda de cocina o barra
-Estado: parcial — la hora que sale en la comanda es la de imprimir, no la de pedir; con una impresora de red apagada, la caja que la disparó avisa y deja reintentar esa estación (hub#2494), pero una comanda que iba por la cola del hub vuelve «fallida» sin aviso (HUB_PERIPHERALS-F06)
+Estado: parcial — con una impresora de red apagada, la caja que la disparó avisa y deja reintentar esa estación (hub#2494), pero una comanda que iba por la cola del hub vuelve «fallida» sin aviso (HUB_PERIPHERALS-F06)
 Actor: sistema
 Pantalla: ninguna
 Pasos:
 1. Una ronda disparada, un aviso de urgencia o el pase marcado como lista manda la comanda.
 2. El papel sale con la palabra «COCINA» grande, el número de la comanda, la etiqueta de la mesa en
    doble tamaño (en doble ancho si cabe en una línea), el camarero, la ronda (solo a partir de la
-   segunda) y la hora.
+   segunda) y la hora del envío de la ronda, también en una copia reimpresa.
 3. Cada línea sale en negrita y doble altura, «2x Bacalao»; los suplementos, en negrita y sangrados
    debajo; la nota del camarero con «>>» y sin realce; las líneas de un menú, agrupadas bajo su nombre
    y sangradas.
 4. Una comanda marcada urgente cierra con «URGENTE» en grande. Se corta el papel.
 5. El vale de anulación de una ronda cancelada o de un plato anulado en el TPV (HUB_SHELL-F78) es esta misma comanda: «ANULADA · Mesa 4» (o «PLATO ANULADO · Mesa 4» para un solo plato) donde va la mesa y cada plato con la cantidad en negativo («-2x Croquetas», «-0.5x Flan»); el signo sale tal cual, nunca se redondea a positivo.
 Entra: el documento que compone `kitchen` (o el shell): número, etiqueta de sala, camarero, ronda,
-prioridad y líneas con cantidad, nombre, suplementos, nota y menú.
+hora (`time`, «17:06», tal cual; sin ella, o vacía, la del dispositivo), prioridad y líneas con cantidad, nombre, suplementos, nota y menú.
 Sale: el papel. La función (Cocina o Barra) la decide el hub; esta parte pinta lo mismo en las dos.
 Si falla: un documento que no es objeto se rechaza antes de imprimir. Con un campo sin rellenar sale
 con su valor por omisión (cantidad 1). Sin comprobar que sea una comanda: una comanda sin líneas sale
@@ -334,7 +336,8 @@ Actor: sistema
 Pantalla: ninguna
 Pasos:
 1. El camarero pide la cuenta (o el cajero la del cliente) antes de cobrar.
-2. El papel sale con el título «CUENTA», el negocio, la mesa (o el cliente), las líneas con sus
+2. El papel sale con el título «CUENTA», el negocio, la mesa (o el cliente), la fecha en que se pidió
+   (`date`, tal cual; sin ella, la del dispositivo), las líneas con sus
    suplementos, los totales y un aviso de que **no es una factura**, partido por palabras al ancho del
    papel. Se corta.
 Entra: el documento «cuenta» que compone `sales`, con sus líneas.
@@ -372,7 +375,8 @@ Pasos:
 1. Un productor manda un documento de cierre de caja, de albarán o genérico.
 2. El **informe de caja** sale titulado «INFORME PARCIAL (X)» si la sesión sigue abierta y «CIERRE DE
    CAJA (Z)» si ya está cerrada (lo dice el número de sesión que manda Caja, «<número> (X)» o
-   «<número> (Z)»), como los titula la pantalla de Caja. Debajo, la sesión, la fecha, el cajero, el
+   «<número> (Z)»), como los titula la pantalla de Caja. Debajo, la sesión, la fecha que manda Caja
+   (`date`: el cierre en el Z, el momento de pedirlo en el X), el cajero, el
    fondo de apertura y una línea por cada cifra que manda Caja, ya en el idioma de quien imprime:
    ventas por forma de pago, devoluciones, entradas, salidas, invitaciones, el esperado y, en el Z,
    el contado y el descuadre. La aplicación no calcula ninguna diferencia propia: el descuadre es el
@@ -383,7 +387,8 @@ Pasos:
    línea para la firma.
 4. El **genérico** sale con título y una línea «clave: valor» por campo, sin formato.
 Entra: el documento estructurado de quien lo pida.
-Sale: el papel; fechas del momento de imprimir, como en HUB_PERIPHERALS-F09.
+Sale: el papel. El informe de caja sin `date` y el albarán, que no trae fecha, salen con la hora del
+dispositivo.
 Si falla: como el resto: un documento que no es objeto se rechaza; un campo que falta, en blanco.
 Implicados: PRINTING-F16, PRINTING-F17, CASH_REGISTER-F16
 QA: ninguno

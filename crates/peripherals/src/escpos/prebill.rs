@@ -1,5 +1,5 @@
 use super::builder::{print_wrapped, wrap_to_width, Align, EscposBuilder};
-use super::fields::{fmt_qty, is_truthy, now_dmy_hm, str_field};
+use super::fields::{fmt_qty, is_truthy, paper_date, str_field};
 use super::locale::{Label, Locale};
 use super::receipt::print_item_detail;
 use super::{LINE_WIDTH, PRODUCT_NAME};
@@ -44,7 +44,7 @@ pub(super) fn render_prebill(b: &mut EscposBuilder, data: &serde_json::Value) {
     if is_truthy(data, "customer_name") {
         b.text(&format!("{}{}\n", t.label(Label::TableOrCustomer), str_field(data, "customer_name", "")));
     }
-    b.text(&format!("{}{}\n", t.label(Label::Date), now_dmy_hm()));
+    b.text(&format!("{}{}\n", t.label(Label::Date), paper_date(data)));
     b.text("--------------------------------\n");
 
     if let Some(items) = data.get("items").and_then(|v| v.as_array()) {
