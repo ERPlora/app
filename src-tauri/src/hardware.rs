@@ -81,24 +81,41 @@ pub(crate) fn build_peripherals_state(devices_path: PathBuf) -> PeripheralsState
     PeripheralsState { registry, queue }
 }
 
-/// Error of the hardware handlers. It is serialized as a string for the frontend, where the SDK
-/// turns it into a rejected promise.
+/// Error of the hardware handlers. The page gets only its stable code (`code`), which the SDK turns
+/// into a rejected promise: the device that prints for the hub reports it as the job's last error,
+/// and the Printing screen says it in the reader's language. The words, which name the system's
+/// error and the printer's address, go to the device's log as the error leaves.
 #[derive(Debug, thiserror::Error)]
 pub enum HardwareError {
     #[error("{0}")]
     Peripheral(#[from] erplora_peripherals::PeripheralError),
+    /// Android refused `BLUETOOTH_CONNECT`: the person has to allow it; the printer is fine.
+    #[error("{0}")]
+    BluetoothPermissionDenied(String),
+}
+
+impl HardwareError {
+    /// The stable word a screen branches on (`PeripheralError::code`).
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Peripheral(e) => e.code(),
+            Self::BluetoothPermissionDenied(_) => {
+                tauri_plugin_erplora_android::BLUETOOTH_PERMISSION_DENIED
+            }
+        }
+    }
 }
 
 impl Serialize for HardwareError {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(&self.to_string())
+        eprintln!("peripherals: {self}");
+        s.serialize_str(self.code())
     }
 }
 
 /// Refusal of `erplora_add_network_printer`: the stable `code` the page branches on next to the
-/// message for the log. `HardwareError` travels as a bare string, and the two answers this command
-/// can give send the owner to opposite places — fix the typed address, or go check the printer —
-/// so the page must be able to tell them apart without parsing prose.
+/// message, which names the address that was typed. The two answers this command can give send
+/// the owner to opposite places — fix the typed address, or go check the printer.
 #[derive(Debug, Serialize)]
 pub(crate) struct AddPrinterError {
     code: &'static str,
@@ -189,9 +206,8 @@ mod tests {
 
     // ── Adding a printer by typing its address ───────────────────────────────────────────────────
     //
-    // The screen has to tell a typo from a printer that did not answer, in the user's language. A
-    // bare string (what `HardwareError` sends) cannot be branched on without parsing prose, so this
-    // command's refusal carries the stable code next to the message.
+    // The screen has to tell a typo from a printer that did not answer, in the user's language, so
+    // this command's refusal carries the stable code next to the message.
 
     #[test]
     fn a_refused_manual_printer_reaches_the_page_as_a_code_and_a_message() {
@@ -206,6 +222,43 @@ mod tests {
             "not an IPv4 address".into(),
         ));
         assert_eq!(serde_json::to_value(&typo).expect("serializes")["code"], "invalid_printer_address");
+    }
+
+    // ── A print that fails reaches the page as its code ─────────────────────────────────────────
+    //
+    // The device that prints for the hub reports this answer as the job's last error, and the
+    // Printing screen says it in the reader's language. The system's words («Connection refused
+    // (os error 111)») tell whoever runs the shop nothing; they go to the device's log.
+
+    #[test]
+    fn a_failed_print_reaches_the_page_as_its_code_not_the_systems_words() {
+        use erplora_peripherals::PeripheralError;
+        let cases = [
+            (
+                PeripheralError::Unreachable("192.168.1.50:9100: Connection refused (os error 111)".into()),
+                "printer_unreachable",
+            ),
+            (PeripheralError::InvalidPrinterId("not an IPv4 address".into()), "invalid_printer_address"),
+            (PeripheralError::UnknownDocumentType("menu".into()), "unknown_document_type"),
+            (PeripheralError::InvalidPayload("no lines".into()), "invalid_payload"),
+            (
+                PeripheralError::Io(std::io::Error::from(std::io::ErrorKind::ConnectionRefused)),
+                "io_error",
+            ),
+        ];
+        for (error, code) in cases {
+            let wire = serde_json::to_value(HardwareError::from(error)).expect("serializes");
+            assert_eq!(wire, serde_json::json!(code));
+        }
+    }
+
+    #[test]
+    fn a_bluetooth_permission_refusal_has_its_own_code() {
+        let denied = HardwareError::BluetoothPermissionDenied("BLUETOOTH_CONNECT".into());
+        assert_eq!(
+            serde_json::to_value(&denied).expect("serializes"),
+            serde_json::json!("bluetooth_permission_denied")
+        );
     }
 
     // ── The app must not introduce itself as «v0.0.0» ────────────────────────────────────────
