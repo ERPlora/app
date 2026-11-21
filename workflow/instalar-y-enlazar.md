@@ -106,23 +106,25 @@ Pantalla: HUB_SHELL: Barra superior
 Pasos:
 1. Dentro de la aplicación (no en un navegador), pulsa el icono «Cambiar de negocio».
 2. Lee «¿Cambiar de negocio?» y confirma con «Cambiar» (o «Cancelar», o toca fuera: es un no).
-3. Antes de olvidar nada, la aplicación cierra la sesión de verdad (erplora-old/hub#2503), en este orden: el hub
-   revoca la sesión (espera su respuesta hasta 5 s: si no contesta, se sigue igual); y se borran del
-   dispositivo la sesión, el nombre y el correo de la persona y sus credenciales de erplora.com.
+3. Antes de olvidar nada, el hub cierra su sesión en el servidor (espera su respuesta hasta 10 s) y después borra
+   lo que guarda en el navegador del dispositivo, menos el identificador del dispositivo y la respuesta a los
+   avisos. La sesión de erplora.com sigue abierta: es la que enseña la lista de negocios.
 4. Solo entonces olvida el negocio recordado y lleva la ventana a la lista de negocios del SaaS
    (`/shell/?choose=1`), que fuerza la lista aunque solo haya uno.
 5. Elige otro: se recuerda como en HUB_APP-F02. Volver al anterior (con su enlace o desde la lista) pide
    entrar otra vez, con la cuenta o con el PIN.
 Entra: la confirmación de la persona.
-Sale: la sesión revocada en el hub; en el almacenamiento del origen del negocio anterior ya no quedan el token
-de sesión del hub, el usuario con nombre y correo ni los tokens de acceso y refresco de erplora.com
-(`signOutAndForgetHub` en `change-hub.ts`, el mismo camino que el 410 de HUB_APP-F05); el fichero `hub.url` borrado y el negocio desenlazado (ninguna página maneja el hardware hasta elegir
-otro). **Se conserva `device.id`** (ancla de la sesión única por dispositivo): reasignar una caja a otro
+Sale: la sesión cerrada en el hub; en el almacenamiento del origen del negocio anterior solo quedan el
+identificador del dispositivo y la respuesta a los avisos (`changeBusiness` en `base/frontend/lib/change-business.ts`
+de ERPlora/hub, el mismo camino que el 410 de HUB_APP-F05); el fichero `hub.url` borrado y el negocio desenlazado
+(ninguna página maneja el hardware hasta elegir otro). **Se conserva `device.id`** (ancla de la sesión única por dispositivo): reasignar una caja a otro
 local no obliga a desinstalar (en Android, desinstalar lo destruiría).
-Si falla: un hub que no contesta a la revocación no retiene a la persona: a los 5 s se sigue (lo local ya está
-borrado y la sesión caduca sola). Sin ventana no falla, simplemente no navega. Con un solo negocio, sin
+Si falla: si el hub no cierra la sesión (sin conexión, un error o sin respuesta en 10 s), «¿Cambiar de negocio?» lo
+dice y no se olvida ni se borra nada: la persona sigue dentro, con su sesión, y puede volver a intentarlo (olvidar el
+negocio con la sesión abierta la dejaría abierta para quien vuelva a él). Si es la aplicación la que no puede olvidarlo,
+la sesión ya está cerrada y el diálogo pide cerrar la aplicación y volver a abrirla. Sin ventana no falla, simplemente no navega. Con un solo negocio, sin
 `?choose=1` el SaaS lo volvería a abrir al instante; por eso este camino lo lleva.
-Implicados: HUB_SHELL-F16, SAAS_DASHBOARD-F07
+Implicados: HUB_SHELL-F16, SAAS_DASHBOARD-F07, BASE-F61 (ERPlora/hub)
 QA: qa-hub-android Fase 1
 
 ### HUB_APP-F05 Olvidar un negocio que ya no existe
@@ -134,10 +136,10 @@ Pasos:
    aplicación le hace una petición `HEAD` (6 s de plazo).
 2. Si contesta 404 o 410 (el negocio se borró), la aplicación olvida `hub.url`, lo desenlaza y lleva la
    ventana al SaaS. Cualquier otra respuesta —viva, sin sesión, caída— o ningún contacto: lo conserva.
-3. Además, si estando dentro el Cloud contesta 410 «negocio no encontrado», el hub cierra la sesión como en
-   HUB_APP-F04 (sesión revocada, credenciales borradas) y solo después pide olvidar
-   (`forget_hub` sin lista forzada); como `forget_hub` navega toda la ventana, la persona acaba en `/shell/` del
-   SaaS, no en el acceso del hub (en un navegador, en el acceso del hub).
+3. Además, si estando dentro el negocio contesta 410 (ya no existe), el hub cierra la sesión como en HUB_APP-F04
+   (lo que guarda en el navegador, borrado) y solo después pide olvidar (`forget_hub` sin lista forzada); como
+   `forget_hub` navega toda la ventana, la persona acaba en `/shell/` del SaaS, no en la página del negocio borrado
+   (en un navegador, en esa página, con el camino de vuelta a ERPlora).
 Entra: el `hub.url` y la respuesta del negocio.
 Sale: el fichero borrado y la ventana en el SaaS. La asimetría es a propósito: olvidar de más obliga a
 rehacer el alta; olvidar de menos deja una pantalla fea que se arregla sola.
