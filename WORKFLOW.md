@@ -191,7 +191,7 @@ tests `tests/shell_surface.rs`, `app_update_channel.rs` y `notice_tap.rs`.
 | Orden | Quién la llama (hub viejo, 2026-10-05) | En `ERPlora/hub`, `@erplora/ui` y `ERPlora/saas` (2026-11-11) | Flujos HUB_APP | Fuera de HUB_APP |
 |---|---|---|---|---|
 | `device_context` | `device.ts` (inicio de sesión) | hub `base/frontend/lib/management.ts` | F06 | HUB-F137, HUB-F139; SaaS (login) |
-| `forget_hub` | `change-hub.ts` (`signOutAndForgetHub`, también el 410 de `main.ts`) | **nadie** | F04, F05 | HUB_SHELL Barra superior |
+| `forget_hub` | `change-hub.ts` (`signOutAndForgetHub`, también el 410 de `main.ts`) | hub `base/frontend/lib/change-business.ts` («Cambiar de negocio» de la barra y el 410 de un negocio que ya no existe) | F04, F05 | HUB_SHELL Barra superior |
 | `open_external_url` | `open-external.ts` (pago, plan, descarga) | ui `src/shell/open-external.ts`, que usan `UserMenuPopover.vue` y pantallas del hub (`FileDocument.vue`, `saas-pass.ts`…) | F29, F31 | HUB_SHELL Aplicaciones/plan, Sistema |
 | `save_download` | `save-download.ts` | hub `base/frontend/lib/download.ts` | F30 | HUB_SHELL Archivos, Ajustes |
 | `print_document` | `native-print.ts` → `print.ts` | hub `base/frontend/lib/print-paper.ts`, `apps/printing/templates/printing/test_page.html`; ui `src/shell/device-printer.ts` | F22 | PRINTING-F08 |
