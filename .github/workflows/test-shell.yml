@@ -3,7 +3,8 @@
 # ==============================================================================
 #
 # This workflow runs `cargo test -p erplora-tauri -p tauri-plugin-erplora-android
-# -p erplora-peripherals` (the three crates of this repo's workspace), only when the app changes.
+# -p erplora-peripherals` (the three crates of this repo's workspace): on a push to `main` only when
+# the app changes, and on every pull request, because its checks are required to merge into `main`.
 #
 # On the three desktop systems the app ships to: Linux, Windows and macOS, so a change that breaks
 # one of them is found on its pull request and not while cutting a release. Windows and macOS need
@@ -28,8 +29,8 @@
 # that the code cites nothing its reader does not have, and the size and function limits of the
 # code (`scripts/ci/file-size.py`, `scripts/ci/function-limits.sh`), which only let their
 # exceptions shrink against the merge-base with `main`: the job checks out the whole history.
-# Those two checks also run on EVERY pull request and push to `main`, in `code-limits.yml`,
-# because the path filter below would miss a big file added anywhere else.
+# Those two checks also run on EVERY push to `main`, in `code-limits.yml`, because the path filter
+# of the push below would miss a big file added anywhere else.
 #
 # The `test` job also runs `cargo clippy --workspace --all-targets` on the three systems: the lint
 # levels and the function limits live in the root `Cargo.toml` and `clippy.toml`, and only clippy
@@ -56,7 +57,7 @@ on:
       - "crates/peripherals/**"
       - "crates/tauri-plugin-erplora-android/**"
       - ".github/workflows/test-shell.yml"
-      # Its contract: a PR that only touches the test must run it.
+      # Its contract: a change to the test alone must run it.
       - "scripts/tests/test-shell-workflow.test.sh"
       # `release_runner_assumptions.rs` reads EVERY workflow (see the header), and the `scripts`
       # job lints them all: any of them can turn this suite red. That includes `tauri-release.yml`,
@@ -68,33 +69,11 @@ on:
       # The size exceptions and the function limits: a change to either alone must be checked.
       - ".file-size-allow"
       - "clippy.toml"
+  # EVERY pull request, no path filter: its checks are required to merge into `main` (branch
+  # protection), and a required check whose workflow a filter skips never reports, so GitHub would
+  # keep a docs-only PR waiting forever.
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      # The app is the whole repo: its crate, the bundled page, the workspace manifests and both
-      # library crates it compiles against.
-      - "src-tauri/**"
-      - "shell-dist/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "rust-toolchain.toml"
-      - "crates/peripherals/**"
-      - "crates/tauri-plugin-erplora-android/**"
-      - ".github/workflows/test-shell.yml"
-      # Its contract: a PR that only touches the test must run it.
-      - "scripts/tests/test-shell-workflow.test.sh"
-      # `release_runner_assumptions.rs` reads EVERY workflow (see the header), and the `scripts`
-      # job lints them all: any of them can turn this suite red. That includes `tauri-release.yml`,
-      # whose APK permission check `android_local_network.rs` guards.
-      - ".github/workflows/*.yml"
-      # Every script and its test: the `scripts` job runs all of them (both release gates, the
-      # MSIX packer, the apt wrapper, the Play preflight…) and the `test` job the Kotlin runner.
-      - "scripts/**"
-      # The size exceptions and the function limits: a change to either alone must be checked.
-      - ".file-size-allow"
-      - "clippy.toml"
   workflow_dispatch:
   # `tauri-release.yml` calls this workflow and builds only after it is green.
   workflow_call:

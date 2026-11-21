@@ -63,8 +63,8 @@ const RUNNER_SCRIPT: &str = "scripts/kotlin-plugin-tests.sh";
 
 /// The Kotlin tests must run on a PULL REQUEST, not only when publishing.
 ///
-/// `test-shell.yml` is the right home: it already triggers on `pull_request` filtered to
-/// `crates/tauri-plugin-erplora-android/**`, which is exactly the tree these tests cover.
+/// `test-shell.yml` is the right home: it already runs on every `pull_request`, and on a push to
+/// `main` its path filter includes `crates/tauri-plugin-erplora-android/**`, these tests' tree.
 #[test]
 fn the_kotlin_unit_tests_run_in_the_pull_request_workflow() {
     let workflow = code_of(&read(SHELL_WORKFLOW), "#");
@@ -82,9 +82,9 @@ fn the_kotlin_unit_tests_run_in_the_pull_request_workflow() {
 
 /// The workflow must keep watching the tree the Kotlin tests live in.
 ///
-/// The path filter is what decides whether the job runs at all. Dropping
+/// On a push to `main`, the path filter is what decides whether the job runs at all. Dropping
 /// `crates/tauri-plugin-erplora-android/**` would leave the step present in the file and never
-/// executed — a green PR that never compiled the thing it changed.
+/// executed — a green push that never compiled the thing it changed.
 #[test]
 fn the_workflow_still_watches_the_plugin_tree() {
     let workflow = code_of(&read(SHELL_WORKFLOW), "#");

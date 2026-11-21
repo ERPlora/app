@@ -51,8 +51,9 @@ cargo test -p erplora-peripherals --test hardware_smoke -- --ignored --nocapture
 En CI, `test-shell.yml` tiene dos jobs: `test` corre el `cargo test` y el `cargo clippy` en Linux,
 Windows y macOS y, solo en Linux, los tests Kotlin; `scripts` corre `actionlint` y **todos** los
 `scripts/*.test.sh` y `scripts/tests/*.test.sh` por glob (en el monorepo cinco de ellos solo los
-corría `actionlint.yml`, que no se trajo). Se dispara en push a `main` y en PR cuando cambia algo de
-la app, de `scripts/` o de un workflow, y lo **llama** `tauri-release.yml` antes de construir nada.
+corría `actionlint.yml`, que no se trajo). Se dispara en push a `main` cuando cambia algo de la app,
+de `scripts/` o de un workflow, y en **toda** PR lista para revisar, sin filtro de rutas, porque sus
+checks son obligatorios para mergear a `main`. Lo **llama** `tauri-release.yml` antes de construir nada.
 
 **Tamaño y límites de función.** Cada lenguaje tiene su tope, en líneas físicas (producción / tests):
 Rust 500 fuera de los bloques `#[cfg(test)]` y 1.000 el fichero entero (si pasa, los tests salen a

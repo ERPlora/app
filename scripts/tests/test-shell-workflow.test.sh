@@ -2,8 +2,8 @@
 # Contract of .github/workflows/test-shell.yml — run with:  bash scripts/tests/test-shell-workflow.test.sh
 #
 # What it pins: the installable app is compiled and tested on the three desktop systems it ships
-# to, on the PULL REQUEST that touches it, so a change that breaks the Windows or Mac build is not
-# found while cutting the release, with the installer.
+# to, on EVERY pull request (its checks are required to merge into `main`), so a change that breaks
+# the Windows or Mac build is not found while cutting the release, with the installer.
 #
 # What must NOT come back with it:
 #   · draft PRs spending minutes on runs a re-push during the review cancels — every job keeps the
@@ -17,8 +17,8 @@
 # And the lint gate: `cargo clippy --workspace --all-targets` on the three systems (the lint levels
 # and the function limits live in `Cargo.toml` and `clippy.toml`), and the `scripts` job checks out
 # the whole history, because the size and function-limit checks only let their exceptions shrink
-# against the merge-base with `main`. Those two checks also run on EVERY pull request and push to
-# `main`, path filter or not, in `code-limits.yml` (its own contract).
+# against the merge-base with `main`. Those two checks also run on every push to `main`, path
+# filter or not, in `code-limits.yml` (its own contract).
 #
 # And the workflow is also CALLED by `tauri-release.yml` (`workflow_call`), whose builds need it —
 # nothing is published on red. Its `scripts` job runs actionlint over every workflow and EVERY
@@ -93,34 +93,42 @@ check(
     "ready_for_review" in (pr.get("types") or []),
     "a draft that becomes ready would never get a run: the draft filter skipped opened/synchronize",
 )
-for event, block in (("pull_request", pr), ("push", push)):
-    paths = block.get("paths") or []
-    # `.github/workflows/*.yml`: `release_runner_assumptions.rs` reads EVERY workflow, so a change to
-    # any of them can turn this suite red, and only a run of this workflow would say so.
-    # The app is the whole repo: its crate, the bundled page, the workspace manifests and both
-    # library crates it compiles against.
-    for wanted in (
-        "src-tauri/**",
-        "shell-dist/**",
-        "Cargo.toml",
-        "Cargo.lock",
-        "crates/peripherals/**",
-        "crates/tauri-plugin-erplora-android/**",
-        ".github/workflows/test-shell.yml",
-        ".github/workflows/*.yml",
-        SELF,
-        # Every script and its test (ERPlora/app): the `scripts` job runs all of them, so a change
-        # to any one alone must trigger it.
-        "scripts/**",
-        # The size exceptions and the function limits: a change to either alone must be checked.
-        ".file-size-allow",
-        "clippy.toml",
-    ):
-        check(
-            f"`{event}.paths` includes `{wanted}`",
-            wanted in paths,
-            f"paths are {paths} — a change to it alone would run no shell check",
-        )
+# The checks of this workflow are required to merge into `main` (branch protection). A required
+# check whose workflow a filter skips never reports, and GitHub keeps that PR waiting forever: a
+# docs-only PR could never be merged. So every pull request runs it.
+for name in ("paths", "paths-ignore", "branches", "branches-ignore"):
+    check(
+        f"`pull_request` has no `{name}` filter",
+        name not in pr,
+        f"{name} is {pr.get(name)!r} — a PR it filters out never reports the required checks",
+    )
+paths = push.get("paths") or []
+# `.github/workflows/*.yml`: `release_runner_assumptions.rs` reads EVERY workflow, so a change to
+# any of them can turn this suite red, and only a run of this workflow would say so.
+# The app is the whole repo: its crate, the bundled page, the workspace manifests and both
+# library crates it compiles against.
+for wanted in (
+    "src-tauri/**",
+    "shell-dist/**",
+    "Cargo.toml",
+    "Cargo.lock",
+    "crates/peripherals/**",
+    "crates/tauri-plugin-erplora-android/**",
+    ".github/workflows/test-shell.yml",
+    ".github/workflows/*.yml",
+    SELF,
+    # Every script and its test (ERPlora/app): the `scripts` job runs all of them, so a change
+    # to any one alone must trigger it.
+    "scripts/**",
+    # The size exceptions and the function limits: a change to either alone must be checked.
+    ".file-size-allow",
+    "clippy.toml",
+):
+    check(
+        f"`push.paths` includes `{wanted}`",
+        wanted in paths,
+        f"paths are {paths} — a change to it alone would run no shell check",
+    )
 
 # ── 2 · The test job: three systems, independent, without drafts ──────────────────────
 jobs = doc.get("jobs") or {}
