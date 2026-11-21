@@ -64,8 +64,9 @@ Entra: el emparejamiento de Android y el permiso de Bluetooth.
 Sale: los bytes por el canal serie (SPP). A diferencia de la red, **el resultado vuelve de verdad**: la
 orden no contesta hasta que los bytes se han escrito o el intento ha fallado.
 Si falla: Bluetooth apagado o sin permiso, o impresora fuera de alcance/apagada: la orden rechaza con el
-motivo («impresora inalcanzable: …» o `bluetooth_permission_denied`) y la persona lo ve en la hoja de
-prueba y el hub marca el trabajo como fallido para reintentar. El conectar puede tardar segundos; la
+código del motivo (`printer_unreachable` o `bluetooth_permission_denied`; las palabras del sistema van al
+registro del dispositivo), la pantalla de Impresión lo dice con una frase en el idioma de quien mira
+(PRINTING-F19) y el hub marca el trabajo como fallido para reintentar. El conectar puede tardar segundos; la
 orden no deja la pantalla colgada porque corre fuera del hilo principal.
 Implicados: HUB_PERIPHERALS-F09, HUB_PERIPHERALS-F14, PRINTING-F02, PRINTING-F05, REC_ALTA-F17
 QA: qa-hub-android Pendiente (Bluetooth SPP, fase C; la prueba en una tablet real la sigue ERPlora/app#33)
@@ -82,8 +83,8 @@ Pasos:
    alta del puesto solo reconocen impresoras con dirección de red o Bluetooth con MAC
    (`apps/web/src/lib/print.ts:199-202`); una USB entra en el registro con dirección vacía
    (`crates/peripherals/src/registry.rs:155-168`).
-4. En Android no hay cola del sistema: un identificador `usb:` falla con «impresora inalcanzable… usa una
-   de red o una Bluetooth emparejada».
+4. En Android no hay cola del sistema: un identificador `usb:` falla con `printer_unreachable` (en el
+   registro: «… usa una de red o una Bluetooth emparejada»).
 Entra: el identificador `usb:<cola>`.
 Sale: solo la hoja de prueba y la orden directa; con las colas CUPS la aplicación comprueba el estado
 antes de enviar y cancela a los 15 s lo que no sale (`HUB_PERIPHERALS-F07`).
@@ -166,10 +167,10 @@ Sale: lo que **se le devuelve a la pantalla** por caso:
 
    | Caso | Qué recibe quien pidió el papel |
    |---|---|
-   | Identificador mal formado, tipo desconocido, documento que no compone | Error al instante |
-   | Red, impresora apagada, IP equivocada, sin permiso de red local en Android 17 o en macOS 15 | Error «impresora inalcanzable» con el motivo, tras los 3 intentos (unos 13 s) (hub#2494) |
+   | Identificador mal formado, tipo desconocido, documento que no compone | Error al instante: `invalid_printer_address`, `unknown_document_type`, `invalid_payload` |
+   | Red, impresora apagada, IP equivocada, sin permiso de red local en Android 17 o en macOS 15 | Error `printer_unreachable` tras los 3 intentos (unos 13 s) (hub#2494); el motivo del sistema («Connection refused», «timed out»…) solo en el registro |
    | Red, impresora encendida pero sin papel o con la tapa abierta | **«Correcto» y nada más**: no se consulta el estado de la impresora; escribir en el socket funciona |
-   | Bluetooth fuera de alcance, apagado o sin permiso | Error con el motivo |
+   | Bluetooth fuera de alcance o apagado; sin permiso | Error `printer_unreachable`; `bluetooth_permission_denied` |
    | USB (solo la hoja de prueba) | Error con el motivo si la cola no está lista o no saca el trabajo en 15 s |
 
    Quien lo pidió trata el «correcto» como entregado y el error como no impreso: la puerta directa de
@@ -195,9 +196,10 @@ Pasos:
 Entra: el identificador de la impresora y, opcionalmente, el nombre del negocio y el idioma.
 Sale: la hoja; nada guardado; no pasa por la cola del hub. Un módulo más antiguo que la aplicación
 no manda datos y la hoja sale igual con «ERPlora» en español.
-Si falla: de red, tras los intentos (unos 13 s) vuelve «impresora inalcanzable» (HUB_APP-F19,
+Si falla: de red, tras los intentos (unos 13 s) vuelve `printer_unreachable` (HUB_APP-F19,
 hub#2494). De USB o Bluetooth, el error vuelve en el momento. En los dos casos sale en rojo en la
-pantalla de Impresión.
+pantalla de Impresión, dicho en el idioma de quien mira («La impresora no contesta. Comprueba que está
+encendida y conectada a la red o al Bluetooth de este dispositivo.», PRINTING-F19).
 Implicados: HUB_PERIPHERALS-F14, PRINTING-F05
 QA: qa-hub §8, qa-hub-android Fase 3
 
