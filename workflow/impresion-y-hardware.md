@@ -199,7 +199,7 @@ no manda datos y la hoja sale igual con «ERPlora» en español.
 Si falla: de red, tras los intentos (unos 13 s) vuelve `printer_unreachable` (HUB_APP-F19,
 hub#2494). De USB o Bluetooth, el error vuelve en el momento. En los dos casos sale en rojo en la
 pantalla de Impresión, dicho en el idioma de quien mira («La impresora no contesta. Comprueba que está
-encendida y conectada a la red o al Bluetooth de este dispositivo.», PRINTING-F19).
+encendida y conectada.», PRINTING-F19).
 Implicados: HUB_PERIPHERALS-F14, PRINTING-F05
 QA: qa-hub §8, qa-hub-android Fase 3
 
