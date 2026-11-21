@@ -163,6 +163,10 @@ Entra: el identificador de la impresora, el tipo de documento y el documento (nu
    `priority` tal como llega del Hub; `HIGH`, la palabra del contrato anterior, sale como «!! URGENTE !!»
    en el idioma del papel), la de alergia (el texto de `allergy`) y la de copia («DUPLICADO», la misma
    del tique) solo con `duplicate: true`. Sin esos campos, o vacíos, la comanda sale como siempre.
+   La fecha del tique, la factura, la cuenta y el informe de caja (`date`, «21/11/2026 15:41») y la hora de
+   la comanda (`time`, «17:06») son las que manda el Hub, ya en el reloj del negocio, y salen tal cual: un
+   tique reimpreso lleva la hora del cobro y una comanda reimpresa la del envío de la ronda. Sin el campo, o
+   vacío, sale la hora del dispositivo.
 Sale: lo que **se le devuelve a la pantalla** por caso:
 
    | Caso | Qué recibe quien pidió el papel |

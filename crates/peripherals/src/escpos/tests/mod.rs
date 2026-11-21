@@ -8,6 +8,7 @@ mod document;
 mod invoice;
 mod item_lines;
 mod kitchen;
+mod paper_moment;
 mod paper_rules;
 mod prebill;
 mod receipt;

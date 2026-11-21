@@ -1,5 +1,5 @@
 use super::builder::{Align, EscposBuilder};
-use super::fields::{is_truthy, now_dmy_hm, str_field};
+use super::fields::{is_truthy, paper_date, str_field};
 use super::locale::{Label, Locale};
 
 /// **Which report a `cash_session_report` is.**
@@ -51,7 +51,7 @@ pub(super) fn render_cash_report(b: &mut EscposBuilder, data: &serde_json::Value
 
     b.set(Align::Left, false, false, false);
     b.text(&format!("{}{}\n", t.label(Label::Session), str_field(data, "receipt_id", "")));
-    b.text(&format!("{}{}\n", t.label(Label::Date), now_dmy_hm()));
+    b.text(&format!("{}{}\n", t.label(Label::Date), paper_date(data)));
 
     if is_truthy(data, "cashier") {
         b.text(&format!("{}{}\n", t.label(Label::Cashier), str_field(data, "cashier", "")));
