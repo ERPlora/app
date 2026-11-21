@@ -68,6 +68,22 @@ object HtmlPrinter {
     private fun looksLikeAnAddress(title: String): Boolean =
         title.startsWith("about:") || title.startsWith("data:") || title.contains("://")
 
+    private const val DEFAULT_PAGE_MARGIN_RULE = "<style>@page { margin: 10mm; }</style>"
+    private val HEAD = Regex("<head(?:\\s[^>]*)?>", RegexOption.IGNORE_CASE)
+    private val DOCTYPE = Regex("^\\s*<!doctype[^>]*>", RegexOption.IGNORE_CASE)
+
+    /**
+     * [html] with the 1 cm page margin Chrome leaves as its first style: without it the WebView
+     * prints right up to the edge on «Save as PDF». The page's own `@page` margin comes after it and
+     * still wins. The print attributes cannot carry this margin: the print screen replaces theirs
+     * with the printer's, and the WebView scales them by the printer's resolution.
+     */
+    @JvmStatic
+    fun withDefaultPageMargin(html: String): String {
+        val at = (HEAD.find(html) ?: DOCTYPE.find(html))?.range?.last?.plus(1) ?: 0
+        return html.substring(0, at) + DEFAULT_PAGE_MARGIN_RULE + html.substring(at)
+    }
+
     /**
      * Renders [html] in an offscreen WebView and opens the system print screen with it, preset to
      * A4. [onOpened] runs once the print screen has been asked for; [onFailed] when it could not
@@ -111,7 +127,7 @@ object HtmlPrinter {
                     }
                 }
             }
-            webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+            webView.loadDataWithBaseURL(null, withDefaultPageMargin(html), "text/html", "UTF-8", null)
 
             main.postDelayed({
                 if (answered.compareAndSet(false, true)) {

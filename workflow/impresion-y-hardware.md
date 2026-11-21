@@ -229,12 +229,14 @@ Estado: hecho
 Actor: empleado, administrador, responsable
 Pantalla: Ventana de impresión
 Pasos:
-1. Desde un documento A4 que **manda su HTML** a la puerta de impresión, la persona pulsa imprimir. Facturas
-   no lo manda: su factura va a la térmica de «Recibo» (PRINTING-F08).
+1. Desde un documento A4 que **manda su HTML** a la puerta de impresión, la persona pulsa imprimir. La ficha
+   de factura lo manda cuando la factura no sale por una impresora del sistema de Impresión (INVOICE-F18).
 2. **Ordenador**: se abre una ventana que enseña el documento y, al cargar, el diálogo de impresión del
    sistema con su lista de impresoras y «Guardar como PDF»; la ventana se queda detrás como vista previa
    hasta que se cierra.
-3. **Android**: se abre la pantalla de impresión de Android con el documento a A4.
+3. **Android**: se abre la pantalla de impresión de Android con el documento a A4, con el margen que pide
+   la página (`@page { margin: … }`) o, si no pide ninguno, 1 cm por lado, el que deja un navegador;
+   también al guardarlo con «Guardar como PDF», que por sí solo imprimiría hasta el borde del papel.
 Entra: el HTML del documento (no vacío, con tope de tamaño).
 Sale: nada guardado. Se contesta cuando el diálogo se ha pedido; lo que la persona haga en él (imprimir,
 guardar, cancelar) es del sistema.
@@ -243,7 +245,7 @@ Si falla: documento vacío o demasiado grande: `print_document_refused`; sistema
 hay una impresora de «Recibo» alcanzable, **la puerta sigue**: el documento sale por la térmica y vuelve
 `via: bridge`, dado por impreso (`print.ts:375-411`); solo sin impresora devuelve el motivo. El documento corre sin scripts (política
 que no permite ninguno), sin permisos de ninguna orden y sin poder navegar a otro sitio.
-Implicados: HUB_SHELL-F77
+Implicados: HUB_SHELL-F77, INVOICE-F18
 QA: qa-hub-android Fase 3
 
 ### HUB_APP-F23 Leer una tarjeta NFC para entrar
