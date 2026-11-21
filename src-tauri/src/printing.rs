@@ -22,11 +22,18 @@ fn bluetooth_send(
     use tauri_plugin_erplora_android::ErploraAndroidExt;
     app.erplora_android()
         .bluetooth_print(mac, payload)
-        .map_err(|e| {
-            HardwareError::from(erplora_peripherals::PeripheralError::Unreachable(
-                e.to_string(),
-            ))
-        })
+        .map_err(|e| bluetooth_error(e.to_string()))
+}
+
+/// A Bluetooth send the plugin refused, as the page reads it: Android's missing permission is its
+/// own answer (the person allows it in the settings; the printer is fine), anything else is a
+/// printer that did not answer.
+fn bluetooth_error(message: String) -> HardwareError {
+    if message.contains(tauri_plugin_erplora_android::BLUETOOTH_PERMISSION_DENIED) {
+        HardwareError::BluetoothPermissionDenied(message)
+    } else {
+        HardwareError::from(erplora_peripherals::PeripheralError::Unreachable(message))
+    }
 }
 
 /// Sends already-rendered bytes to the printer behind an OS print queue.
@@ -206,6 +213,18 @@ mod tests {
             matches!(err, HardwareError::Peripheral(erplora_peripherals::PeripheralError::Unreachable(_))),
             "got {err:?}"
         );
+    }
+
+    #[test]
+    fn a_bluetooth_failure_says_whether_the_permission_is_missing() {
+        // What Tauri makes of the plugin's `invoke.reject(message, code)`: «[code] - message».
+        let denied = bluetooth_error(format!(
+            "[{}] - bluetooth permission denied: need BLUETOOTH_CONNECT",
+            tauri_plugin_erplora_android::BLUETOOTH_PERMISSION_DENIED
+        ));
+        assert_eq!(denied.code(), "bluetooth_permission_denied");
+        let silent = bluetooth_error("read failed, socket might closed or timeout".into());
+        assert_eq!(silent.code(), "printer_unreachable");
     }
 
     #[test]
