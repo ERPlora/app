@@ -111,6 +111,18 @@ mod tests {
     }
 
     #[test]
+    fn the_printed_document_is_loaded_with_a_page_margin() {
+        // «Save as PDF» lets the WebView print right up to the paper's edge. `withDefaultPageMargin`
+        // (HtmlPrinterTest.kt) gives a page without a margin of its own the 1 cm a browser leaves;
+        // this pins that the WebView loads the document through it, which no JVM test can see.
+        let code = without_kotlin_comments(HTML_PRINTER_KT);
+        assert!(
+            code.contains("loadDataWithBaseURL(null, withDefaultPageMargin(html),"),
+            "{code}"
+        );
+    }
+
+    #[test]
     fn desktop_refuses_to_print_through_the_android_plugin() {
         // Unreachable by construction (the shell only routes here on Android), and a refusal
         // anyway: a resolved call would read as a dialog that opened.
