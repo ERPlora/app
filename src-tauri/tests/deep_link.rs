@@ -333,3 +333,27 @@ fn android_declares_the_scheme_where_the_plugin_filters_it_too() {
         "no entry in plugins.deep-link.mobile matches {DEEP_LINK_SCHEME}://hub/… : {mobile:?}"
     );
 }
+
+#[test]
+fn android_hands_over_the_way_back_of_the_sign_in_with_google() {
+    // The same filter as above drops `erplora://signed-in?code=…` unless an entry names its host:
+    // seen on the Android emulator, where the browser's «Open the ERPlora app» brought the app to
+    // the front and the window never reached the end of the sign-in.
+    let conf: serde_json::Value = serde_json::from_str(TAURI_CONF).expect("tauri.conf.json parses");
+    let mobile = conf
+        .pointer("/plugins/deep-link/mobile")
+        .and_then(|v| v.as_array())
+        .expect("plugins.deep-link.mobile must be declared or Android drops every link");
+    let hands_over = mobile.iter().any(|entry| {
+        let declares_scheme = entry
+            .pointer("/scheme")
+            .and_then(|v| v.as_array())
+            .is_some_and(|s| s.iter().any(|v| v.as_str().is_some_and(|s| s.eq_ignore_ascii_case(DEEP_LINK_SCHEME))));
+        let host_fits = entry
+            .pointer("/host")
+            .and_then(|v| v.as_str())
+            .is_none_or(|host| host.eq_ignore_ascii_case("signed-in"));
+        declares_scheme && host_fits
+    });
+    assert!(hands_over, "no entry in plugins.deep-link.mobile matches {DEEP_LINK_SCHEME}://signed-in : {mobile:?}");
+}
