@@ -381,7 +381,11 @@ fn answer_refusal<R: tauri::Runtime>(
     saas_base: &str,
 ) -> tauri::Result<()> {
     match verdict {
-        NavigationVerdict::Allow | NavigationVerdict::Browser => Ok(()),
+        // Each of these is answered by what it opens, not by the window.
+        NavigationVerdict::Allow
+        | NavigationVerdict::Browser
+        | NavigationVerdict::AppSignIn
+        | NavigationVerdict::SignInTab => Ok(()),
         NavigationVerdict::Home => {
             let start = onboarding_url(saas_base)
                 .parse::<tauri::Url>()

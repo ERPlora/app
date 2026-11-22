@@ -539,8 +539,8 @@ fn pages_that_are_not_the_saas_are_followed_as_before() {
             // The app's own bundled page (the offline screen).
             "http://tauri.localhost/index.html",
             "tauri://localhost/index.html",
-            // Google's sign-in, which the window walks through, and a non-web scheme.
-            "https://accounts.google.com/o/oauth2/v2/auth?client_id=x",
+            // A non-web scheme. Google's sign-in starts the app's own sign-in in the browser on
+            // Android, in every copy (`foreign_navigation.rs`).
             "about:blank",
         ],
         "a page that is not the SaaS",
