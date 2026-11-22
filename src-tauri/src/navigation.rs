@@ -1,10 +1,11 @@
 //! Which pages the main window follows.
 //!
 //! The window is the till: the printer, the cash drawer and the card reader answer the linked hub in
-//! it. It shows the hubs, the SaaS, the origins it boots on, this device, the app's own page and
-//! Google's sign-in; on Android any other page opens in the system browser instead, and the window
-//! stays where it was ([`FOREIGN_PAGES_LEAVE`]). Without it, one tap on the YouTube logo of a video
-//! player inside a hub page took the whole till to youtube.com.
+//! it. It shows the hubs, the SaaS, the origins it boots on, this device, the app's own page and, on
+//! the computer, Google's sign-in; on Android any other page opens in the system browser instead, and
+//! the window stays where it was ([`FOREIGN_PAGES_LEAVE`]). Without it, one tap on the YouTube logo of
+//! a video player inside a hub page took the whole till to youtube.com. On Android Google's sign-in
+//! goes to the device's browser too, through the app's own sign-in (`app_sign_in.rs`).
 //!
 //! The app boots on the SaaS (`/shell/`) and shows its sign-in, sign-up and account pages inside
 //! its own window. If `on_navigation` answered `true` without looking, that window could walk to
@@ -29,6 +30,7 @@
 
 use tauri::Url;
 
+use crate::app_sign_in::{BROWSER_PATH, FINISH_PATH, START_PATH};
 use crate::links::{is_hub_domain, is_loopback_host};
 
 /// What `on_navigation` does with a page the window is about to load.
@@ -42,6 +44,11 @@ pub enum NavigationVerdict {
     Home,
     /// Do not load it; it opens in the system browser and the window stays where it is.
     Browser,
+    /// Google's page on Android: do not load it; the app starts its own sign-in in the device's
+    /// browser instead (`app_sign_in.rs`).
+    AppSignIn,
+    /// The browser half of that sign-in: it opens in a tab of the device's browser over the app.
+    SignInTab,
 }
 
 /// Whether this system sends a page the window does not show to the system browser: only Android,
@@ -55,7 +62,8 @@ pub const FOREIGN_PAGES_LEAVE: bool = cfg!(target_os = "android");
 /// The app's own page (the offline screen) where Tauri serves it over `http`: Windows and Android.
 const BUNDLED_PAGE_HOST: &str = "tauri.localhost";
 
-/// Google's sign-in, which «Continue with Google» walks the window through (`PLAY_SAAS_PAGES`).
+/// Google's sign-in, which «Continue with Google» walks the window through on the computer
+/// (`PLAY_SAAS_PAGES`); on Android it starts the app's sign-in in the browser ([`sign_in_verdict`]).
 const GOOGLE_SIGN_IN_HOST: &str = "accounts.google.com";
 
 /// The pages the main window shows, fixed when it opens.
@@ -87,7 +95,8 @@ impl WindowPages {
     }
 
     /// Is `target` a page the window shows? Hubs and this device by host, whatever the scheme or
-    /// port, like the SaaS; the origins the window boots on whole; Google's sign-in over https.
+    /// port, like the SaaS; the origins the window boots on whole. Google's sign-in is not one: it
+    /// never reaches here on Android, the only system where a page leaves ([`sign_in_verdict`]).
     fn shows(&self, target: &Url) -> bool {
         if is_saas(&self.saas_base, target)
             || self.entries.contains(&target.origin().ascii_serialization())
@@ -98,10 +107,7 @@ impl WindowPages {
             return false;
         };
         let host = host.strip_suffix('.').unwrap_or(host);
-        is_hub_domain(host)
-            || is_loopback_host(host)
-            || host == BUNDLED_PAGE_HOST
-            || (target.scheme() == "https" && host == GOOGLE_SIGN_IN_HOST)
+        is_hub_domain(host) || is_loopback_host(host) || host == BUNDLED_PAGE_HOST
     }
 }
 
@@ -168,6 +174,9 @@ const PLAY_SAAS_PAGES: &[&str] = &[
 /// link: Microsoft Store allows paying outside the store for non-game apps, and the direct install
 /// has no store at all.
 pub fn navigation_verdict(distribution: &str, window: &WindowPages, target: &Url) -> NavigationVerdict {
+    if let Some(verdict) = sign_in_verdict(window, target) {
+        return verdict;
+    }
     if window.sends_out(target) {
         return NavigationVerdict::Browser;
     }
@@ -186,6 +195,24 @@ pub fn navigation_verdict(distribution: &str, window: &WindowPages, target: &Url
     } else {
         NavigationVerdict::Refuse
     }
+}
+
+/// The pages of «Continue with Google» the app answers itself. The start and the finish of its sign-in
+/// are refused to every page, in every copy: the app loads them on its own (`AppSignIn::admits`), and a
+/// link to the finish could open someone else's session in this window. On Android, Google's page
+/// starts that sign-in and its browser half opens in a tab of the device's browser.
+fn sign_in_verdict(window: &WindowPages, target: &Url) -> Option<NavigationVerdict> {
+    let saas = is_saas(&window.saas_base, target);
+    if saas && (under(target.path(), START_PATH) || under(target.path(), FINISH_PATH)) {
+        return Some(NavigationVerdict::Refuse);
+    }
+    if !window.foreign_pages_leave {
+        return None;
+    }
+    if target.scheme() == "https" && target.host_str() == Some(GOOGLE_SIGN_IN_HOST) {
+        return Some(NavigationVerdict::AppSignIn);
+    }
+    (saas && under(target.path(), BROWSER_PATH)).then_some(NavigationVerdict::SignInTab)
 }
 
 /// Is `target` a page of the SaaS? The production hosts by NAME, whatever the scheme or port — a

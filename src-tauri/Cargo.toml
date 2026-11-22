@@ -66,6 +66,9 @@ tauri-plugin-opener = "2"
 # shell holds the disk, so they cross the `invoke` boundary. base64 and not a JSON array of numbers:
 # a 5 MB export is ~6.7 MB of text this way and ~20 MB the other, on a tablet.
 base64 = "0.22"
+# The secret of «Continue with Google» in the browser (PKCE, `app_sign_in.rs`): versions already in the lockfile.
+sha2 = "0.10"
+getrandom = "0.2"
 
 [dev-dependencies]
 # `tests/remote_acl.rs` validates the patterns of `capabilities/default.json` with the SAME engine

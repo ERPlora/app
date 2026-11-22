@@ -17,7 +17,7 @@ Pasos:
 4. Ábrela (HUB_APP-F02). Desde un navegador, **Sistema** ofrece la descarga que corresponde al
    dispositivo y la oculta dentro de la propia aplicación.
 Entra: el instalador del canal; en el instalador de Windows y en el de la Store, el esquema
-`erplora://` queda registrado al instalar.
+`erplora://` queda registrado al instalar: `erplora://hub/…` abre un negocio (HUB_APP-F03) y `erplora://signed-in?code=…` cierra el inicio de sesión con Google de Android (HUB_APP-F02).
 Sale: la aplicación `com.erplora.app` con su versión (la de `tauri.conf.json`, única fuente: cada publicación la toma tal cual y crea el tag `v<versión>`; el 2026-11-11, 1.1.35) y su canal
 (`play`, `msstore` o `direct`), horneado al compilar en Android y deducido en ejecución en Windows
 (una copia que corre desde `WindowsApps` es `msstore`). Ante la duda es `direct`, a propósito.
@@ -35,6 +35,12 @@ Pasos:
 1. Abre la aplicación recién instalada: no recuerda ningún negocio, así que carga la página de entrada
    de erplora.com (`/shell/`).
 2. Inicia sesión o crea la cuenta. Registrarse no crea el negocio: hace falta un paso más en erplora.com, «¿Cómo se llama tu negocio?» o, desde «Abre tu hub» sin ninguno, «Crear hub gratuito» → «Crea tu hub» con su nombre. En Android, el correo y la contraseña se escriben a mano: la ventana no usa el autocompletado del sistema (HUB_APP-F32).
+   En Android, «Continue with Google» no carga Google en la ventana, que no ve las cuentas del dispositivo: la aplicación
+   crea un secreto propio, carga `/auth/app/start/` de erplora.com con su huella y abre `/auth/app/google/` en una pestaña
+   del navegador del dispositivo, encima de la aplicación. Ahí Google ofrece «Elige una cuenta» con las cuentas de la tableta;
+   al elegir una, el navegador dice que ya ha entrado y ofrece «Abrir la app de ERPlora» (`erplora://signed-in?code=…`).
+   La aplicación carga `/auth/app/finish/` con ese código y su secreto y la ventana queda dentro de erplora.com, donde iba
+   (el `next` de la entrada) o en la entrada. En el ordenador, «Continue with Google» sigue dentro de la ventana, como antes.
 3. Con un solo negocio listo, entra solo; con varios, elige uno en «Abre tu hub» (cada tarjeta enseña
    su rol y, si aún se despliega, «Preparando tu hub… esta página se refresca sola»).
 4. El SaaS lleva la ventana al negocio con la marca `?shell=1` (`/shell/open/<id>/` responde con una
@@ -53,13 +59,13 @@ instalación `device.id` la primera vez (HUB_APP-F06). Una sola escritura por ca
 ninguna contraseña ni sesión aquí: la sesión vive en la ventana (almacenamiento del origen del hub). En Android,
 la ventana lleva `FLAG_KEEP_SCREEN_ON`, sin permisos nuevos ni servicio en primer plano: Android aplica la
 bandera solo mientras esa ventana está visible.
-Si falla: una página que se lleva a sí misma, o a otro negocio, con `?shell=1` sin venir del SaaS (la web
+Si falla: `/auth/app/start/` y `/auth/app/finish/` solo se cargan cuando los pide la aplicación, una vez cada uno: un enlace de cualquier página a ellos se rechaza, en todas las copias, y otra aplicación que atrape `erplora://signed-in` tiene el código sin el secreto. Una vuelta sin un inicio de sesión en curso (la aplicación se cerró mientras tanto) no hace nada: la persona vuelve a pulsar «Continue with Google». Sin pestaña del navegador, `/auth/app/google/` se abre en el navegador mismo; si el inicio de sesión no puede empezar, la ventana dice que no se ha podido abrir el navegador. Una página que se lleva a sí misma, o a otro negocio, con `?shell=1` sin venir del SaaS (la web
 pública, otro negocio) **no se enlaza ni se recuerda**: el negocio enlazado sigue siendo el que era
 (erplora-old/hub#2504). Un destino que no es de la plataforma (el marcador viene de un enlace ajeno) **no se
 recuerda** y no queda rastro (la aplicación no instala ningún destino para sus registros); un `hub.url` editado a mano o de una versión sin el
 filtro se revalida al leerlo y, si no vale, se arranca en el SaaS. Sin red, HUB_APP-F11. Un negocio con
 dominio propio no tiene hardware en la aplicación (ver «Qué puede hacer cada página»).
-Implicados: HUB_SHELL-F02, REC_ALTA-F16, SAAS_AUTH-F19, SAAS_DASHBOARD-F02, SAAS_DASHBOARD-F07, SAAS_PUBLIC-F78
+Implicados: HUB_SHELL-F02, REC_ALTA-F16, SAAS_AUTH-F19, SAAS_DASHBOARD-F02, SAAS_DASHBOARD-F07, SAAS_PUBLIC-F78, ACCOUNTS-F06
 QA: qa-hub-android Fase 0, qa-hub-android Fase 1; qa-hub-android Pendiente (tras la release, con la tablet desbloqueada: superar el tiempo de apagado en primer plano, pasar a segundo plano y comprobar el botón físico)
 
 ### HUB_APP-F03 Abrir un negocio desde un enlace

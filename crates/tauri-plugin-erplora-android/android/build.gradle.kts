@@ -43,6 +43,8 @@ dependencies {
     // `WebViewCompat.getWebChromeClient` (WebPermissionGate): the platform getter is API 26, the
     // app starts at 24. Same version the app module already ships, so nothing new reaches the APK.
     implementation("androidx.webkit:webkit:1.14.0")
+    // The browser tab of «Continue with Google» (CustomTab), which shares the device's Google accounts.
+    implementation("androidx.browser:browser:1.8.0")
     implementation(project(":tauri-android"))
 
     testImplementation(kotlin("test"))
