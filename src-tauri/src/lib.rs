@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 
 /// What the window shows when the network dies under it.
+mod app_sign_in;
 mod connectivity;
 /// Only the linked hub drives the device.
 mod hub_link;
