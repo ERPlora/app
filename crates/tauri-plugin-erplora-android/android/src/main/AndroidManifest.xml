@@ -35,6 +35,13 @@
          only the port-9100 sweep is left. -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
+    <!-- 🔴 Load-bearing, same trap as the NFC feature below: the multicast permission makes Google
+         Play add an IMPLICIT `android.hardware.wifi` requirement and hide the app from every device
+         without Wi-Fi. A till on Ethernet or mobile data works the same. -->
+    <uses-feature
+        android:name="android.hardware.wifi"
+        android:required="false" />
+
     <!-- Local Network Protection (Android 17 / API 37). A RUNTIME permission: declaring it is
          only what makes it possible to ask for it — `ErploraAndroidPlugin.requestPermissions`
          does the asking. Without the declaration the request is answered DENIED with no dialog,

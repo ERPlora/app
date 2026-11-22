@@ -518,6 +518,9 @@ jobs:
           # (aapt2, targetSdk 36). Dictating to the assistant is optional; the till sells without it.
           echo "$BADGING" | grep -qE "uses-feature-not-required: ?name='android.hardware.microphone'" \
             || { echo "::error::the APK REQUIRES android.hardware.microphone — Play would hide it from devices without a microphone"; echo "$BADGING" | grep -i microphone; exit 1; }
+          # Same risk with Wi-Fi: CHANGE_WIFI_MULTICAST_STATE implies `android.hardware.wifi`.
+          echo "$BADGING" | grep -qE "uses-feature-not-required: ?name='android.hardware.wifi'" \
+            || { echo "::error::the APK REQUIRES android.hardware.wifi — Play would hide it from devices without Wi-Fi"; echo "$BADGING" | grep -i wifi; exit 1; }
 
       # Both or red: `if-no-files-found: error` below only fires when NEITHER is there.
       - name: Stage artifacts
