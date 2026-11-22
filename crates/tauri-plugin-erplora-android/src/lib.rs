@@ -21,6 +21,7 @@ use tauri::{
 };
 
 mod bluetooth;
+mod custom_tab;
 mod downloads;
 mod html_print;
 mod hub_question;
@@ -31,6 +32,7 @@ mod permissions;
 mod voice;
 
 pub use bluetooth::{BluetoothPrinter, BluetoothPrinterList, BLUETOOTH_PERMISSION_DENIED};
+pub use custom_tab::OPEN_CUSTOM_TAB_COMMAND;
 pub use downloads::{PublishedDownload, DOWNLOADS_UNREACHABLE};
 pub use html_print::PRINT_HTML_COMMAND;
 pub use hub_question::{Wording, ASK_TO_OPEN_HUB_COMMAND};
