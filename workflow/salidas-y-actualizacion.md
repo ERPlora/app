@@ -33,7 +33,7 @@ Pasos:
    uno que no se puede cerrar retiene la pulsación.
 3. Sin nada abierto y con historial, retrocede; sin historial, manda la aplicación al fondo (no la cierra
    ni la mata).
-4. En una página que no toma el botón (la de entrar de erplora.com, la de Google), Atrás retrocede en el
+4. En una página que no toma el botón (la de entrar de erplora.com), Atrás retrocede en el
    historial de la ventana y, sin historial, la aplicación pasa al fondo igual: Android no la cierra, como
    hace desde la versión 12 con la pantalla principal de cualquier aplicación.
 Entra: la pulsación.
