@@ -6,11 +6,11 @@ Prefijo: HUB_APP
 
 ### HUB_APP-F27 Arrancar con el ordenador
 Estado: hecho
-Actor: administrador, responsable
-Pantalla: HUB_SHELL: Ajustes
+Actor: propietario, administrador, responsable, empleado
+Pantalla: Hub: Ajustes › General
 Pasos:
-1. En un ordenador (no en Android), en **Ajustes › Hub** aparece «Arrancar al iniciar sesión»; está
-   **apagado** de fábrica.
+1. En un ordenador (no en Android), en **Ajustes › General** del Hub, dentro de «Este dispositivo», aparece
+   «Arrancar al iniciar sesión»; está **apagado** de fábrica.
 2. Al activarlo, la aplicación lo registra en el sistema (macOS, agente de arranque; Windows, clave de
    registro; Linux, carpeta de autoarranque) y vuelve a leer qué dice el sistema.
 3. La pantalla enseña lo que el sistema respondió, no lo que se pidió.
@@ -20,7 +20,7 @@ Si falla: un fallo al registrar se propaga y la pantalla dice «No se pudo cambi
 iniciar sesión». En Android la orden rechaza a propósito y el control no se pinta. Arrancar con el
 ordenador es para que siempre haya un puesto que saque la cola; abrir el equipo no garantiza que haya
 sesión iniciada en el hub.
-Implicados: HUB_SHELL-F163
+Implicados: BASE-F120 (ERPlora/hub)
 QA: ninguno
 
 ### HUB_APP-F28 Botón Atrás de Android

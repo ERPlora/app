@@ -208,7 +208,7 @@ tests `tests/shell_surface.rs`, `app_update_channel.rs` y `notice_tap.rs`.
 | `erplora_notify` | `bridge-transport.ts`, SDK `notify` | ui `src/shell/device-notices.ts` | F24 | KITCHEN-F05, HUB-F60 |
 | `erplora_take_notice_tap` | `main.ts:342-345` | ui `src/shell/device-notices.ts` | F25 | — |
 | `erplora_nfc_read` | `nfc-badge.ts` | **nadie** | F23 | HUB-F134 |
-| `autostart_*` | `autostart.ts` → Ajustes | **nadie** | F27 | HUB_SHELL Ajustes |
+| `autostart_*` | `autostart.ts` → Ajustes | hub `base/frontend/lib/autostart.ts` («Arrancar al iniciar sesión» de «Este dispositivo», en Ajustes › General) | F27 | BASE-F120 |
 | `plugin:erplora-android` `check_permissions` y `request_permissions` (solo el negocio enlazado, erplora-old/hub#2642) | `device-permission.ts`, `bridge-transport.ts`, SDK | ui `src/shell/device-notices.ts` (solo el de notificaciones) | F07, F08, F13 | PRINTING-F02 |
 | `plugin:erplora-android` `leave_app` (solo el negocio enlazado, erplora-old/hub#2642) | `router/back-closes-overlay.ts` | hub `base/frontend/lib/system-back.ts` | F28 | — |
 | `plugin:erplora-android` `open_app_settings` (solo el negocio enlazado, erplora-old/hub#2642) | `device-permission.ts` → Sistema | **nadie** | F08 | — |
