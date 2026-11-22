@@ -95,7 +95,8 @@ impl WindowPages {
     }
 
     /// Is `target` a page the window shows? Hubs and this device by host, whatever the scheme or
-    /// port, like the SaaS; the origins the window boots on whole; Google's sign-in over https.
+    /// port, like the SaaS; the origins the window boots on whole. Google's sign-in is not one: it
+    /// never reaches here on Android, the only system where a page leaves ([`sign_in_verdict`]).
     fn shows(&self, target: &Url) -> bool {
         if is_saas(&self.saas_base, target)
             || self.entries.contains(&target.origin().ascii_serialization())
@@ -106,10 +107,7 @@ impl WindowPages {
             return false;
         };
         let host = host.strip_suffix('.').unwrap_or(host);
-        is_hub_domain(host)
-            || is_loopback_host(host)
-            || host == BUNDLED_PAGE_HOST
-            || (target.scheme() == "https" && host == GOOGLE_SIGN_IN_HOST)
+        is_hub_domain(host) || is_loopback_host(host) || host == BUNDLED_PAGE_HOST
     }
 }
 
