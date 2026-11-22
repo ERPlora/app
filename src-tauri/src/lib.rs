@@ -224,10 +224,15 @@ pub fn run() {
             // A link that does NOT resolve does nothing, on purpose: the fallback belongs to the
             // browser that launched it, and navigating «somewhere» would be worse than staying put.
             let handle = app.handle().clone();
+            let saas_base = hub_url::saas_base_url();
             app.deep_link().on_open_url(move |event| {
                 // Same filter as the cold start: one link per gesture and, should several arrive,
                 // the first one that resolves wins.
                 let urls: Vec<String> = event.urls().into_iter().map(String::from).collect();
+                // The way back of «Continue with Google» from the device's browser (`app_sign_in.rs`).
+                if urls.iter().any(|url| app_sign_in::come_back(&handle, &saas_base, url)) {
+                    return;
+                }
                 // A notice link is a click on a notice: single-instance hands it over.
                 if notice_tap::click_from_args(urls.iter().cloned()).is_some() {
                     return;
@@ -363,6 +368,30 @@ mod tests {
         let app = app_with_kept_tap();
         on_second_launch(app.handle(), vec!["ERPlora.exe".into(), "erplora://hub/demo.a.erplora.com".into()]);
         assert_eq!(app.state::<notice_tap::KeptNoticeTap>().take(), None);
+    }
+
+    #[test]
+    fn the_window_hands_google_s_page_to_the_app_s_sign_in_and_takes_its_way_back() {
+        let window = code_of(include_str!("window.rs"));
+        let opening = body_of(window, "pub(crate) fn open_main_window(");
+        for wiring in [
+            "app.manage(app_sign_in::AppSignIn::default());",
+            ".is_some_and(|sign_in| sign_in.admits(nav))",
+        ] {
+            assert!(opening.contains(wiring), "open_main_window lost `{wiring}`");
+        }
+        let refusing = body_of(window, "fn refuse_navigation(");
+        for wiring in [
+            "NavigationVerdict::AppSignIn => app_sign_in::start(&app, &saas_base),",
+            "NavigationVerdict::SignInTab => app_sign_in::open_tab(&app, &target),",
+        ] {
+            assert!(refusing.contains(wiring), "refuse_navigation lost `{wiring}`");
+        }
+        let shell = code_of(include_str!("lib.rs"));
+        assert!(
+            body_of(shell, "pub fn run() {").contains("app_sign_in::come_back(&handle, &saas_base, url)"),
+            "a link back from the sign-in with Google is not taken"
+        );
     }
 
     #[test]

@@ -126,6 +126,60 @@ impl AppSignIn {
     }
 }
 
+/// Google's page on Android: a new secret, and the window to the start with it (`NavigationVerdict::AppSignIn`).
+/// The destination is the one of the page the person tapped «Continue with Google» on.
+pub(crate) fn start<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saas_base: &str) {
+    use tauri::Manager;
+    let Some(window) = app.get_webview_window("main") else {
+        log::error!("shell: no main window to start the sign-in with Google in");
+        return;
+    };
+    let next = window.url().ok().and_then(|page| next_of(&page));
+    let started = app.try_state::<AppSignIn>().and_then(|sign_in| sign_in.begin(saas_base, next.as_deref()));
+    let Some(start) = started else {
+        log::error!("shell: the sign-in with Google could not start");
+        say_the_browser_did_not_open(&window);
+        return;
+    };
+    if let Err(e) = window.navigate(start) {
+        log::error!("shell: could not load the start of the sign-in with Google: {e}");
+    }
+}
+
+/// `erplora://signed-in?code=…`: the window to the finish of the sign-in it started. `false` for any
+/// other link; a way back with no sign-in under way (the app was closed meanwhile) is ignored.
+pub(crate) fn come_back<R: tauri::Runtime>(app: &tauri::AppHandle<R>, saas_base: &str, link: &str) -> bool {
+    use tauri::Manager;
+    let Some(code) = returned_code(link) else {
+        return false;
+    };
+    let finish = app.try_state::<AppSignIn>().and_then(|sign_in| sign_in.finish(saas_base, &code));
+    let (Some(finish), Some(window)) = (finish, app.get_webview_window("main")) else {
+        log::warn!("shell: a way back from the sign-in with Google with no sign-in under way");
+        return true;
+    };
+    if let Err(e) = window.navigate(finish) {
+        log::error!("shell: could not load the finish of the sign-in with Google: {e}");
+    }
+    true
+}
+
+/// The browser half of the sign-in, in a tab of the device's browser over the app; in the browser
+/// itself when no tab opens (`NavigationVerdict::SignInTab`).
+pub(crate) fn open_tab(app: &tauri::AppHandle, target: &Url) {
+    use tauri_plugin_erplora_android::ErploraAndroidExt as _;
+    if let Err(e) = app.erplora_android().open_custom_tab(target.as_str()) {
+        log::warn!("shell: no browser tab for the sign-in with Google ({e}); the browser itself opens it");
+        crate::window::open_in_browser(app, target);
+    }
+}
+
+fn say_the_browser_did_not_open<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+    if let Err(e) = window.eval(crate::window::browser_failure_notice_script()) {
+        log::error!("shell: could not say that the sign-in with Google did not start: {e}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,5 +273,48 @@ mod tests {
     #[test]
     fn a_way_back_with_no_sign_in_started_opens_nothing() {
         assert_eq!(AppSignIn::default().finish(SAAS, "the-code"), None);
+    }
+
+    fn window_at(page: &str) -> (tauri::App<tauri::test::MockRuntime>, tauri::WebviewWindow<tauri::test::MockRuntime>) {
+        use tauri::Manager;
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        app.manage(AppSignIn::default());
+        let window = tauri::WebviewWindowBuilder::new(&app, "main", tauri::WebviewUrl::External(url(page)))
+            .build()
+            .expect("mock window");
+        (app, window)
+    }
+
+    #[test]
+    fn google_s_page_takes_the_window_to_the_start_with_the_destination_of_the_page() {
+        use tauri::Manager;
+        let (app, window) = window_at("https://erplora.com/launch?next=%2Fhub-login%2F%3Fhub%3Da");
+        start(app.handle(), SAAS);
+        let shown = window.url().expect("url");
+        assert_eq!(shown.path(), START_PATH);
+        assert_eq!(query_of(&shown, "next").as_deref(), Some("/hub-login/?hub=a"));
+        assert!(app.state::<AppSignIn>().admits(&shown), "the window would refuse the start it was sent to");
+    }
+
+    #[test]
+    fn the_way_back_takes_the_window_to_the_finish_of_the_sign_in_it_started() {
+        let (app, window) = window_at("https://erplora.com/launch");
+        start(app.handle(), SAAS);
+        let challenge = query_of(&window.url().expect("url"), "challenge").expect("challenge");
+        assert!(come_back(app.handle(), SAAS, "erplora://signed-in?code=the-code"));
+        let shown = window.url().expect("url");
+        assert_eq!(shown.path(), FINISH_PATH);
+        assert_eq!(query_of(&shown, "code").as_deref(), Some("the-code"));
+        assert_eq!(challenge_of(&query_of(&shown, "verifier").expect("verifier")), challenge);
+    }
+
+    #[test]
+    fn a_hub_link_is_not_the_way_back_and_a_way_back_without_a_start_stays_put() {
+        let (app, window) = window_at("https://erplora.com/launch");
+        assert!(!come_back(app.handle(), SAAS, "erplora://hub/panaderia.a.erplora.com"));
+        assert!(come_back(app.handle(), SAAS, "erplora://signed-in?code=the-code"), "the way back is never a hub link");
+        assert_eq!(window.url().expect("url").as_str(), "https://erplora.com/launch");
     }
 }

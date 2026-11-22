@@ -13,7 +13,7 @@ use crate::hub_url::{
 };
 use crate::links::deep_link_from_args;
 use crate::navigation::{navigation_verdict, NavigationVerdict, WindowPages, FOREIGN_PAGES_LEAVE};
-use crate::{hub_link, link_consent, ShellError, DEFAULT_SAAS_URL, ENV_SHELL_URL};
+use crate::{app_sign_in, hub_link, link_consent, ShellError, DEFAULT_SAAS_URL, ENV_SHELL_URL};
 
 /// Forgets the captured hub and sends the window back to the SaaS onboarding. Two callers: the
 /// frontend on a 410 `hub_not_found` (no `choose` → the plain onboarding) and the topbar's «switch
@@ -261,6 +261,7 @@ pub(crate) fn open_main_window(app: &tauri::App, cache_dir: Option<PathBuf>) -> 
         hub_link.link(&origin);
     }
     app.manage(hub_link);
+    app.manage(app_sign_in::AppSignIn::default());
     let nav_state = Arc::new(ShellNav::new(initial_target));
     app.manage(nav_state.clone());
 
@@ -282,7 +283,9 @@ pub(crate) fn open_main_window(app: &tauri::App, cache_dir: Option<PathBuf>) -> 
             // neither remembered as the hub nor watched by the guard below; and when it is the
             // redirect of an allowed page, what that page already moved goes back to the page the
             // window still shows.
-            let verdict = navigation_verdict(distribution_channel(), &pages, nav);
+            // The start and the finish of the sign-in with Google load only when the app asked for them.
+            let asked = refusals.try_state::<app_sign_in::AppSignIn>().is_some_and(|sign_in| sign_in.admits(nav));
+            let verdict = if asked { NavigationVerdict::Allow } else { navigation_verdict(distribution_channel(), &pages, nav) };
             if verdict != NavigationVerdict::Allow {
                 if let Some(link) = refusals.try_state::<hub_link::HubLink>() {
                     link.stayed();
@@ -349,7 +352,7 @@ fn page_finished<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>, url: &taur
 const BROWSER_FAILURE_NOTICE_EN: &str = "The browser could not be opened to show this page.";
 const BROWSER_FAILURE_NOTICE_ES: &str = "No se ha podido abrir el navegador para mostrar esta página.";
 
-fn browser_failure_notice_script() -> String {
+pub(crate) fn browser_failure_notice_script() -> String {
     notice_script(BROWSER_FAILURE_NOTICE_EN, BROWSER_FAILURE_NOTICE_ES)
 }
 
@@ -412,8 +415,8 @@ fn refuse_navigation(
 
     // Origin and path, never the query: it can carry a one-time code.
     let page = format!("{}{}", target.origin().ascii_serialization(), target.path());
-    if verdict == NavigationVerdict::Browser {
-        log::info!("shell: {page} is not a page of the window; it opens in the system browser");
+    if matches!(verdict, NavigationVerdict::Browser | NavigationVerdict::AppSignIn | NavigationVerdict::SignInTab) {
+        log::info!("shell: {page} is not a page of the window; it opens in the system browser ({verdict:?})");
     } else {
         log::warn!("shell: the {} copy refused {page} ({verdict:?})", distribution_channel());
     }
@@ -421,23 +424,26 @@ fn refuse_navigation(
     let saas_base = saas_base.to_string();
     let target = target.clone();
     tauri::async_runtime::spawn(async move {
-        if verdict == NavigationVerdict::Browser {
-            open_in_browser(&app, &target);
-            return;
-        }
-        let Some(window) = app.get_webview_window("main") else {
-            log::error!("shell: no main window to answer a refused page on");
-            return;
-        };
-        if let Err(e) = answer_refusal(&window, verdict, &saas_base) {
-            log::error!("shell: could not answer a refused page ({verdict:?}): {e}");
+        match verdict {
+            NavigationVerdict::Browser => open_in_browser(&app, &target),
+            NavigationVerdict::AppSignIn => app_sign_in::start(&app, &saas_base),
+            NavigationVerdict::SignInTab => app_sign_in::open_tab(&app, &target),
+            NavigationVerdict::Allow | NavigationVerdict::Home | NavigationVerdict::Refuse => {
+                let Some(window) = app.get_webview_window("main") else {
+                    log::error!("shell: no main window to answer a refused page on");
+                    return;
+                };
+                if let Err(e) = answer_refusal(&window, verdict, &saas_base) {
+                    log::error!("shell: could not answer a refused page ({verdict:?}): {e}");
+                }
+            }
         }
     });
 }
 
 /// Hands `target` to the system browser as its own app, the way `open_external_url` does. When no
 /// browser opens it, the window says so: otherwise the tap that sent it out did nothing at all.
-fn open_in_browser(app: &tauri::AppHandle, target: &tauri::Url) {
+pub(crate) fn open_in_browser(app: &tauri::AppHandle, target: &tauri::Url) {
     use tauri::Manager;
     use tauri_plugin_opener::OpenerExt;
 
