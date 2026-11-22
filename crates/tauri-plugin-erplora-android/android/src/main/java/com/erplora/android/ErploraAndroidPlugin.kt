@@ -31,7 +31,7 @@ class WatchNoticeTapsArgs {
 
 /**
  * The till's Kotlin side on Android: runtime permissions, Bluetooth and NFC, downloads, printing,
- * the notices and the system voice.
+ * the notices, the system voice and the browser tab of «Continue with Google».
  *
  * Declaring a permission in the manifest is not enough, and a missing one gives no error at all:
  *
@@ -258,7 +258,7 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     @PermissionCallback
     override fun checkPermissions(invoke: Invoke) {
-        invoke.resolve(estadoActual())
+        invoke.resolve(currentStatus())
     }
 
     /**
@@ -287,9 +287,9 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     override fun requestPermissions(invoke: Invoke) {
         val scope = requestScope(PermissionPolicy.required(), requestedPermissions(invoke))
-        val missing = pendingOf(scope, concedidos())
+        val missing = pendingOf(scope, grantedPermissions())
         if (missing.isEmpty()) {
-            invoke.resolve(estadoActual())
+            invoke.resolve(currentStatus())
             return
         }
         requestPermissionForAliases(missing.toTypedArray(), invoke, "checkPermissions")
@@ -542,17 +542,17 @@ class ErploraAndroidPlugin(private val activity: Activity) : Plugin(activity) {
         }, timeout)
     }
 
-    private fun concedidos(): Set<String> =
+    /** The browser half of «Continue with Google»; only Rust calls it, never a page ([CustomTab]). */
+    @Command
+    fun openCustomTab(invoke: Invoke) = CustomTab.open(activity, invoke)
+
+    private fun grantedPermissions(): Set<String> =
         PermissionPolicy.required()
             .filter { ContextCompat.checkSelfPermission(activity, it) == PackageManager.PERMISSION_GRANTED }
             .toSet()
 
-    private fun estadoActual(): JSObject {
-        val resultado = JSObject()
-        for ((permiso, concedido) in statusOf(PermissionPolicy.required(), concedidos())) {
-            resultado.put(permiso, concedido)
-        }
-        return resultado
+    private fun currentStatus(): JSObject = JSObject().apply {
+        statusOf(PermissionPolicy.required(), grantedPermissions()).forEach { (name, granted) -> put(name, granted) }
     }
 
     companion object {

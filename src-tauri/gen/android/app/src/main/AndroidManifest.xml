@@ -24,6 +24,11 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
 
+    <!-- 🔴 Same trap as the NFC feature below: CHANGE_WIFI_MULTICAST_STATE makes Google Play add an
+         IMPLICIT android.hardware.wifi requirement. The till works the same on Ethernet or mobile
+         data. -->
+    <uses-feature android:name="android.hardware.wifi" android:required="false" />
+
     <!-- Telling the kitchen an order came in when NOBODY is looking at the screen.
          Runtime permission since Android 13. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -120,6 +125,19 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="erplora" />
                 <data android:host="hub" />
+                
+                
+                
+                
+            </intent-filter>
+            <intent-filter >
+                <action android:name="android.intent.action.VIEW" />
+                <!-- ChromeOS ARC++ uses a different action for deep links -->
+                <action android:name="org.chromium.arc.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="erplora" />
+                <data android:host="signed-in" />
                 
                 
                 

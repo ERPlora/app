@@ -1012,6 +1012,7 @@ version = "0.0.0"
 dependencies = [
  "base64 0.22.1",
  "erplora-peripherals",
+ "getrandom 0.2.17",
  "log",
  "mac-notification-sys",
  "notify-rust",
@@ -1019,6 +1020,7 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
+ "sha2",
  "sys-locale",
  "tauri",
  "tauri-build",

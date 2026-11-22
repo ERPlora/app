@@ -99,7 +99,14 @@ const LOCATION_FEATURE: &str = "android.hardware.location";
 /// Every hardware feature that one of the permissions in [`REQUIRED`] implies and the till can
 /// live without. Each one must be declared `required="false"` or Play hides the app from every
 /// device lacking it.
-const OPTIONAL_FEATURES: &[&str] = &[NFC_FEATURE, LOCATION_FEATURE, MICROPHONE_FEATURE];
+const OPTIONAL_FEATURES: &[&str] =
+    &[NFC_FEATURE, LOCATION_FEATURE, MICROPHONE_FEATURE, WIFI_FEATURE];
+
+/// The hardware feature `CHANGE_WIFI_MULTICAST_STATE` drags in behind it: same trap as
+/// [`NFC_FEATURE`] (aapt2: `uses-implied-feature: name='android.hardware.wifi' reason='requested
+/// android.permission.CHANGE_WIFI_MULTICAST_STATE permission'`). The permission only serves the
+/// mDNS half of printer discovery; a till on Ethernet or mobile data works the same.
+const WIFI_FEATURE: &str = "android.hardware.wifi";
 
 const RECORD_AUDIO: &str = "android.permission.RECORD_AUDIO";
 const MODIFY_AUDIO_SETTINGS: &str = "android.permission.MODIFY_AUDIO_SETTINGS";

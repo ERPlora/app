@@ -18,7 +18,10 @@
       "desktop": {
         "schemes": ["erplora"]
       },
-      "mobile": [{ "scheme": ["erplora"], "host": "hub" }]
+      "mobile": [
+        { "scheme": ["erplora"], "host": "hub" },
+        { "scheme": ["erplora"], "host": "signed-in" }
+      ]
     }
   },
   "bundle": {

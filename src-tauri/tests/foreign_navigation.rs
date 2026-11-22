@@ -210,31 +210,72 @@ fn the_loopback_and_the_app_s_own_page_stay_in_the_window() {
 }
 
 #[test]
-fn continue_with_google_takes_the_window_to_google_and_back() {
+fn on_android_google_s_page_starts_the_sign_in_in_the_device_s_browser() {
+    // Google's page inside the window sees none of the device's accounts and asks for the address and
+    // the password; the app takes the sign-in to the browser instead (`app_sign_in.rs`).
+    assert_everywhere(
+        &android(),
+        NavigationVerdict::AppSignIn,
+        &[
+            "https://accounts.google.com/o/oauth2/v2/auth?client_id=x&redirect_uri=https%3A%2F%2Ferplora.com%2Fauth%2Fgoogle%2Fcallback%2F",
+            "https://accounts.google.com/v3/signin/identifier?flowName=GeneralOAuthFlow",
+        ],
+        "Google's page never loads in the window on Android",
+    );
+    assert_everywhere(
+        &android(),
+        NavigationVerdict::SignInTab,
+        &["https://erplora.com/auth/app/google/?challenge=C"],
+        "the browser half of the sign-in opens in a tab of the device's browser",
+    );
     assert_everywhere(
         &android(),
         NavigationVerdict::Allow,
         &[
             // The form the SaaS posts, which allauth answers with Google's page.
             "https://erplora.com/_allauth/browser/v1/auth/provider/redirect",
-            // Google's sign-in, as the window walks it: the start, the account, the consent.
-            "https://accounts.google.com/o/oauth2/v2/auth?client_id=x&redirect_uri=https%3A%2F%2Ferplora.com%2Fauth%2Fgoogle%2Fcallback%2F",
-            "https://accounts.google.com/v3/signin/identifier?flowName=GeneralOAuthFlow",
-            "https://accounts.google.com/signin/oauth/v3/consent?authuser=0",
-            // And the way back.
             "https://erplora.com/auth/google/callback/?code=x&state=y",
         ],
-        "«Continue with Google» runs in the window",
+        "the SaaS pages of the round trip stay the window's",
     );
     // Google's sign-in is served over https only: anything else is not the page the SaaS sent.
     assert_eq!(
-        verdict(
-            &android(),
-            "direct",
-            "http://accounts.google.com/o/oauth2/v2/auth"
-        ),
+        verdict(&android(), "direct", "http://accounts.google.com/o/oauth2/v2/auth"),
         NavigationVerdict::Browser
     );
+}
+
+#[test]
+fn on_a_computer_continue_with_google_still_runs_in_the_window() {
+    let computer = WindowPages::new(SAAS, vec![SAAS.to_string()], false);
+    assert_everywhere(
+        &computer,
+        NavigationVerdict::Allow,
+        &[
+            "https://erplora.com/_allauth/browser/v1/auth/provider/redirect",
+            "https://accounts.google.com/o/oauth2/v2/auth?client_id=x",
+            "https://erplora.com/auth/google/callback/?code=x&state=y",
+        ],
+        "nothing changes on the computer",
+    );
+}
+
+#[test]
+fn no_page_takes_the_window_to_the_start_or_the_finish_of_the_app_s_sign_in() {
+    // Only the app loads them, with its own secret (`AppSignIn::admits`): a link of a page to the
+    // finish could open someone else's session in this window.
+    for window in [android(), WindowPages::new(SAAS, vec![SAAS.to_string()], false)] {
+        assert_everywhere(
+            &window,
+            NavigationVerdict::Refuse,
+            &[
+                "https://erplora.com/auth/app/start/?challenge=C",
+                "https://erplora.com/auth/app/finish/?code=x&verifier=y",
+                "https://erplora.com/auth/app/finish",
+            ],
+            "a page cannot start nor finish the app's sign-in",
+        );
+    }
 }
 
 #[test]
