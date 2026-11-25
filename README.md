@@ -109,7 +109,7 @@ decide:
 - **no existe** y no es mayor (o no es `X.Y.Z`, o minor/patch ≥ 1000) → **rojo** con el motivo: la
   Store y Play solo aceptan versiones crecientes y el `versionCode` es `major·10⁶ + minor·10³ + patch`.
 
-Para publicar: subir `version` en `src-tauri/tauri.conf.json` (hoy 1.1.36, que vuelve a quitar el servicio en
+Para publicar: subir `version` en `src-tauri/tauri.conf.json` (hoy 1.1.37; la 1.1.36 volvió a quitar el servicio en
 primer plano que Google Play no dejaba publicar sin declararlo con un vídeo: app#36; la 1.1.35 mantiene la
 pantalla encendida con la app Android en primer plano: app#26; la 1.1.34 quitó el servicio en primer plano que
 Google Play no dejaba publicar sin declararlo con un vídeo: app#23; la 1.1.33 sacó las fichas del hub del
