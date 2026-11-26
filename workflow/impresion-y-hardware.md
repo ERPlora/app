@@ -163,6 +163,9 @@ Entra: el identificador de la impresora, el tipo de documento y el documento (nu
    `priority` tal como llega del Hub; `HIGH`, la palabra del contrato anterior, sale como «!! URGENTE !!»
    en el idioma del papel), la de alergia (el texto de `allergy`) y la de copia («DUPLICADO», la misma
    del tique) solo con `duplicate: true`. Sin esos campos, o vacíos, la comanda sale como siempre.
+   Cada plato sale con su cantidad y su nombre: «2x Croquetas» si es por unidades y, si el Hub manda la
+   unidad de un plato al peso (`unit`), con ella en lugar de la «x»: «0.35 kg Gambas al peso» (en el vale
+   de anulación, con su signo: «-0.35 kg»). Sin `unit`, el plato sale como siempre.
    La fecha del tique, la factura, la cuenta y el informe de caja (`date`, «21/11/2026 15:41») y la hora de
    la comanda (`time`, «17:06») son las que manda el Hub, ya en el reloj del negocio, y salen tal cual: un
    tique reimpreso lleva la hora del cobro y una comanda reimpresa la del envío de la ronda. Sin el campo, o

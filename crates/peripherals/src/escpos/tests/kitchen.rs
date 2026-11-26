@@ -97,6 +97,29 @@ fn a_void_slip_prints_the_word_and_negative_quantities() {
     assert!(!text.contains("URGENTE"), "a void is never urgent:\n{text}");
 }
 
+/// **A dish sold by measure says its unit.** «0.35x Gambas» does not tell the cook whether it is
+/// 0.35 kilos or 0.35 portions. The Hub sends the unit of a dish sold by measure (`unit`) and the
+/// chit prints it in place of the times sign; a dish without one is a count and keeps its «2x». On
+/// a void slip the weighed dish keeps its sign, as a counted one does.
+#[test]
+fn a_dish_sold_by_measure_prints_its_unit_and_a_count_keeps_its_times_sign() {
+    let text = paper(&json!({
+        "items": [
+            { "name": "Gambas al peso", "quantity": 0.35, "unit": "kg" },
+            { "name": "Croquetas", "quantity": 2 },
+        ],
+    }));
+    assert!(text.contains("0.35 kg Gambas al peso"), "the weighed dish with its unit:\n{text}");
+    assert!(!text.contains("0.35x"), "never the times sign on a weighed dish:\n{text}");
+    assert!(text.contains("2x Croquetas"), "a counted dish keeps its times sign:\n{text}");
+
+    let void = paper(&json!({
+        "label": "ANULADA",
+        "items": [{ "name": "Gambas al peso", "quantity": -0.35, "unit": "kg" }],
+    }));
+    assert!(void.contains("-0.35 kg Gambas al peso"), "the void keeps its sign and its unit:\n{void}");
+}
+
 /// **The first round is NOT announced.** It is the normal case — a chit that is not a second
 /// course — and printing «Ronda 1» would add a line of noise to 99 % of the paper. The round
 /// says «this is already the second send for this table», and that is only true from two on.
