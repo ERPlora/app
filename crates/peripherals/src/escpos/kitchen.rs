@@ -109,14 +109,10 @@ pub(super) fn render_kitchen_order(b: &mut EscposBuilder, data: &serde_json::Val
 
             // Two levels at most: at 32 columns a third would leave the text no room.
             let indent = if combo.is_some() { "  " } else { "" };
-            let qty = item.get("quantity").and_then(|v| v.as_f64()).unwrap_or(1.0);
             let name = str_field(item, "name", "");
 
             b.set(Align::Left, true, true, false);
-            b.text(&format!(
-                "{indent}{}x {name}\n",
-                fmt_qty(item.get("quantity"), qty)
-            ));
+            b.text(&format!("{indent}{} {name}\n", dish_quantity(item)));
 
             // **The supplements.** They go BEFORE the free note and with the same indent: the
             // customer chose the supplement from the menu and it changes the dish; the note is the
@@ -151,6 +147,17 @@ pub(super) fn render_kitchen_order(b: &mut EscposBuilder, data: &serde_json::Val
     b.text("================================\n");
     b.text("\n");
     b.cut();
+}
+
+/// The quantity before a dish: a count with its times sign («2x»), a dish sold by measure with the
+/// unit the Hub sends for it («0.35 kg»).
+fn dish_quantity(item: &serde_json::Value) -> String {
+    let qty = item.get("quantity").and_then(|v| v.as_f64()).unwrap_or(1.0);
+    let quantity = fmt_qty(item.get("quantity"), qty);
+    match str_field(item, "unit", "") {
+        "" => format!("{quantity}x"),
+        unit => format!("{quantity} {unit}"),
+    }
 }
 
 /// The Hub sends the mark already written in the business's language; `HIGH` is the word of the
