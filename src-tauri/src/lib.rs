@@ -449,8 +449,15 @@ mod tests {
         let window = body_of(window_code, "fn open_main_window(");
         assert!(window.contains("app.manage(hub_link)"), "the window opens with no link state");
         let navigation = window.split(".on_navigation(").nth(1).unwrap_or_default();
-        assert!(navigation.contains(".follow(nav)"), "a navigation links a hub without asking who chose it");
-        assert!(!navigation.contains("shell_capture_origin(nav)"), "a navigation links a hub without asking who chose it");
+        let capture = body_of(window_code, "fn remember_linked_hub<");
+        assert!(
+            navigation.contains("remember_linked_hub(&refusals, cache_dir.as_deref(), nav)") && capture.contains(".follow(nav)"),
+            "a navigation links a hub without asking who chose it"
+        );
+        assert!(
+            !navigation.contains("shell_capture_origin(nav)") && !capture.contains("shell_capture_origin(nav)"),
+            "a navigation links a hub without asking who chose it"
+        );
         let loaded = window.split(".on_page_load(").nth(1).unwrap_or_default();
         assert!(
             loaded.contains("PageLoadEvent::Finished")

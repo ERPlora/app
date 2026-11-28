@@ -55,7 +55,8 @@ Entra: la cuenta del SaaS; la dirección del negocio. Solo se recuerda `<etiquet
 (**incluye `www` y `pre`, que son el SaaS, y cualquier subdominio**; el apex `erplora.com` no) o el bucle local
 (`127.0.0.1`/`localhost`, `http` o `https`, **cualquier puerto**), también en la copia de producción.
 Sale: el origen en el fichero `hub.url` de la carpeta de datos de la aplicación, y el identificador de
-instalación `device.id` la primera vez (HUB_APP-F06). Una sola escritura por cambio. No se guarda
+instalación `device.id` la primera vez (HUB_APP-F06). Se escribe cada vez que la ventana enlaza un negocio,
+también si es el mismo que ya estaba: el fichero es lo único que dice dónde arranca la aplicación. No se guarda
 ninguna contraseña ni sesión aquí: la sesión vive en la ventana (almacenamiento del origen del hub). En Android,
 la ventana lleva `FLAG_KEEP_SCREEN_ON`, sin permisos nuevos ni servicio en primer plano: Android aplica la
 bandera solo mientras esa ventana está visible.
@@ -117,7 +118,8 @@ Pasos:
    avisos. La sesión de erplora.com sigue abierta: es la que enseña la lista de negocios.
 4. Solo entonces olvida el negocio recordado y lleva la ventana a la lista de negocios del SaaS
    (`/shell/?choose=1`), que fuerza la lista aunque solo haya uno.
-5. Elige otro: se recuerda como en HUB_APP-F02. Volver al anterior (con su enlace o desde la lista) pide
+5. Elige uno, otro o el mismo: se recuerda como en HUB_APP-F02 y la aplicación arranca en él a partir de entonces,
+   también tras cerrarla. Volver al anterior (con su enlace o desde la lista) pide
    entrar otra vez, con la cuenta o con el PIN.
 Entra: la confirmación de la persona.
 Sale: la sesión cerrada en el hub; en el almacenamiento del origen del negocio anterior solo quedan el
