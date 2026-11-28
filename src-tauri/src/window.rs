@@ -1,7 +1,7 @@
 //! The main window: where it boots, what moves it to a hub, and what it says about a page it
 //! refuses.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::connectivity::{self, ShellNav, spawn_connectivity_guard};
@@ -189,7 +189,7 @@ pub(crate) async fn shell_retry(
 }
 
 /// Creates the main window on [`initial_url_for`] and registers the `on_navigation` handler that
-/// captures `?shell=1` and persists the origin as `hub.url` (a single write per change).
+/// captures `?shell=1` and persists the origin as `hub.url`.
 pub(crate) fn open_main_window(app: &tauri::App, cache_dir: Option<PathBuf>) -> tauri::Result<()> {
     use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
@@ -265,7 +265,6 @@ pub(crate) fn open_main_window(app: &tauri::App, cache_dir: Option<PathBuf>) -> 
     let nav_state = Arc::new(ShellNav::new(initial_target));
     app.manage(nav_state.clone());
 
-    let last = std::sync::Mutex::new(persisted);
     let watched = nav_state.clone();
     let refusals = app.handle().clone();
     let window = WebviewWindowBuilder::new(app, "main", url)
@@ -294,18 +293,7 @@ pub(crate) fn open_main_window(app: &tauri::App, cache_dir: Option<PathBuf>) -> 
                 refuse_navigation(&refusals, verdict, &saas_base, nav);
                 return false;
             }
-            // `?shell=1` links a hub only when the SaaS chose it, or it is the linked one.
-            let captured = refusals.try_state::<hub_link::HubLink>().and_then(|link| link.follow(nav));
-            if let (Some(dir), Some(origin)) = (cache_dir.as_deref(), captured) {
-                if let Ok(mut guard) = last.lock() {
-                    if guard.as_deref() != Some(origin.as_str()) {
-                        match persist_hub_url(dir, &origin) {
-                            Ok(()) => *guard = Some(origin),
-                            Err(e) => eprintln!("shell: could not persist hub.url: {e}"),
-                        }
-                    }
-                }
-            }
+            remember_linked_hub(&refusals, cache_dir.as_deref(), nav);
             // Wherever the webview goes on its own — a link, a redirect, the login chain — that is
             // the page the guard has to keep alive. Our own bundled page is filtered
             // out inside `remote_target`, or the offline screen would end up watching itself.
@@ -324,6 +312,20 @@ pub(crate) fn open_main_window(app: &tauri::App, cache_dir: Option<PathBuf>) -> 
         ColdStartLink::None | ColdStartLink::Open(_) => {}
     }
     Ok(())
+}
+
+/// `?shell=1` links a hub only when the SaaS chose it, or it is the linked one, and the hub it links
+/// is written to `hub.url` every time. The file is the only record of where the app starts:
+/// «Change business» deletes it, so a copy kept here would claim the same business is still written
+/// when the person opens it again.
+fn remember_linked_hub<R: tauri::Runtime>(app: &tauri::AppHandle<R>, cache_dir: Option<&Path>, nav: &tauri::Url) {
+    use tauri::Manager;
+    let captured = app.try_state::<hub_link::HubLink>().and_then(|link| link.follow(nav));
+    if let (Some(dir), Some(origin)) = (cache_dir, captured) {
+        if let Err(e) = persist_hub_url(dir, &origin) {
+            eprintln!("shell: could not persist hub.url: {e}");
+        }
+    }
 }
 
 /// The notice for a page the Play copy refused: English source plus its `es` translation. It names
@@ -576,6 +578,21 @@ mod tests {
         on_second_launch(app.handle(), vec!["ERPlora.exe".into(), "erplora://hub/otronegocio.a.erplora.com".into()]);
         assert_eq!(asked.lock().expect("questions").len(), 1, "nobody was asked");
         assert_eq!(linked_hub(&app).as_deref(), Some(BAKERY));
+    }
+
+    #[test]
+    fn the_same_business_opened_again_after_changing_business_is_where_the_app_starts_next() {
+        use crate::test_support::tempdir;
+        let dir = tempdir();
+        persist_hub_url(&dir, BAKERY).expect("remembered");
+        let (app, _) = till_of_the_bakery(Some(BAKERY), None);
+        // «Change business»: what `forget_hub` does before it sends the window to the SaaS list.
+        clear_hub_url(&dir);
+        forget_linked_hub(app.handle());
+        remember_linked_hub(app.handle(), Some(&dir), &url("https://erplora.com/shell/?choose=1"));
+        remember_linked_hub(app.handle(), Some(&dir), &url("https://panaderia.a.erplora.com/?shell=1"));
+        assert_eq!(load_hub_url(&dir).as_deref(), Some(BAKERY), "the next start lands on the SaaS list");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
